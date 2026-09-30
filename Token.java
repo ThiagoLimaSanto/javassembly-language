@@ -1,27 +1,27 @@
 public class Token {
 
-    private TokenType tipo;
+    private TokenType type;
     private String lexema;
-    private int linha;
+    private int line;
     private int column;
 
-    public Token(TokenType tipo, String lexema, int linha, int column) {
-        this.tipo = tipo;
+    public Token(TokenType type, String lexema, int line, int column) {
+        this.type = type;
         this.lexema = lexema;
-        this.linha = linha;
+        this.line = line;
         this.column = column;
     }
 
-    public TokenType getTipo() {
-        return tipo;
+    public TokenType getType() {
+        return type;
     }
 
-    public int getColumna() {
+    public int getColumn() {
         return column;
     }
 
-    public int getLinha() {
-        return linha;
+    public int getLine() {
+        return line;
     }
 
     public String getLexema() {
@@ -30,6 +30,6 @@ public class Token {
 
     @Override
     public String toString() {
-        return "<" + tipo + ", " + lexema + ", " + linha + ", " + column + ">";
+        return "<" + type + ", " + lexema + ", " + line + ", " + column + ">";
     }
 }

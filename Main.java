@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import exceptions.LexicalException;
+import exceptions.SyntacticException;
 
 public class Main {
 
@@ -32,11 +33,17 @@ public class Main {
 
         try {
             tokens = lexer.analyze();
+            Parser parser = new Parser(tokens);
+            parser.analyze();
 
             for (Token token : tokens) {
                 System.out.println(token);
             }
+            System.out.println();
+            System.out.println("Declaracao válida!");
         } catch (LexicalException e) {
+            System.err.println(e.getMessage());
+        } catch (SyntacticException e) {
             System.err.println(e.getMessage());
         }
     }

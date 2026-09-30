@@ -5,7 +5,7 @@ class Main{
         int c = add a, mul b, 2;
         print c;
         while(cmp.eq c, 30){
-            print "ok";
+            print c;
         }
     }
 }
