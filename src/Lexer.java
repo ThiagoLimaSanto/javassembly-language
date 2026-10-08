@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import src.enums.TokenType;
+import src.states.InitialState;
 import src.states.LexerState;
 import src.states.StringState;
 

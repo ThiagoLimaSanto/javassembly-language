@@ -1,10 +1,8 @@
-package src;
+package src.states;
 
+import src.Lexer;
+import src.Token;
 import src.exceptions.LexicalException;
-import src.states.IdentifierState;
-import src.states.LexerState;
-import src.states.NumberState;
-import src.states.StringState;
 
 public class InitialState implements LexerState {
 

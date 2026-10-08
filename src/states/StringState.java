@@ -1,6 +1,5 @@
 package src.states;
 
-import src.InitialState;
 import src.Lexer;
 import src.Token;
 import src.enums.TokenType;

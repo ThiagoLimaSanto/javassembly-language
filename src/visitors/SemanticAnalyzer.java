@@ -4,13 +4,17 @@ import src.interfaces.StatementInterface;
 import src.interfaces.visitor.ASTVisitor;
 import src.records.BinariaRecord;
 import src.records.BlockRecord;
+import src.records.CallRecord;
 import src.records.ClassRecord;
 import src.records.DeclarationRecord;
+import src.records.ExpressionStatementRecord;
 import src.records.FunctionRecord;
 import src.records.LiteralRecord;
+import src.records.ParameterRecord;
 import src.records.PrintRecord;
 import src.records.ProgramRecord;
 import src.records.RegistradorRecord;
+import src.records.ReturnRecord;
 import src.records.VariavelRecord;
 import src.records.WhileRecord;
 
@@ -81,4 +85,26 @@ public class SemanticAnalyzer implements ASTVisitor {
         // Folha: não possui filhos para visitar.
     }
 
+    @Override
+    public void visit(ParameterRecord node) {
+
+    }
+
+    @Override
+    public void visit(ReturnRecord node) {
+        if (node.value() != null) {
+            node.value().accept(this);
+        }
+    }
+
+    @Override
+    public void visit(CallRecord node) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'visit'");
+    }
+
+    @Override
+    public void visit(ExpressionStatementRecord node) {
+        node.expression().accept(this);
+    }
 }

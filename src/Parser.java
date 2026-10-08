@@ -9,13 +9,17 @@ import src.interfaces.ExpressionInterface;
 import src.interfaces.StatementInterface;
 import src.records.BinariaRecord;
 import src.records.BlockRecord;
+import src.records.CallRecord;
 import src.records.ClassRecord;
 import src.records.DeclarationRecord;
+import src.records.ExpressionStatementRecord;
 import src.records.FunctionRecord;
 import src.records.LiteralRecord;
+import src.records.ParameterRecord;
 import src.records.PrintRecord;
 import src.records.ProgramRecord;
 import src.records.RegistradorRecord;
+import src.records.ReturnRecord;
 import src.records.VariavelRecord;
 import src.records.WhileRecord;
 
@@ -85,11 +89,81 @@ public class Parser {
         }
 
         consumer(TokenType.OPEN_PARENTHESIS, "Esperado '(' apos nome da funcao");
+
+        List<ParameterRecord> parameters = parameters();
+
         consumer(TokenType.CLOSE_PARENTHESIS, "Esperado ')' para fechar a declaracao da funcao");
 
         BlockRecord block = block();
 
-        return new FunctionRecord(visibility, typeReturn.getType(), name.getLexema(), block);
+        return new FunctionRecord(visibility, typeReturn.getType(), name.getLexema(), parameters, block);
+    }
+
+    private List<ParameterRecord> parameters() {
+        List<ParameterRecord> parameters = new ArrayList<>();
+
+        if (verify(TokenType.CLOSE_PARENTHESIS)) {
+            return parameters;
+        }
+
+        do {
+            Token type = type();
+            Token name = consumer(TokenType.IDENTIFIER, "Esperado o nome do parametro");
+
+            parameters.add(new ParameterRecord(type.getType(), name.getLexema()));
+
+            if (!verify(TokenType.COMMA)) {
+                break;
+            }
+
+            consumer(TokenType.COMMA, "Esperado ',' entre os parametros");
+        } while (true);
+
+        return parameters;
+    }
+
+    private ReturnRecord returnStatement() {
+        consumer(TokenType.RETURN, "Esperado 'return'");
+
+        ExpressionInterface value = null;
+
+        if (!verify(TokenType.SEMICOLON)) {
+            value = expression();
+        }
+
+        consumer(TokenType.SEMICOLON, "Esperado ';' apos return");
+
+        return new ReturnRecord(value);
+    }
+
+    private CallRecord functionCall(String name) {
+        consumer(TokenType.OPEN_PARENTHESIS, "Esperado '(' para chamar a função");
+
+        List<ExpressionInterface> arguments = arguments();
+
+        consumer(TokenType.CLOSE_PARENTHESIS, "Esperado ')' para fechar a chamada da função");
+
+        return new CallRecord(name, arguments);
+    }
+
+    private List<ExpressionInterface> arguments() {
+        List<ExpressionInterface> arguments = new ArrayList<>();
+
+        if (verify(TokenType.CLOSE_PARENTHESIS)) {
+            return arguments;
+        }
+
+        do {
+            arguments.add(expression());
+
+            if (!verify(TokenType.COMMA)) {
+                break;
+            }
+
+            consumer(TokenType.COMMA, "Esperado ',' entre os argumentos");
+        } while (true);
+
+        return arguments;
     }
 
     private BlockRecord block() {
@@ -122,6 +196,16 @@ public class Parser {
             consumer(TokenType.CLOSE_PARENTHESIS, "Esperado ')' apos condicao");
             BlockRecord block = block();
             return new WhileRecord(expression, block);
+        } else if (verify(TokenType.RETURN)) {
+            return returnStatement();
+        } else if (verify(TokenType.IDENTIFIER)) {
+            Token name = consumer(TokenType.IDENTIFIER, "Esperado um identificador");
+
+            CallRecord call = functionCall(name.getLexema());
+
+            consumer(TokenType.SEMICOLON, "Esperado ';' apos chamada de função");
+
+            return new ExpressionStatementRecord(call);
         } else {
             throw new SyntacticException(
                     "Esperado declaração, print ou while"
@@ -157,8 +241,12 @@ public class Parser {
                 return new LiteralRecord(token.getLexema());
             }
             case TokenType.IDENTIFIER: {
-                Token token = consumer(TokenType.IDENTIFIER, "Esperado um identificador");
-                return new VariavelRecord(token.getLexema());
+                Token name = consumer(TokenType.IDENTIFIER, "Esperado um identificador");
+
+                if (verify(TokenType.OPEN_PARENTHESIS)) {
+                    return functionCall(name.getLexema());
+                }
+                return new VariavelRecord(name.getLexema());
             }
             case TokenType.REGISTER: {
                 Token token = consumer(TokenType.REGISTER, "Esperado um registrador");
@@ -256,8 +344,9 @@ public class Parser {
         } else if (verify(TokenType.STRING)) {
             return consumer(TokenType.STRING, "Esperado 'String'");
         } else {
-            throw new SyntacticException("Esperado tipo: int, double, boolean ou String. Na linha: " + current().getLine()
-                    + ", coluna: " + current().getColumn());
+            throw new SyntacticException(
+                    "Esperado tipo: int, double, boolean ou String. Na linha: " + current().getLine()
+                            + ", coluna: " + current().getColumn());
         }
     }
 }

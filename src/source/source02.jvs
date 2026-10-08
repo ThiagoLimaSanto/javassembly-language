@@ -1,0 +1,10 @@
+public class Main{
+    public func void main(){
+        sum();
+    }
+
+    public func int sum(int a, int b){
+        int c = add a, b;
+        return c;
+    }
+}
