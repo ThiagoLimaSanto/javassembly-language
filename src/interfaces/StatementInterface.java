@@ -1,5 +1,7 @@
 package src.interfaces;
 
-public interface StatementInterface {
+import src.interfaces.visitor.ASTNode;
+
+public interface StatementInterface extends ASTNode {
     
 }

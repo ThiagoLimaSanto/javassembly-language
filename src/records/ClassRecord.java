@@ -3,11 +3,18 @@ package src.records;
 import java.util.List;
 
 import src.enums.TokenType;
+import src.interfaces.visitor.ASTNode;
+import src.interfaces.visitor.ASTVisitor;
 
 public record ClassRecord(
         TokenType visibility,
         String name,
-        List<FunctionRecord> functions) {
+        List<FunctionRecord> functions) implements ASTNode {
+
+    @Override
+    public void accept(ASTVisitor visitor) {
+        visitor.visit(this);
+    }
 
     @Override
     public String toString() {

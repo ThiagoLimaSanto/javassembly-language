@@ -1,8 +1,8 @@
 package src;
 
-import src.exceptions.LexerState;
 import src.exceptions.LexicalException;
 import src.states.IdentifierState;
+import src.states.LexerState;
 import src.states.NumberState;
 import src.states.StringState;
 

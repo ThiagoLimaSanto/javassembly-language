@@ -1,4 +1,4 @@
-package src.exceptions;
+package src.states;
 
 import src.Lexer;
 

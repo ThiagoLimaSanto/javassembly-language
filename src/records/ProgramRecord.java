@@ -2,10 +2,18 @@ package src.records;
 
 import java.util.List;
 
-public record ProgramRecord(List<ClassRecord> classes) {
+import src.interfaces.visitor.ASTNode;
+import src.interfaces.visitor.ASTVisitor;
+
+public record ProgramRecord(List<ClassRecord> classes) implements ASTNode {
 
     @Override
     public String toString() {
         return AstFormat.node("Programa", classes.toArray());
+    }
+
+     @Override
+    public void accept(ASTVisitor visitor) {
+        visitor.visit(this);
     }
 }

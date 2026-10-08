@@ -4,7 +4,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import src.enums.TokenType;
-import src.exceptions.LexerState;
+import src.states.LexerState;
 import src.states.StringState;
 
 public class Lexer {

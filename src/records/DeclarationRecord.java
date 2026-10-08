@@ -3,6 +3,7 @@ package src.records;
 import src.enums.TokenType;
 import src.interfaces.ExpressionInterface;
 import src.interfaces.StatementInterface;
+import src.interfaces.visitor.ASTVisitor;
 
 public record DeclarationRecord(
         TokenType type,
@@ -13,5 +14,10 @@ public record DeclarationRecord(
     public String toString() {
         return AstFormat.node("Declaração: " + type + " " + name,
                 value == null ? "Sem inicialização" : value);
+    }
+
+     @Override
+    public void accept(ASTVisitor visitor) {
+        visitor.visit(this);
     }
 }

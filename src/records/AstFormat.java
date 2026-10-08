@@ -2,7 +2,6 @@ package src.records;
 
 import src.enums.TokenType;
 
-/** Formatação compartilhada da árvore exibida pelos records. */
 final class AstFormat {
     private AstFormat() {
     }

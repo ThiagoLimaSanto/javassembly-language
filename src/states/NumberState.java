@@ -4,7 +4,6 @@ import src.InitialState;
 import src.Lexer;
 import src.Token;
 import src.enums.TokenType;
-import src.exceptions.LexerState;
 
 public class NumberState implements LexerState {
     private final int line;

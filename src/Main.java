@@ -8,6 +8,7 @@ import java.util.List;
 import src.exceptions.LexicalException;
 import src.exceptions.SyntacticException;
 import src.records.ProgramRecord;
+import src.visitors.SemanticAnalyzer;
 
 public class Main {
 
@@ -38,6 +39,8 @@ public class Main {
             tokens = lexer.analyze();
             Parser parser = new Parser(tokens);
             ProgramRecord program = parser.analyze();
+            SemanticAnalyzer semanticAnalyzer = new SemanticAnalyzer();
+            program.accept(semanticAnalyzer);
 
             System.out.println("========== TOKENS ==========");
             for (Token token : tokens) {

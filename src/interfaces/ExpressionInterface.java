@@ -1,4 +1,7 @@
 package src.interfaces;
-public interface ExpressionInterface {
+
+import src.interfaces.visitor.ASTNode;
+
+public interface ExpressionInterface extends ASTNode {
     
 }
