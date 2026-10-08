@@ -1,117 +1,59 @@
 package src;
+
 import java.util.ArrayList;
 import java.util.List;
 
 import src.enums.TokenType;
-import src.exceptions.LexicalException;
+import src.exceptions.LexerState;
+import src.states.StringState;
 
 public class Lexer {
 
     private String source;
     private int currentPosition;
+    private int line = 1;
+    private int column = 1;
+    private List<Token> tokens = new ArrayList<>();
+    private LexerState state = new InitialState();
 
     public Lexer(String source) {
         this.source = source;
         this.currentPosition = 0;
     }
 
+    public void changeState(LexerState state) {
+        this.state = state;
+    }
+
+    public boolean finished() {
+        return currentPosition >= source.length();
+    }
+
+    public char current() {
+        return source.charAt(currentPosition);
+    }
+
+    public char advance() {
+        char character = source.charAt(currentPosition++);
+
+        if (character == '\n') {
+            line++;
+            column = 1;
+        } else {
+            column++;
+        }
+
+        return character;
+    }
+
     public List<Token> analyze() {
-        List<Token> tokens = new ArrayList<>();
-        int line = 1;
-        int column = 1;
+        while (!finished()) {
+            state.process(this);
 
-        while (currentPosition < source.length()) {
+        }
 
-            char atual = source.charAt(currentPosition);
-
-            if (isNewLine(atual)) {
-                line++;
-                column = 1;
-                currentPosition++;
-                continue;
-            }
-
-            if (isWhitespace(atual)) {
-                currentPosition++;
-                column++;
-                continue;
-            }
-
-            int startColumn = column;
-
-            if (isDigit(atual)) {
-
-                String lexema = "";
-
-                while (currentPosition < source.length()
-                        && isDigit(source.charAt(currentPosition))) {
-                    lexema += source.charAt(currentPosition);
-                    column++;
-                    currentPosition++;
-                }
-
-                tokens.add(new Token(TokenType.NUMBER, lexema, line, startColumn));
-                continue;
-            }
-
-            if (isQuote(atual) || isSingleQuote(atual)) {
-                char delimiter = atual;
-                StringBuilder lexema = new StringBuilder();
-
-                currentPosition++;
-                column++;
-
-                while (currentPosition < source.length()
-                        && source.charAt(currentPosition) != delimiter
-                        && !isNewLine(source.charAt(currentPosition))) {
-                    lexema.append(source.charAt(currentPosition));
-                    currentPosition++;
-                    column++;
-                }
-
-                if (currentPosition >= source.length()
-                        || source.charAt(currentPosition) != delimiter) {
-                    throw new LexicalException(
-                            "Faltando delimitador de string", line, column);
-                }
-
-                currentPosition++;
-                column++;
-
-                tokens.add(new Token(
-                        TokenType.STRING, lexema.toString(), line, startColumn));
-                continue;
-            }
-
-            if (isLetter(atual)) {
-
-                String lexema = "";
-
-                while (currentPosition < source.length()
-                        && isLetterOrDigit(source.charAt(currentPosition))) {
-                    lexema += source.charAt(currentPosition);
-                    column++;
-                    currentPosition++;
-                }
-
-                TokenType type = getType(lexema);
-
-                tokens.add(new Token(type, lexema, line, startColumn));
-                continue;
-            }
-
-            String lexema = String.valueOf(atual);
-            if ((atual == '=' || atual == '!' || atual == '<' || atual == '>')
-                    && currentPosition + 1 < source.length()
-                    && source.charAt(currentPosition + 1) == '=') {
-                lexema += '=';
-            }
-
-            TokenType type = getType(lexema);
-
-            tokens.add(new Token(type, lexema, line, startColumn));
-            column += lexema.length();
-            currentPosition += lexema.length();
+        if (state instanceof StringState) {
+            state.process(this);
         }
 
         tokens.add(new Token(TokenType.EOF, "EOF", line, column));
@@ -119,9 +61,23 @@ public class Lexer {
         return tokens;
     }
 
-    private TokenType getType(String lexema) {
+    public int getLine() {
+        return line;
+    }
+
+    public int getColumn() {
+        return column;
+    }
+
+    public void addToken(Token token) {
+        tokens.add(token);
+    }
+
+    public TokenType getType(String lexema) {
 
         switch (lexema) {
+            case "String":
+                return TokenType.STRING;
             case "add":
                 return TokenType.ADD;
             case "sub":
@@ -235,33 +191,5 @@ public class Lexer {
 
     private boolean isRegister(String lexema) {
         return lexema.matches("R\\d+");
-    }
-
-    private boolean isNewLine(char c) {
-        return c == '\n';
-    }
-
-    private boolean isQuote(char c) {
-        return c == '"';
-    }
-
-    private boolean isSingleQuote(char c) {
-        return c == '\'';
-    }
-
-    private boolean isDigit(char c) {
-        return Character.isDigit(c);
-    }
-
-    private boolean isLetter(char c) {
-        return Character.isLetter(c);
-    }
-
-    private boolean isLetterOrDigit(char c) {
-        return Character.isLetterOrDigit(c);
-    }
-
-    private boolean isWhitespace(char c) {
-        return Character.isWhitespace(c);
     }
 }

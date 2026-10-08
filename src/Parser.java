@@ -30,9 +30,9 @@ public class Parser {
 
     public ProgramRecord analyze() {
         List<ClassRecord> classes = new ArrayList<>();
-        classes.add(classDeclaration());
-
-        while (verify(TokenType.CLASS)) {
+        while (verify(TokenType.CLASS)
+                || verify(TokenType.PUBLIC)
+                || verify(TokenType.PRIVATE)) {
             classes.add(classDeclaration());
         }
 
@@ -107,7 +107,8 @@ public class Parser {
     }
 
     private StatementInterface statement() {
-        if (verify(TokenType.INT) || verify(TokenType.DOUBLE) || verify(TokenType.BOOLEAN)) {
+        if (verify(TokenType.INT) || verify(TokenType.DOUBLE) || verify(TokenType.BOOLEAN)
+                || verify(TokenType.STRING)) {
             return declaration();
         } else if (verify(TokenType.PRINT)) {
             consumer(TokenType.PRINT, "Esperado 'print'");
@@ -151,8 +152,8 @@ public class Parser {
                 Token token = consumer(TokenType.NUMBER, "Esperado um número");
                 return new LiteralRecord(Integer.parseInt(token.getLexema()));
             }
-            case TokenType.STRING: {
-                Token token = consumer(TokenType.STRING, "Esperada uma string");
+            case TokenType.TEXT: {
+                Token token = consumer(TokenType.TEXT, "Esperado um literal de texto");
                 return new LiteralRecord(token.getLexema());
             }
             case TokenType.IDENTIFIER: {
@@ -252,8 +253,10 @@ public class Parser {
             return consumer(TokenType.DOUBLE, "Esperado 'double'");
         } else if (verify(TokenType.BOOLEAN)) {
             return consumer(TokenType.BOOLEAN, "Esperado 'boolean'");
+        } else if (verify(TokenType.STRING)) {
+            return consumer(TokenType.STRING, "Esperado 'String'");
         } else {
-            throw new SyntacticException("Esperado tipo: int, double ou boolean. Na linha: " + current().getLine()
+            throw new SyntacticException("Esperado tipo: int, double, boolean ou String. Na linha: " + current().getLine()
                     + ", coluna: " + current().getColumn());
         }
     }

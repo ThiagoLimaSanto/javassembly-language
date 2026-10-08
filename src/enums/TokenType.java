@@ -20,6 +20,7 @@ public enum TokenType {
     BOOLEAN,
     NUMBER,
     STRING,
+    TEXT,
     VOID,
     MAIN,
 
