@@ -1,7 +1,23 @@
 package src;
+
+import java.util.ArrayList;
 import java.util.List;
 
+import src.enums.TokenType;
 import src.exceptions.SyntacticException;
+import src.interfaces.ExpressionInterface;
+import src.interfaces.StatementInterface;
+import src.records.BinariaRecord;
+import src.records.BlockRecord;
+import src.records.ClassRecord;
+import src.records.DeclarationRecord;
+import src.records.FunctionRecord;
+import src.records.LiteralRecord;
+import src.records.PrintRecord;
+import src.records.ProgramRecord;
+import src.records.RegistradorRecord;
+import src.records.VariavelRecord;
+import src.records.WhileRecord;
 
 public class Parser {
     private final List<Token> tokens;
@@ -12,76 +28,99 @@ public class Parser {
         this.currentTokenIndex = 0;
     }
 
-    public void analyze() {
-        classDeclaration();
+    public ProgramRecord analyze() {
+        List<ClassRecord> classes = new ArrayList<>();
+        classes.add(classDeclaration());
 
         while (verify(TokenType.CLASS)) {
-            classDeclaration();
+            classes.add(classDeclaration());
         }
 
         consumer(TokenType.EOF, "Esperado fim do código");
+
+        return new ProgramRecord(classes);
     }
 
-    private void classDeclaration() {
+    private ClassRecord classDeclaration() {
+        TokenType visibility = null;
+        if (verify(TokenType.PUBLIC) || verify(TokenType.PRIVATE)) {
+            visibility = consumer(current().getType(), "Esperada visibilidade da funcao").getType();
+        }
         consumer(TokenType.CLASS, "Esperado 'class'");
-        consumer(TokenType.IDENTIFIER, "Esperado o nome da classe");
+        Token name = consumer(TokenType.IDENTIFIER, "Esperado o nome da classe");
         consumer(TokenType.OPEN_BRACE, "Esperado '{' apos nome da classe");
 
+        List<FunctionRecord> functions = new ArrayList<>();
+
         while (!verify(TokenType.CLOSE_BRACE) && !verify(TokenType.EOF)) {
-            functionDeclaration();
+            functions.add(functionDeclaration());
         }
 
         consumer(TokenType.CLOSE_BRACE, "Esperado '}' para fechar a classe");
+
+        return new ClassRecord(visibility, name.getLexema(), functions);
     }
 
-    private void functionDeclaration() {
+    private FunctionRecord functionDeclaration() {
+        TokenType visibility = null;
+        Token typeReturn;
+        Token name;
+
         if (verify(TokenType.PUBLIC) || verify(TokenType.PRIVATE)) {
-            consumer(current().getType(), "Esperada visibilidade da funcao");
+            visibility = consumer(current().getType(), "Esperada visibilidade da funcao").getType();
         }
 
         consumer(TokenType.FUNC, "Esperado 'func' para declarar uma funcao");
 
         if (verify(TokenType.VOID)) {
-            consumer(TokenType.VOID, "Esperado 'void'");
+            typeReturn = consumer(TokenType.VOID, "Esperado 'void'");
         } else {
-            type();
+            typeReturn = type();
         }
 
         if (verify(TokenType.MAIN)) {
-            consumer(TokenType.MAIN, "Esperado funcao 'main'");
+            name = consumer(TokenType.MAIN, "Esperado funcao 'main'");
         } else {
-            consumer(TokenType.IDENTIFIER, "Esperado nome da funcao");
+            name = consumer(TokenType.IDENTIFIER, "Esperado nome da funcao");
         }
 
         consumer(TokenType.OPEN_PARENTHESIS, "Esperado '(' apos nome da funcao");
-        consumer(TokenType.CLOSE_PARENTHESIS, "Esperado ')'");
+        consumer(TokenType.CLOSE_PARENTHESIS, "Esperado ')' para fechar a declaracao da funcao");
 
-        block();
+        BlockRecord block = block();
+
+        return new FunctionRecord(visibility, typeReturn.getType(), name.getLexema(), block);
     }
 
-    private void block() {
+    private BlockRecord block() {
         consumer(TokenType.OPEN_BRACE, "Esperado '{' para iniciar um bloco");
 
+        List<StatementInterface> commands = new ArrayList<>();
+
         while (!verify(TokenType.CLOSE_BRACE) && !verify(TokenType.EOF)) {
-            statement();
+            commands.add(statement());
         }
 
         consumer(TokenType.CLOSE_BRACE, "Esperado '}' para fechar o bloco");
+
+        return new BlockRecord(commands);
     }
 
-    private void statement() {
+    private StatementInterface statement() {
         if (verify(TokenType.INT) || verify(TokenType.DOUBLE) || verify(TokenType.BOOLEAN)) {
-            declaration();
+            return declaration();
         } else if (verify(TokenType.PRINT)) {
             consumer(TokenType.PRINT, "Esperado 'print'");
-            expression();
+            ExpressionInterface expression = expression();
             consumer(TokenType.SEMICOLON, "Esperado ';' apos print");
+            return new PrintRecord(expression);
         } else if (verify(TokenType.WHILE)) {
             consumer(TokenType.WHILE, "Esperado 'while'");
             consumer(TokenType.OPEN_PARENTHESIS, "Esperado '(' apos while");
-            expression();
+            ExpressionInterface expression = expression();
             consumer(TokenType.CLOSE_PARENTHESIS, "Esperado ')' apos condicao");
-            block();
+            BlockRecord block = block();
+            return new WhileRecord(expression, block);
         } else {
             throw new SyntacticException(
                     "Esperado declaração, print ou while"
@@ -90,65 +129,82 @@ public class Parser {
         }
     }
 
-    private void declaration() {
-        type();
+    private StatementInterface declaration() {
+        Token token = type();
+        Token name = consumer(TokenType.IDENTIFIER, "Esperado o nome da variável");
 
-        consumer(TokenType.IDENTIFIER, "Esperado nome da variável");
+        ExpressionInterface value = null;
 
         if (verify(TokenType.ASSIGN)) {
             consumer(TokenType.ASSIGN, "Esperado sinal de atribuição '='");
-            expression();
+            value = expression();
         }
 
         consumer(TokenType.SEMICOLON, "Esperado ';' apos declaração");
+
+        return new DeclarationRecord(token.getType(), name.getLexema(), value);
     }
 
-    private void expression() {
+    private ExpressionInterface expression() {
         switch (current().getType()) {
-            case TokenType.NUMBER:
-            case TokenType.STRING:
-            case TokenType.IDENTIFIER:
-            case TokenType.REGISTER:
+            case TokenType.NUMBER: {
+                Token token = consumer(TokenType.NUMBER, "Esperado um número");
+                return new LiteralRecord(Integer.parseInt(token.getLexema()));
+            }
+            case TokenType.STRING: {
+                Token token = consumer(TokenType.STRING, "Esperada uma string");
+                return new LiteralRecord(token.getLexema());
+            }
+            case TokenType.IDENTIFIER: {
+                Token token = consumer(TokenType.IDENTIFIER, "Esperado um identificador");
+                return new VariavelRecord(token.getLexema());
+            }
+            case TokenType.REGISTER: {
+                Token token = consumer(TokenType.REGISTER, "Esperado um registrador");
+                return new RegistradorRecord(token.getLexema());
+            }
             case TokenType.TRUE:
-            case TokenType.FALSE:
-                consumer(current().getType(), "Esperada uma expressão");
-                break;
+            case TokenType.FALSE: {
+                Token token = consumer(current().getType(), "Esperado um booleano");
+                return new LiteralRecord(token.getType() == TokenType.TRUE);
+            }
 
             case TokenType.ADD:
             case TokenType.SUB:
             case TokenType.MUL:
             case TokenType.DIV:
-                operation();
-                break;
+                return operation();
 
             case TokenType.CMP:
-                comparison();
-                break;
+                return comparison();
             case TokenType.OPEN_PARENTHESIS:
                 consumer(TokenType.OPEN_PARENTHESIS, "Esperado '('");
-                expression();
+                ExpressionInterface expression = expression();
                 consumer(TokenType.CLOSE_PARENTHESIS, "Esperado ')'");
-                break;
+                return expression;
             default:
                 throw new SyntacticException(
                         "Expressão inválida. Na linha: " + current().getLine() + ", coluna: " + current().getColumn());
         }
     }
 
-    private void operation() {
-        consumer(current().getType(), "Esperado operador. 'add, sub, mul, div'");
+    private ExpressionInterface operation() {
+        Token operador = consumer(current().getType(), "Esperado operador. 'add, sub, mul, div'");
 
-        expression();
+        ExpressionInterface left = expression();
 
         consumer(TokenType.COMMA, "Esperado ',' entre os operandos");
 
-        expression();
+        ExpressionInterface right = expression();
+
+        return new BinariaRecord(operador.getType(), left, right);
     }
 
-    private void comparison() {
+    private ExpressionInterface comparison() {
         consumer(TokenType.CMP, "Esperado 'cmp'");
         consumer(TokenType.DOT, "Esperado '.' apos cmp");
 
+        Token operador;
         switch (current().getType()) {
             case EQ:
             case NE:
@@ -156,16 +212,18 @@ public class Parser {
             case GT:
             case LE:
             case GE:
-                consumer(current().getType(), "Esperada condicao.");
+                operador = consumer(current().getType(), "Esperada condicao.");
                 break;
 
             default:
-                throw new SyntacticException("Esperado eq, ne, lt, gt, le ou ge");
+                throw new SyntacticException(
+                        "Erro na linha: " + current().getLine() + " Esperado eq, ne, lt, gt, le ou ge");
         }
 
-        expression();
+        ExpressionInterface left = expression();
         consumer(TokenType.COMMA, "Esperado ',' entre os operandos");
-        expression();
+        ExpressionInterface right = expression();
+        return new BinariaRecord(operador.getType(), left, right);
     }
 
     private Token current() {
@@ -187,13 +245,13 @@ public class Parser {
                 message + ". Na linha: " + current().getLine() + ", coluna: " + current().getColumn());
     }
 
-    private void type() {
+    private Token type() {
         if (verify(TokenType.INT)) {
-            consumer(TokenType.INT, "Esperado 'int'");
+            return consumer(TokenType.INT, "Esperado 'int'");
         } else if (verify(TokenType.DOUBLE)) {
-            consumer(TokenType.DOUBLE, "Esperado 'double'");
+            return consumer(TokenType.DOUBLE, "Esperado 'double'");
         } else if (verify(TokenType.BOOLEAN)) {
-            consumer(TokenType.BOOLEAN, "Esperado 'boolean'");
+            return consumer(TokenType.BOOLEAN, "Esperado 'boolean'");
         } else {
             throw new SyntacticException("Esperado tipo: int, double ou boolean. Na linha: " + current().getLine()
                     + ", coluna: " + current().getColumn());

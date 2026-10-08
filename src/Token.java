@@ -1,4 +1,7 @@
 package src;
+
+import src.enums.TokenType;
+
 public class Token {
 
     private TokenType type;
@@ -31,6 +34,6 @@ public class Token {
 
     @Override
     public String toString() {
-        return "<" + type + ", " + lexema + ", " + line + ", " + column + ">";
+        return "<" + type + ", " + lexema + ", L" + line + ", C" + column + ">";
     }
 }

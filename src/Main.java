@@ -1,4 +1,5 @@
 package src;
+
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.util.ArrayList;
@@ -6,11 +7,12 @@ import java.util.List;
 
 import src.exceptions.LexicalException;
 import src.exceptions.SyntacticException;
+import src.records.ProgramRecord;
 
 public class Main {
 
     public static void main(String[] args) throws Exception {
-        String fileName = args.length > 0 ? args[0] : "source.jvs";
+        String fileName = args.length > 0 ? args[0] : "./src/source/source.jvs";
 
         if (!fileName.endsWith(".jvs")) {
             System.err.println("Arquivo deve ser do tipo .jvs");
@@ -35,12 +37,19 @@ public class Main {
         try {
             tokens = lexer.analyze();
             Parser parser = new Parser(tokens);
-            parser.analyze();
+            ProgramRecord program = parser.analyze();
 
+            System.out.println("========== TOKENS ==========");
             for (Token token : tokens) {
                 System.out.println(token);
             }
             System.out.println();
+
+            System.out.println("========== PROGRAM ==========");
+            System.out.println(program);
+            System.out.println();
+
+            System.out.println("========== Resultado ==========");
             System.out.println("Declaracao válida!");
         } catch (LexicalException e) {
             System.err.println(e.getMessage());

@@ -2,6 +2,7 @@ package src;
 import java.util.ArrayList;
 import java.util.List;
 
+import src.enums.TokenType;
 import src.exceptions.LexicalException;
 
 public class Lexer {
