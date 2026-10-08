@@ -1,10 +1,11 @@
+package src;
 import java.io.BufferedReader;
 import java.io.FileReader;
 import java.util.ArrayList;
 import java.util.List;
 
-import exceptions.LexicalException;
-import exceptions.SyntacticException;
+import src.exceptions.LexicalException;
+import src.exceptions.SyntacticException;
 
 public class Main {
 

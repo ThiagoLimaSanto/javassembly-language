@@ -1,6 +1,7 @@
+package src;
 import java.util.List;
 
-import exceptions.SyntacticException;
+import src.exceptions.SyntacticException;
 
 public class Parser {
     private final List<Token> tokens;

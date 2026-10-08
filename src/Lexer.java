@@ -1,7 +1,8 @@
+package src;
 import java.util.ArrayList;
 import java.util.List;
 
-import exceptions.LexicalException;
+import src.exceptions.LexicalException;
 
 public class Lexer {
 

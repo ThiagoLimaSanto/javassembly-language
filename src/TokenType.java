@@ -1,3 +1,4 @@
+package src;
 public enum TokenType {
 
     // Palavras-chave
