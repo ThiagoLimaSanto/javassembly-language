@@ -1,6 +1,8 @@
 public class Main{
     public func void main(){
-        sum();
+        while (and cmp.gt a, 0, cmp.lt a, 10) {
+            push R0;
+        }
     }
 
     public func int sum(int a, int b){

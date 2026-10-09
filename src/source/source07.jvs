@@ -1,0 +1,29 @@
+public class Registradores {
+    public func void main() {
+        push R0;
+        push R1;
+        push R2;
+
+        mostrar();
+
+        pop R2;
+        pop R1;
+        pop R0;
+        return;
+    }
+
+    private func void mostrar() {
+        print R0;
+        print R1;
+        print R2;
+    }
+}
+
+private class Auxiliar {
+    public func int identidade(int valor) {
+        return valor;
+    }
+
+    private func void vazio(){
+    }
+}

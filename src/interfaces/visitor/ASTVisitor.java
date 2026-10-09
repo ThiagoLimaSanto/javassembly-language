@@ -7,11 +7,16 @@ import src.records.ClassRecord;
 import src.records.DeclarationRecord;
 import src.records.ExpressionStatementRecord;
 import src.records.FunctionRecord;
+import src.records.JERecord;
+import src.records.JMPRecord;
+import src.records.LabelRecord;
 import src.records.LiteralRecord;
 import src.records.ParameterRecord;
+import src.records.PopRecord;
 import src.records.PrintRecord;
 import src.records.ProgramRecord;
-import src.records.RegistradorRecord;
+import src.records.PushRecord;
+import src.records.RegisterRecord;
 import src.records.ReturnRecord;
 import src.records.VariavelRecord;
 import src.records.WhileRecord;
@@ -37,7 +42,7 @@ public interface ASTVisitor {
 
     void visit(VariavelRecord node);
 
-    void visit(RegistradorRecord node);
+    void visit(RegisterRecord node);
 
     void visit(ParameterRecord node);
 
@@ -46,4 +51,14 @@ public interface ASTVisitor {
     void visit(CallRecord node);
 
     void visit(ExpressionStatementRecord node);
+
+    void visit(PushRecord node);
+
+    void visit(PopRecord node);
+
+    void visit(LabelRecord node);
+
+    void visit(JMPRecord node);
+
+    void visit(JERecord node);
 }

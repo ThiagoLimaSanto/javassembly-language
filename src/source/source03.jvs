@@ -1,0 +1,22 @@
+public class Literais {
+    public func void main() {
+        int quantidade = 10;
+        double preco = 2.5;
+        String mensagem = "Teste de literais";
+        String vazio = '';
+        boolean ativo = True;
+        boolean bloqueado = False;
+        int reserva;
+
+        int total = add quantidade, mul 2, 3;
+        double metade = div preco, 2.0;
+        int diferenca = sub total, quantidade;
+
+        print mensagem;
+        print vazio;
+        print (total);
+        print metade;
+        print diferenca;
+        print and ativo, or bloqueado, True;
+    }
+}

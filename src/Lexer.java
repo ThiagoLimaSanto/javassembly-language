@@ -93,6 +93,10 @@ public class Lexer {
                 return TokenType.CMP;
             case "jmp":
                 return TokenType.JMP;
+            case "je":
+                return TokenType.JE;
+            case ":":
+                return TokenType.COLON;
             case "print":
                 return TokenType.PRINT;
             case "push":
@@ -110,9 +114,9 @@ public class Lexer {
                 return TokenType.CLASS;
             case "this":
                 return TokenType.THIS;
-            case "true":
+            case "True":
                 return TokenType.TRUE;
-            case "false":
+            case "False":
                 return TokenType.FALSE;
             case "null":
                 return TokenType.NULL;

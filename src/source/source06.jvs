@@ -1,0 +1,19 @@
+public class Saltos {
+    public func void main() {
+        int a = 10;
+        int b = 20;
+
+        cmp.eq a, b;
+        je iguais;
+
+        print "Valores diferentes";
+        jmp fim;
+
+        iguais:
+        print "Valores iguais";
+
+        fim:
+        print "Fim da comparacao";
+        return;
+    }
+}

@@ -9,11 +9,16 @@ import src.records.ClassRecord;
 import src.records.DeclarationRecord;
 import src.records.ExpressionStatementRecord;
 import src.records.FunctionRecord;
+import src.records.JERecord;
+import src.records.JMPRecord;
+import src.records.LabelRecord;
 import src.records.LiteralRecord;
 import src.records.ParameterRecord;
+import src.records.PopRecord;
 import src.records.PrintRecord;
 import src.records.ProgramRecord;
-import src.records.RegistradorRecord;
+import src.records.PushRecord;
+import src.records.RegisterRecord;
 import src.records.ReturnRecord;
 import src.records.VariavelRecord;
 import src.records.WhileRecord;
@@ -81,7 +86,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     @Override
-    public void visit(RegistradorRecord node) {
+    public void visit(RegisterRecord node) {
         // Folha: não possui filhos para visitar.
     }
 
@@ -99,12 +104,39 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(CallRecord node) {
-        // TODO Auto-generated method stub
         throw new UnsupportedOperationException("Unimplemented method 'visit'");
     }
 
     @Override
     public void visit(ExpressionStatementRecord node) {
         node.expression().accept(this);
+    }
+
+    @Override
+    public void visit(PushRecord node) {
+        node.register().accept(this);
+    }
+
+    @Override
+    public void visit(PopRecord node) {
+        node.register().accept(this);
+    }
+
+    @Override
+    public void visit(LabelRecord node) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'visit'");
+    }
+
+    @Override
+    public void visit(JMPRecord node) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'visit'");
+    }
+
+    @Override
+    public void visit(JERecord node) {
+        // TODO Auto-generated method stub
+        throw new UnsupportedOperationException("Unimplemented method 'visit'");
     }
 }

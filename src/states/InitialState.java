@@ -24,7 +24,7 @@ public class InitialState implements LexerState {
             return;
         }
 
-        if (Character.isDigit(currentCharacter)) {
+        if (currentCharacter >= '0' && currentCharacter <= '9') {
             lexer.changeState(new NumberState(this.line, this.column));
             return;
         }
@@ -37,7 +37,7 @@ public class InitialState implements LexerState {
             return;
         }
 
-        if ("=.,;{}()".indexOf(lexer.current()) >= 0) {
+        if ("=.,;{}():".indexOf(lexer.current()) >= 0) {
             String lexema = String.valueOf(lexer.advance());
             lexer.addToken(new Token(lexer.getType(lexema), lexema, this.line, this.column));
             return;

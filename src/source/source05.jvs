@@ -1,0 +1,24 @@
+public class Condicoes {
+    public func void main() {
+        int a = 5;
+        int b = 10;
+
+        boolean igual = cmp.eq a, b;
+        boolean diferente = cmp.ne a, b;
+        boolean menor = cmp.lt a, b;
+        boolean maior = cmp.gt a, b;
+        boolean menorOuIgual = cmp.le a, b;
+        boolean maiorOuIgual = cmp.ge a, b;
+
+        print and diferente, menor;
+        print or igual, maior;
+        print and cmp.ge a, 0, cmp.le a, 10;
+
+        while (and cmp.gt a, b, True) {
+            print "Bloco externo";
+            while (False) {
+                print "Bloco interno";
+            }
+        }
+    }
+}

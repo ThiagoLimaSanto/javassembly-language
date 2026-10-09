@@ -34,6 +34,8 @@ public enum TokenType {
     POP,
     CMP,
     JMP,
+    COLON,
+    JE,
     PRINT,
 
     // Condições do CMP

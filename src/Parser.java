@@ -14,11 +14,16 @@ import src.records.ClassRecord;
 import src.records.DeclarationRecord;
 import src.records.ExpressionStatementRecord;
 import src.records.FunctionRecord;
+import src.records.JERecord;
+import src.records.JMPRecord;
+import src.records.LabelRecord;
 import src.records.LiteralRecord;
 import src.records.ParameterRecord;
+import src.records.PopRecord;
 import src.records.PrintRecord;
 import src.records.ProgramRecord;
-import src.records.RegistradorRecord;
+import src.records.PushRecord;
+import src.records.RegisterRecord;
 import src.records.ReturnRecord;
 import src.records.VariavelRecord;
 import src.records.WhileRecord;
@@ -198,20 +203,77 @@ public class Parser {
             return new WhileRecord(expression, block);
         } else if (verify(TokenType.RETURN)) {
             return returnStatement();
+        } else if (verify(TokenType.PUSH)) {
+            return pushStatement();
+        } else if (verify(TokenType.POP)) {
+            return popStatement();
         } else if (verify(TokenType.IDENTIFIER)) {
             Token name = consumer(TokenType.IDENTIFIER, "Esperado um identificador");
+
+            if (verify(TokenType.COLON)) {
+                consumer(TokenType.COLON, "Esperado ':' apos identificador");
+                return new LabelRecord(name.getLexema());
+            }
 
             CallRecord call = functionCall(name.getLexema());
 
             consumer(TokenType.SEMICOLON, "Esperado ';' apos chamada de função");
 
             return new ExpressionStatementRecord(call);
+        } else if (verify(TokenType.JMP)) {
+            return jumpStatement();
+        } else if (verify(TokenType.JE)) {
+            return jumpEqualStatement();
+        } else if (verify(TokenType.CMP)) {
+            ExpressionInterface comparison = comparison();
+
+            consumer(
+                    TokenType.SEMICOLON,
+                    "Esperado ';' apos comparação");
+
+            return new ExpressionStatementRecord(comparison);
         } else {
             throw new SyntacticException(
-                    "Esperado declaração, print ou while"
+                    "Comando inválido ou não reconhecido"
                             + ". Na linha: " + current().getLine()
                             + ", coluna: " + current().getColumn());
         }
+    }
+
+    private PushRecord pushStatement() {
+        Token type = consumer(TokenType.PUSH, "Esperado 'push'");
+        Token register = consumer(TokenType.REGISTER, "Esperado um registrador");
+
+        consumer(TokenType.SEMICOLON, "Esperado ';' apos push");
+
+        return new PushRecord(type.getType(), new RegisterRecord(register.getLexema()));
+    }
+
+    private PopRecord popStatement() {
+        Token type = consumer(TokenType.POP, "Esperado 'pop'");
+        Token register = consumer(TokenType.REGISTER, "Esperado um registrador");
+
+        consumer(TokenType.SEMICOLON, "Esperado ';' apos pop");
+
+        return new PopRecord(type.getType(), new RegisterRecord(register.getLexema()));
+    }
+
+    private JMPRecord jumpStatement() {
+        consumer(TokenType.JMP, "Esperado 'jmp'");
+        Token name = consumer(TokenType.IDENTIFIER, "Esperado um identificador");
+
+        consumer(TokenType.SEMICOLON, "Esperado ';' apos jmp");
+
+        return new JMPRecord(name.getLexema());
+    }
+
+    private JERecord jumpEqualStatement() {
+        consumer(TokenType.JE, "Esperado 'je'");
+        Token name = consumer(TokenType.IDENTIFIER, "Esperado um identificador");
+
+        consumer(TokenType.SEMICOLON, "Esperado ';' apos je");
+
+        return new JERecord(name.getLexema());
     }
 
     private StatementInterface declaration() {
@@ -234,7 +296,29 @@ public class Parser {
         switch (current().getType()) {
             case TokenType.NUMBER: {
                 Token token = consumer(TokenType.NUMBER, "Esperado um número");
-                return new LiteralRecord(Integer.parseInt(token.getLexema()));
+                if (token.getLexema().contains(".")) {
+                    double value = Double.parseDouble(token.getLexema());
+
+                    if (!Double.isFinite(value)) {
+                        throw new SyntacticException(
+                                "Literal decimal fora do intervalo de double: "
+                                        + token.getLexema()
+                                        + ". Na linha: " + token.getLine()
+                                        + ", coluna: " + token.getColumn());
+                    }
+
+                    return new LiteralRecord(value);
+                }
+                try {
+                    int value = Integer.parseInt(token.getLexema());
+                    return new LiteralRecord(value);
+                } catch (NumberFormatException e) {
+                    throw new SyntacticException(
+                            "Literal inteiro fora do intervalo de 32 bits: "
+                                    + token.getLexema()
+                                    + ". Na linha: " + token.getLine()
+                                    + ", coluna: " + token.getColumn());
+                }
             }
             case TokenType.TEXT: {
                 Token token = consumer(TokenType.TEXT, "Esperado um literal de texto");
@@ -250,7 +334,7 @@ public class Parser {
             }
             case TokenType.REGISTER: {
                 Token token = consumer(TokenType.REGISTER, "Esperado um registrador");
-                return new RegistradorRecord(token.getLexema());
+                return new RegisterRecord(token.getLexema());
             }
             case TokenType.TRUE:
             case TokenType.FALSE: {
@@ -262,6 +346,8 @@ public class Parser {
             case TokenType.SUB:
             case TokenType.MUL:
             case TokenType.DIV:
+            case TokenType.AND:
+            case TokenType.OR:
                 return operation();
 
             case TokenType.CMP:
@@ -278,7 +364,7 @@ public class Parser {
     }
 
     private ExpressionInterface operation() {
-        Token operador = consumer(current().getType(), "Esperado operador. 'add, sub, mul, div'");
+        Token operador = consumer(current().getType(), "Esperado operador. 'add, sub, mul, div, and, or'");
 
         ExpressionInterface left = expression();
 

@@ -3,7 +3,7 @@ package src.records;
 import src.interfaces.ExpressionInterface;
 import src.interfaces.visitor.ASTVisitor;
 
-public record RegistradorRecord(String nome) implements ExpressionInterface {
+public record RegisterRecord(String nome) implements ExpressionInterface {
 
     @Override
     public String toString() {
