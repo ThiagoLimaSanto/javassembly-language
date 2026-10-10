@@ -1,8 +1,12 @@
 package src;
 
+import src.lexer.Lexer;
+import src.lexer.Token;
+import src.parser.Parser;
+
 import java.util.List;
 
-import src.records.ProgramRecord;
+import src.ast.records.ProgramRecord;
 
 public class ProgramAnalyzer {
     public ProgramRecord analyze(String source) {

@@ -5,8 +5,8 @@ import java.io.FileReader;
 
 import src.exceptions.LexicalException;
 import src.exceptions.SyntacticException;
-import src.records.ProgramRecord;
-import src.visitors.ASTPrinter;
+import src.ast.records.ProgramRecord;
+import src.ast.visitor.ASTPrinter;
 
 public class Main {
 
@@ -30,8 +30,8 @@ public class Main {
         reader.close();
 
         try {
-            ProgramAnalyzer javassembly = new ProgramAnalyzer();
-            ProgramRecord program = javassembly.analyze(source.toString());
+            ProgramAnalyzer analyzer = new ProgramAnalyzer();
+            ProgramRecord program = analyzer.analyze(source.toString());
             program.accept(new ASTPrinter());
 
             System.out.println("========== Resultado ==========");
