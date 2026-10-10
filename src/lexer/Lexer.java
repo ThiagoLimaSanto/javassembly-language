@@ -2,8 +2,8 @@ package src.lexer;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 
-import src.lexer.TokenType;
 import src.lexer.states.InitialState;
 import src.lexer.states.LexerState;
 import src.lexer.states.StringState;
@@ -15,6 +15,61 @@ public class Lexer {
     private int line = 1;
     private int column = 1;
     private List<Token> tokens = new ArrayList<>();
+    private static final Map<String, TokenType> KEYWORDS = Map.ofEntries(
+            Map.entry("class", TokenType.CLASS),
+            Map.entry("func", TokenType.FUNC),
+            Map.entry("main", TokenType.MAIN),
+            Map.entry("public", TokenType.PUBLIC),
+            Map.entry("private", TokenType.PRIVATE),
+            Map.entry("int", TokenType.INT),
+            Map.entry("double", TokenType.DOUBLE),
+            Map.entry("boolean", TokenType.BOOLEAN),
+            Map.entry("String", TokenType.STRING),
+            Map.entry("void", TokenType.VOID),
+
+            Map.entry("add", TokenType.ADD),
+            Map.entry("sub", TokenType.SUB),
+            Map.entry("mul", TokenType.MUL),
+            Map.entry("div", TokenType.DIV),
+            Map.entry("mov", TokenType.MOV),
+            Map.entry("cmp", TokenType.CMP),
+            Map.entry("jmp", TokenType.JMP),
+            Map.entry("je", TokenType.JE),
+            Map.entry("print", TokenType.PRINT),
+            Map.entry("push", TokenType.PUSH),
+            Map.entry("pop", TokenType.POP),
+
+            Map.entry("return", TokenType.RETURN),
+            Map.entry("while", TokenType.WHILE),
+            Map.entry("for", TokenType.FOR),
+            Map.entry("this", TokenType.THIS),
+            Map.entry("True", TokenType.TRUE),
+            Map.entry("False", TokenType.FALSE),
+            Map.entry("null", TokenType.NULL),
+            Map.entry("new", TokenType.NEW),
+            Map.entry("super", TokenType.SUPER),
+
+            Map.entry("eq", TokenType.EQ),
+            Map.entry("ne", TokenType.NE),
+            Map.entry("lt", TokenType.LT),
+            Map.entry("gt", TokenType.GT),
+            Map.entry("le", TokenType.LE),
+            Map.entry("ge", TokenType.GE),
+            Map.entry("and", TokenType.AND),
+            Map.entry("or", TokenType.OR));
+    private static final Map<String, TokenType> SYMBOLS = Map.ofEntries(
+            Map.entry("{", TokenType.OPEN_BRACE),
+            Map.entry("}", TokenType.CLOSE_BRACE),
+            Map.entry("(", TokenType.OPEN_PARENTHESIS),
+            Map.entry(")", TokenType.CLOSE_PARENTHESIS),
+            Map.entry(";", TokenType.SEMICOLON),
+            Map.entry(",", TokenType.COMMA),
+            Map.entry(".", TokenType.DOT),
+            Map.entry(":", TokenType.COLON),
+            Map.entry("=", TokenType.ASSIGN),
+            Map.entry("\"", TokenType.QUOTE),
+            Map.entry("'", TokenType.SINGLE_QUOTE));
+
     private LexerState state = new InitialState();
 
     public Lexer(String source) {
@@ -75,123 +130,27 @@ public class Lexer {
     }
 
     public TokenType getType(String lexeme) {
+        TokenType type = KEYWORDS.get(lexeme);
 
-        switch (lexeme) {
-            case "String":
-                return TokenType.STRING;
-            case "add":
-                return TokenType.ADD;
-            case "sub":
-                return TokenType.SUB;
-            case "mul":
-                return TokenType.MUL;
-            case "div":
-                return TokenType.DIV;
-            case "mov":
-                return TokenType.MOV;
-            case "cmp":
-                return TokenType.CMP;
-            case "jmp":
-                return TokenType.JMP;
-            case "je":
-                return TokenType.JE;
-            case ":":
-                return TokenType.COLON;
-            case "print":
-                return TokenType.PRINT;
-            case "push":
-                return TokenType.PUSH;
-            case "pop":
-                return TokenType.POP;
-
-            case "return":
-                return TokenType.RETURN;
-            case "while":
-                return TokenType.WHILE;
-            case "for":
-                return TokenType.FOR;
-            case "class":
-                return TokenType.CLASS;
-            case "this":
-                return TokenType.THIS;
-            case "True":
-                return TokenType.TRUE;
-            case "False":
-                return TokenType.FALSE;
-            case "null":
-                return TokenType.NULL;
-            case "new":
-                return TokenType.NEW;
-            case "super":
-                return TokenType.SUPER;
-            case "public":
-                return TokenType.PUBLIC;
-            case "private":
-                return TokenType.PRIVATE;
-            case "double":
-                return TokenType.DOUBLE;
-            case "boolean":
-                return TokenType.BOOLEAN;
-            case "void":
-                return TokenType.VOID;
-            case "int":
-                return TokenType.INT;
-
-            case "func":
-                return TokenType.FUNC;
-            case "main":
-                return TokenType.MAIN;
-
-            case "{":
-                return TokenType.OPEN_BRACE;
-            case "}":
-                return TokenType.CLOSE_BRACE;
-            case "(":
-                return TokenType.OPEN_PARENTHESIS;
-            case ")":
-                return TokenType.CLOSE_PARENTHESIS;
-            case ";":
-                return TokenType.SEMICOLON;
-            case ",":
-                return TokenType.COMMA;
-            case ".":
-                return TokenType.DOT;
-            case "\"":
-                return TokenType.QUOTE;
-            case "'":
-                return TokenType.SINGLE_QUOTE;
-
-            case "eq":
-                return TokenType.EQ;
-
-            case "ne":
-                return TokenType.NE;
-
-            case "lt":
-                return TokenType.LT;
-
-            case "gt":
-                return TokenType.GT;
-
-            case "le":
-                return TokenType.LE;
-
-            case "ge":
-                return TokenType.GE;
-
-            case "and":
-                return TokenType.AND;
-            case "or":
-                return TokenType.OR;
-            case "=":
-                return TokenType.ASSIGN;
-
-            default:
-                if (isRegister(lexeme)) {
-                    return TokenType.REGISTER;
-                }
-                return TokenType.IDENTIFIER;
+        if (type != null) {
+            return type;
         }
+
+        type = SYMBOLS.get(lexeme);
+
+        if (type != null) {
+            return type;
+        }
+
+        if (isRegister(lexeme)) {
+            return TokenType.REGISTER;
+        }
+
+        return TokenType.IDENTIFIER;
+    }
+
+    public boolean isSymbol(char character) {
+        return SYMBOLS.containsKey(String.valueOf(character));
     }
 
     private boolean isRegister(String lexeme) {

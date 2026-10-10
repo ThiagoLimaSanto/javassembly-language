@@ -1,7 +1,5 @@
 package src.lexer;
 
-import src.lexer.TokenType;
-
 public class Token {
 
     private TokenType type;

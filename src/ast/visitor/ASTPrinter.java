@@ -1,7 +1,6 @@
 package src.ast.visitor;
 
 import src.ast.ASTNode;
-import src.ast.visitor.ASTVisitor;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;

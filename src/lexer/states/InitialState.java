@@ -1,8 +1,8 @@
 package src.lexer.states;
 
+import src.exceptions.LexicalException;
 import src.lexer.Lexer;
 import src.lexer.Token;
-import src.exceptions.LexicalException;
 
 public class InitialState implements LexerState {
 
@@ -37,9 +37,11 @@ public class InitialState implements LexerState {
             return;
         }
 
-        if ("=.,;{}():".indexOf(lexer.current()) >= 0) {
+        if (lexer.isSymbol(currentCharacter)) {
             String lexeme = String.valueOf(lexer.advance());
+
             lexer.addToken(new Token(lexer.getType(lexeme), lexeme, this.line, this.column));
+
             return;
         }
 

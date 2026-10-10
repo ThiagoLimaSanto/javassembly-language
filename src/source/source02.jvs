@@ -1,4 +1,4 @@
-public class Main{
+private class Main{
     public func void main(){
         while (and cmp.gt a, 0, cmp.lt a, 10) {
             push R0;

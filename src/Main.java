@@ -11,7 +11,7 @@ import src.ast.visitor.ASTPrinter;
 public class Main {
 
     public static void main(String[] args) throws Exception {
-        String fileName = args.length > 0 ? args[0] : "./src/source/source07.jvs";
+        String fileName = args.length > 0 ? args[0] : "./src/source/source04.jvs";
 
         if (!fileName.endsWith(".jvs")) {
             System.err.println("Arquivo deve ser do tipo .jvs");
