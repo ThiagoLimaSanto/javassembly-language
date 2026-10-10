@@ -11,9 +11,4 @@ public record JMPRecord(
         visitor.visit(this);
     }
 
-    @Override
-    public String toString() {
-        return "JMP: " + name;
-    }
-
 }

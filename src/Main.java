@@ -6,6 +6,7 @@ import java.io.FileReader;
 import src.exceptions.LexicalException;
 import src.exceptions.SyntacticException;
 import src.records.ProgramRecord;
+import src.visitors.ASTPrinter;
 
 public class Main {
 
@@ -31,10 +32,7 @@ public class Main {
         try {
             ProgramAnalyzer javassembly = new ProgramAnalyzer();
             ProgramRecord program = javassembly.analyze(source.toString());
-
-            System.out.println("========== PROGRAM ==========");
-            System.out.println(program);
-            System.out.println();
+            program.accept(new ASTPrinter());
 
             System.out.println("========== Resultado ==========");
             System.out.println("Declaracao válida!");

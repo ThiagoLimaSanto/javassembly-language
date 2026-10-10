@@ -15,9 +15,4 @@ public record ClassRecord(
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);
     }
-
-    @Override
-    public String toString() {
-        return AstFormat.node("Classe " + name + AstFormat.visibility(visibility), functions.toArray());
-    }
 }

@@ -18,9 +18,4 @@ public record FunctionRecord(
         visitor.visit(this);
     }
 
-    @Override
-    public String toString() {
-        return AstFormat.node("Função " + name + " → " + returnType + AstFormat.visibility(visibility), block);
-    }
-
 }

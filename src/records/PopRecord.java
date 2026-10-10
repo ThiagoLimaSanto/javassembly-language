@@ -11,9 +11,4 @@ public record PopRecord(
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);
     }
-
-    @Override
-    public String toString() {
-        return AstFormat.node("Pop", register);
-    }
 }

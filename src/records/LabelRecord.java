@@ -10,9 +10,4 @@ public record LabelRecord(String name) implements StatementInterface {
         visitor.visit(this);
     }
 
-    @Override
-    public String toString() {
-        return "Label: " + name;
-    }
-
 }

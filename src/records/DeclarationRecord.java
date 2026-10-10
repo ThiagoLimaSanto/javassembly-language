@@ -10,12 +10,6 @@ public record DeclarationRecord(
         String name,
         ExpressionInterface value) implements StatementInterface {
 
-    @Override
-    public String toString() {
-        return AstFormat.node("Declaração: " + type + " " + name,
-                value == null ? "Sem inicialização" : value);
-    }
-
      @Override
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);

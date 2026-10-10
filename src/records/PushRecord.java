@@ -13,9 +13,4 @@ public record PushRecord(
         visitor.visit(this);
     }
 
-    @Override
-    public String toString() {
-        return AstFormat.node("Push", register);
-    }
-
 }

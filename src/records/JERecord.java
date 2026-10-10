@@ -9,9 +9,4 @@ public record JERecord(
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);
     }
-
-    @Override
-    public String toString() {
-        return "JE: " + target;
-    }
 }

@@ -10,11 +10,4 @@ public record ReturnRecord(
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);
     }
-
-    @Override
-    public String toString() {
-        return value == null
-                ? "Return"
-                : AstFormat.node("Return", value);
-    }
 }
