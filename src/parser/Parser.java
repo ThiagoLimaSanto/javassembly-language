@@ -1,12 +1,8 @@
 package src.parser;
 
-import src.lexer.Token;
-
 import java.util.ArrayList;
 import java.util.List;
 
-import src.lexer.TokenType;
-import src.exceptions.SyntacticException;
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
 import src.ast.records.BinaryExpressionRecord;
@@ -29,6 +25,9 @@ import src.ast.records.RegisterRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
+import src.exceptions.SyntacticException;
+import src.lexer.Token;
+import src.lexer.TokenType;
 
 public class Parser {
     private final TokenStream tokens;
@@ -298,75 +297,63 @@ public class Parser {
     }
 
     private ExpressionInterface expression() {
-        switch (tokens.current().getType()) {
-            case TokenType.NUMBER: {
-                Token token = tokens.consume(TokenType.NUMBER, "Esperado um número");
-                if (token.getLexeme().contains(".")) {
-                    double value = Double.parseDouble(token.getLexeme());
+        return switch (tokens.current().getType()) {
+            case TokenType.NUMBER -> numberExpression();
+            case TokenType.TEXT -> textExpression();
+            case TokenType.IDENTIFIER -> identifierExpression();
+            case TokenType.REGISTER -> registerExpression();
+            case TokenType.TRUE, TokenType.FALSE -> booleanExpression();
+            case TokenType.ADD, TokenType.SUB, TokenType.MUL, TokenType.DIV, TokenType.AND, TokenType.OR -> operation();
+            case TokenType.CMP -> comparison();
+            case TokenType.OPEN_PARENTHESIS -> parenthesisExpression();
+            default -> throw new SyntacticException(
+                    "Expressão inválida. Na linha: " + tokens.current().getLine() + ", coluna: "
+                            + tokens.current().getColumn());
+        };
+    }
 
-                    if (!Double.isFinite(value)) {
-                        throw new SyntacticException(
-                                "Literal decimal fora do intervalo de double: "
-                                        + token.getLexeme()
-                                        + ". Na linha: " + token.getLine()
-                                        + ", coluna: " + token.getColumn());
-                    }
+    private ExpressionInterface parenthesisExpression() {
+        tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '('");
+        ExpressionInterface expression = expression();
+        tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')'");
+        return expression;
+    }
 
-                    return new LiteralRecord(value);
-                }
-                try {
-                    int value = Integer.parseInt(token.getLexeme());
-                    return new LiteralRecord(value);
-                } catch (NumberFormatException e) {
-                    throw new SyntacticException(
-                            "Literal inteiro fora do intervalo de 32 bits: "
-                                    + token.getLexeme()
-                                    + ". Na linha: " + token.getLine()
-                                    + ", coluna: " + token.getColumn());
-                }
-            }
-            case TokenType.TEXT: {
-                Token token = tokens.consume(TokenType.TEXT, "Esperado um literal de texto");
-                return new LiteralRecord(token.getLexeme());
-            }
-            case TokenType.IDENTIFIER: {
-                Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado um identificador");
+    private ExpressionInterface booleanExpression() {
+        Token token = tokens.consume(tokens.current().getType(), "Esperado um booleano");
+        return new LiteralRecord(token.getType() == TokenType.TRUE);
+    }
 
-                if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
-                    return functionCall(name.getLexeme());
-                }
-                return new VariableRecord(name.getLexeme());
-            }
-            case TokenType.REGISTER: {
-                Token token = tokens.consume(TokenType.REGISTER, "Esperado um registrador");
-                return new RegisterRecord(token.getLexeme());
-            }
-            case TokenType.TRUE:
-            case TokenType.FALSE: {
-                Token token = tokens.consume(tokens.current().getType(), "Esperado um booleano");
-                return new LiteralRecord(token.getType() == TokenType.TRUE);
-            }
+    private ExpressionInterface numberExpression() {
+        Token token = tokens.consume(TokenType.NUMBER, "Esperado um número");
+        if (token.getLexeme().contains(".")) {
+            double value = Double.parseDouble(token.getLexeme());
 
-            case TokenType.ADD:
-            case TokenType.SUB:
-            case TokenType.MUL:
-            case TokenType.DIV:
-            case TokenType.AND:
-            case TokenType.OR:
-                return operation();
-
-            case TokenType.CMP:
-                return comparison();
-            case TokenType.OPEN_PARENTHESIS:
-                tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '('");
-                ExpressionInterface expression = expression();
-                tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')'");
-                return expression;
-            default:
+            if (!Double.isFinite(value)) {
                 throw new SyntacticException(
-                        "Expressão inválida. Na linha: " + tokens.current().getLine() + ", coluna: "
-                                + tokens.current().getColumn());
+                        "Literal decimal fora do intervalo de double: "
+                                + token.getLexeme()
+                                + ". Na linha: " + token.getLine()
+                                + ", coluna: " + token.getColumn());
+            }
+
+            return new LiteralRecord(value);
         }
+        try {
+            int value = Integer.parseInt(token.getLexeme());
+            return new LiteralRecord(value);
+        } catch (NumberFormatException e) {
+            throw new SyntacticException(
+                    "Literal inteiro fora do intervalo de 32 bits: "
+                            + token.getLexeme()
+                            + ". Na linha: " + token.getLine()
+                            + ", coluna: " + token.getColumn());
+        }
+    }
+
+    private ExpressionInterface textExpression() {
+        Token token = tokens.consume(TokenType.TEXT, "Esperado um literal de texto");
+        return new LiteralRecord(token.getLexeme());
     }
 
     private ExpressionInterface operation() {
@@ -380,6 +367,20 @@ public class Parser {
         ExpressionInterface right = expression();
 
         return new BinaryExpressionRecord(operator.getType(), left, right);
+    }
+
+    private ExpressionInterface identifierExpression() {
+        Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado um identificador");
+
+        if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
+            return functionCall(name.getLexeme());
+        }
+        return new VariableRecord(name.getLexeme());
+    }
+
+    private ExpressionInterface registerExpression() {
+        Token token = tokens.consume(TokenType.REGISTER, "Esperado um registrador");
+        return new RegisterRecord(token.getLexeme());
     }
 
     private ExpressionInterface comparison() {
@@ -409,18 +410,14 @@ public class Parser {
     }
 
     private Token type() {
-        if (tokens.verify(TokenType.INT)) {
-            return tokens.consume(TokenType.INT, "Esperado 'int'");
-        } else if (tokens.verify(TokenType.DOUBLE)) {
-            return tokens.consume(TokenType.DOUBLE, "Esperado 'double'");
-        } else if (tokens.verify(TokenType.BOOLEAN)) {
-            return tokens.consume(TokenType.BOOLEAN, "Esperado 'boolean'");
-        } else if (tokens.verify(TokenType.STRING)) {
-            return tokens.consume(TokenType.STRING, "Esperado 'String'");
-        } else {
-            throw new SyntacticException(
+        return switch (tokens.current().getType()) {
+            case TokenType.INT -> tokens.consume(TokenType.INT, "Esperado 'int'");
+            case TokenType.DOUBLE -> tokens.consume(TokenType.DOUBLE, "Esperado 'double'");
+            case TokenType.BOOLEAN -> tokens.consume(TokenType.BOOLEAN, "Esperado 'boolean'");
+            case TokenType.STRING -> tokens.consume(TokenType.STRING, "Esperado 'String'");
+            default -> throw new SyntacticException(
                     "Esperado tipo: int, double, boolean ou String. Na linha: " + tokens.current().getLine()
                             + ", coluna: " + tokens.current().getColumn());
-        }
+        };
     }
 }
