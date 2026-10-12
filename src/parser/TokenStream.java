@@ -27,11 +27,6 @@ public class TokenStream {
         return current().getType() == type;
     }
 
-    public Token peek() {
-        int nextPosition = Math.min(position + 1, tokens.size() - 1);
-        return tokens.get(nextPosition);
-    }
-
     public Token consume(TokenType type, String message) {
         if (!verify(type)) {
             throw new SyntacticException(message, current().getLine(), current().getColumn());
