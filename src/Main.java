@@ -13,7 +13,7 @@ public class Main {
         String fileName = args.length > 0 ? args[0] : "./src/source/source04.jvs";
 
         if (!fileName.endsWith(".jvs")) {
-            System.err.println("Arquivo deve ser do tipo .jvs");
+            System.err.println("Tipo de arquivo não reconhecido");
             return;
         }
 
