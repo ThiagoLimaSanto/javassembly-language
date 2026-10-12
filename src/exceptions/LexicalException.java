@@ -1,8 +1,7 @@
 package src.exceptions;
 
-public class LexicalException extends RuntimeException {
+public class LexicalException extends LanguageException {
     public LexicalException(String message, int line, int column) {
-        super("Erro léxico na linha " + line
-            + ", coluna " + column + ": " + message);
+        super("léxico", message, line, column);
     }
 }

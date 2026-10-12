@@ -25,6 +25,8 @@ import src.ast.records.RegisterRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
+import src.exceptions.DoubleOutOfRangeException;
+import src.exceptions.IntegerOutOfRangeException;
 import src.exceptions.SyntacticException;
 import src.lexer.Token;
 import src.lexer.TokenType;
@@ -196,10 +198,8 @@ public class Parser {
             case TokenType.JMP -> jumpStatement();
             case TokenType.JE -> jumpEqualStatement();
             case TokenType.CMP -> comparisonStatement();
-            default -> throw new SyntacticException(
-                    "Comando inválido ou não reconhecido"
-                            + ". Na linha: " + tokens.current().getLine()
-                            + ", coluna: " + tokens.current().getColumn());
+            default -> throw new SyntacticException("Comando inválido ou não reconhecido.",
+                    tokens.current().getLine(), tokens.current().getColumn());
         };
     }
 
@@ -306,9 +306,8 @@ public class Parser {
             case TokenType.ADD, TokenType.SUB, TokenType.MUL, TokenType.DIV, TokenType.AND, TokenType.OR -> operation();
             case TokenType.CMP -> comparison();
             case TokenType.OPEN_PARENTHESIS -> parenthesisExpression();
-            default -> throw new SyntacticException(
-                    "Expressão inválida. Na linha: " + tokens.current().getLine() + ", coluna: "
-                            + tokens.current().getColumn());
+            default -> throw new SyntacticException("Expressão inválida.",
+                    tokens.current().getLine(), tokens.current().getColumn());
         };
     }
 
@@ -330,11 +329,10 @@ public class Parser {
             double value = Double.parseDouble(token.getLexeme());
 
             if (!Double.isFinite(value)) {
-                throw new SyntacticException(
-                        "Literal decimal fora do intervalo de double: "
-                                + token.getLexeme()
-                                + ". Na linha: " + token.getLine()
-                                + ", coluna: " + token.getColumn());
+                throw new DoubleOutOfRangeException(
+                        token.getLexeme(),
+                        token.getLine(),
+                        token.getColumn());
             }
 
             return new LiteralRecord(value);
@@ -343,11 +341,7 @@ public class Parser {
             int value = Integer.parseInt(token.getLexeme());
             return new LiteralRecord(value);
         } catch (NumberFormatException e) {
-            throw new SyntacticException(
-                    "Literal inteiro fora do intervalo de 32 bits: "
-                            + token.getLexeme()
-                            + ". Na linha: " + token.getLine()
-                            + ", coluna: " + token.getColumn());
+            throw new IntegerOutOfRangeException(token.getLexeme(), token.getLine(), token.getColumn());
         }
     }
 
@@ -400,7 +394,8 @@ public class Parser {
 
             default:
                 throw new SyntacticException(
-                        "Erro na linha: " + tokens.current().getLine() + " Esperado eq, ne, lt, gt, le ou ge");
+                        "Esperado eq, ne, lt, gt, le ou ge.",
+                        tokens.current().getLine(), tokens.current().getColumn());
         }
 
         ExpressionInterface left = expression();
@@ -415,9 +410,8 @@ public class Parser {
             case TokenType.DOUBLE -> tokens.consume(TokenType.DOUBLE, "Esperado 'double'");
             case TokenType.BOOLEAN -> tokens.consume(TokenType.BOOLEAN, "Esperado 'boolean'");
             case TokenType.STRING -> tokens.consume(TokenType.STRING, "Esperado 'String'");
-            default -> throw new SyntacticException(
-                    "Esperado tipo: int, double, boolean ou String. Na linha: " + tokens.current().getLine()
-                            + ", coluna: " + tokens.current().getColumn());
+            default -> throw new SyntacticException("Esperado declaração de tipo: int, double, boolean ou String.",
+                    tokens.current().getLine(), tokens.current().getColumn());
         };
     }
 }

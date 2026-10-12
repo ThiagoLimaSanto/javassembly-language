@@ -1,11 +1,10 @@
 package src.parser;
 
-import src.lexer.Token;
-
 import java.util.List;
 
-import src.lexer.TokenType;
 import src.exceptions.SyntacticException;
+import src.lexer.Token;
+import src.lexer.TokenType;
 
 public class TokenStream {
 
@@ -35,10 +34,7 @@ public class TokenStream {
 
     public Token consume(TokenType type, String message) {
         if (!verify(type)) {
-            throw new SyntacticException(
-                    message
-                            + ". Na linha: " + current().getLine()
-                            + ", coluna: " + current().getColumn());
+            throw new SyntacticException(message, current().getLine(), current().getColumn());
         }
 
         Token token = current();
@@ -49,4 +45,5 @@ public class TokenStream {
 
         return token;
     }
+
 }

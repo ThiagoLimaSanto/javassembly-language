@@ -3,8 +3,7 @@ package src;
 import java.io.BufferedReader;
 import java.io.FileReader;
 
-import src.exceptions.LexicalException;
-import src.exceptions.SyntacticException;
+import src.exceptions.LanguageException;
 import src.ast.records.ProgramRecord;
 import src.ast.visitor.ASTPrinter;
 
@@ -36,10 +35,10 @@ public class Main {
 
             System.out.println("========== Resultado ==========");
             System.out.println("Declaracao válida!");
-        } catch (LexicalException e) {
-            System.err.println(e.getMessage());
-        } catch (SyntacticException e) {
-            System.err.println(e.getMessage());
+        } catch (LanguageException e) {
+            System.err.println(
+                    "[" + e.getClass().getSimpleName() + "] "
+                            + e.getMessage());
         }
     }
 }

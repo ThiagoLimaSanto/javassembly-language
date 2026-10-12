@@ -1,9 +1,9 @@
 package src.lexer.states;
 
+import src.exceptions.LexicalException;
 import src.lexer.Lexer;
 import src.lexer.Token;
 import src.lexer.TokenType;
-import src.exceptions.LexicalException;
 
 public class NumberState implements LexerState {
     private final int line;
@@ -27,8 +27,8 @@ public class NumberState implements LexerState {
 
             if (lexer.finished() || !isDigit(lexer.current())) {
                 throw new LexicalException("Esperado dígito após o ponto decimal",
-                        lexer.getLine(),
-                        lexer.getColumn());
+                        line,
+                        column);
             }
 
             while (!lexer.finished()
