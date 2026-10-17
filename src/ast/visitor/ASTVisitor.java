@@ -1,5 +1,6 @@
 package src.ast.visitor;
 
+import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
@@ -61,4 +62,6 @@ public interface ASTVisitor {
     void visit(JMPRecord node);
 
     void visit(JERecord node);
+
+    void visit(AttributeRecord node);
 }

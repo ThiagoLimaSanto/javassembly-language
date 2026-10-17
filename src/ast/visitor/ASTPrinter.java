@@ -1,6 +1,7 @@
 package src.ast.visitor;
 
 import src.ast.ASTNode;
+import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
@@ -66,6 +67,10 @@ public class ASTPrinter implements ASTVisitor {
 
         printLine("Classe " + node.name() + visibility);
 
+        for (AttributeRecord attribute : node.attributes()) {
+            visitChild(attribute);
+        }
+
         for (FunctionRecord function : node.functions()) {
             visitChild(function);
         }
@@ -75,7 +80,9 @@ public class ASTPrinter implements ASTVisitor {
     public void visit(FunctionRecord node) {
         String visibility = node.visibility() == null
                 ? "" : " [" + node.visibility() + "]";
-        printLine("Função " + node.name() + " → " + node.returnType() + visibility);
+        printLine("Função " + node.name() + " → " + node.returnType() + visibility
+                + (node.isStatic() ? " [STATIC]" : "")
+                + (node.isFinal() ? " [FINAL]" : ""));
         for (ParameterRecord parameter : node.parameters()) {
             visitChild(parameter);
         }
@@ -197,5 +204,17 @@ public class ASTPrinter implements ASTVisitor {
     @Override
     public void visit(JERecord node) {
         printLine("JE → " + node.target());
+    }
+
+    @Override
+    public void visit(AttributeRecord node) {
+        String visibility = node.visibility() == null ? "" : " [" + node.visibility() + "]";
+        printLine("Atributo: " + node.type().name() + " " + node.name() + visibility
+                + (node.isStatic() ? " [STATIC]" : "")
+                + (node.isFinal() ? " [FINAL]" : "")
+                + (node.value() == null ? " (sem inicialização)" : ""));
+        if (node.value() != null) {
+            visitChild(node.value());
+        }
     }
 }

@@ -8,6 +8,8 @@ import src.ast.visitor.ASTVisitor;
 
 public record FunctionRecord(
         TokenType visibility,
+        boolean isStatic,
+        boolean isFinal,
         TokenType returnType,
         String name,
         List<ParameterRecord> parameters,

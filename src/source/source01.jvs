@@ -1,7 +1,7 @@
 public class Main{
     public func void main(){
         String a = "Hello World";
-        int a = 10;
+        double a = 10.5;
         int b = 20;
         int c = add a, mul b, 2;
         print c;

@@ -8,6 +8,8 @@ public enum TokenType {
     FOR,
     RETURN,
     CLASS,
+    STATIC,
+    FINAL,
     THIS,
     TRUE,
     FALSE,

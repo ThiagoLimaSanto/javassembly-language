@@ -20,6 +20,8 @@ public class Lexer {
             Map.entry("func", TokenType.FUNC),
             Map.entry("main", TokenType.MAIN),
             Map.entry("public", TokenType.PUBLIC),
+            Map.entry("static", TokenType.STATIC),
+            Map.entry("final", TokenType.FINAL),
             Map.entry("private", TokenType.PRIVATE),
             Map.entry("int", TokenType.INT),
             Map.entry("double", TokenType.DOUBLE),

@@ -10,7 +10,7 @@ import src.ast.visitor.ASTPrinter;
 public class Main {
 
     public static void main(String[] args) throws Exception {
-        String fileName = args.length > 0 ? args[0] : "./src/source/source04.jvs";
+        String fileName = args.length > 0 ? args[0] : "./src/source/source08.jvs";
 
         if (!fileName.endsWith(".jvs")) {
             System.err.println("Tipo de arquivo não reconhecido");

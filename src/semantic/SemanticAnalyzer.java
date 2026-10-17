@@ -1,7 +1,7 @@
 package src.semantic;
 
 import src.ast.StatementInterface;
-import src.ast.visitor.ASTVisitor;
+import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
@@ -22,6 +22,7 @@ import src.ast.records.RegisterRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
+import src.ast.visitor.ASTVisitor;
 
 public class SemanticAnalyzer implements ASTVisitor {
 
@@ -34,6 +35,9 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(ClassRecord node) {
+        for (AttributeRecord attribute : node.attributes()) {
+            attribute.accept(this);
+        }
         for (FunctionRecord function : node.functions()) {
             function.accept(this);
         }
@@ -138,5 +142,12 @@ public class SemanticAnalyzer implements ASTVisitor {
     public void visit(JERecord node) {
         // TODO Auto-generated method stub
         throw new UnsupportedOperationException("Unimplemented method 'visit'");
+    }
+
+    @Override
+    public void visit(AttributeRecord node) {
+        if (node.value() != null) {
+            node.value().accept(this);
+        }
     }
 }

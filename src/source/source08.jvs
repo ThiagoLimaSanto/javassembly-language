@@ -1,0 +1,39 @@
+public class Cadastro {
+    private static final Pessoa pessoa;
+    public final static int limite = 100;
+    private double taxa = 2.5;
+    private String titulo = "Cadastro de pessoas";
+    private boolean ativo = True;
+    int quantidade;
+
+    public static func void main() {
+        print "Teste de atributos e modificadores";
+        print calcularLimite(10);
+        return;
+    }
+
+    private static final int incremento = add 2, 3;
+
+    private final static func int calcularLimite(int base) {
+        return add base, incremento;
+    }
+
+    func void exibir() {
+        print titulo;
+        print taxa;
+        print ativo;
+    }
+}
+
+class Pessoa {
+    private String nome = "Ana";
+    private int idade = 20;
+
+    public final func String obterNome() {
+        return nome;
+    }
+
+    public func int obterIdade() {
+        return idade;
+    }
+}

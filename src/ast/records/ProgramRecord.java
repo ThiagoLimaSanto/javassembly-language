@@ -7,7 +7,7 @@ import src.ast.visitor.ASTVisitor;
 
 public record ProgramRecord(List<ClassRecord> classes) implements ASTNode {
 
-     @Override
+    @Override
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);
     }

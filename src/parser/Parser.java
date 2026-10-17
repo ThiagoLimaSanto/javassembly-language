@@ -16,6 +16,7 @@ import src.ast.records.JERecord;
 import src.ast.records.JMPRecord;
 import src.ast.records.LabelRecord;
 import src.ast.records.LiteralRecord;
+import src.ast.records.ModifiersRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PopRecord;
 import src.ast.records.PrintRecord;
@@ -23,8 +24,10 @@ import src.ast.records.ProgramRecord;
 import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
 import src.ast.records.ReturnRecord;
+import src.ast.records.TypeRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
+import src.ast.records.AttributeRecord;
 import src.exceptions.DoubleOutOfRangeException;
 import src.exceptions.IntegerOutOfRangeException;
 import src.exceptions.SyntacticException;
@@ -52,7 +55,7 @@ public class Parser {
     }
 
     private ClassRecord classDeclaration() {
-        TokenType visibility = null;
+        TokenType visibility = TokenType.PUBLIC;
         if (tokens.verify(TokenType.PUBLIC) || tokens.verify(TokenType.PRIVATE)) {
             visibility = tokens.consume(tokens.current().getType(), "Esperada visibilidade da funcao").getType();
         }
@@ -61,24 +64,115 @@ public class Parser {
         tokens.consume(TokenType.OPEN_BRACE, "Esperado '{' apos nome da classe");
 
         List<FunctionRecord> functions = new ArrayList<>();
+        List<AttributeRecord> attributes = new ArrayList<>();
 
         while (!tokens.verify(TokenType.CLOSE_BRACE) && !tokens.verify(TokenType.EOF)) {
-            functions.add(functionDeclaration());
+            ModifiersRecord modifiers = modifiers();
+
+            if (tokens.verify(TokenType.FUNC)) {
+                functions.add(functionDeclaration(modifiers));
+            } else {
+                attributes.add(attributeDeclaration(modifiers));
+            }
         }
 
         tokens.consume(TokenType.CLOSE_BRACE, "Esperado '}' para fechar a classe");
 
-        return new ClassRecord(visibility, name.getLexeme(), functions);
+        return new ClassRecord(visibility, name.getLexeme(), attributes, functions);
     }
 
-    private FunctionRecord functionDeclaration() {
+    private TypeRecord typeReference() {
+        Token token = tokens.current();
+
+        return switch (token.getType()) {
+            case INT, DOUBLE, BOOLEAN, STRING, IDENTIFIER -> {
+                tokens.consume(token.getType(), "Esperado tipo");
+                yield new TypeRecord(token.getLexeme());
+            }
+
+            default -> throw new SyntacticException(
+                    "Esperado tipo primitivo ou nome de classe",
+                    token.getLine(),
+                    token.getColumn());
+        };
+    }
+
+    private ModifiersRecord modifiers() {
         TokenType visibility = null;
+        boolean isStatic = false;
+        boolean isFinal = false;
+
+        while (true) {
+            Token token = tokens.current();
+
+            switch (token.getType()) {
+                case TokenType.PUBLIC, TokenType.PRIVATE -> {
+                    if (visibility != null) {
+                        throw new SyntacticException(
+                                "Visibilidade repetida ou conflitante",
+                                token.getLine(),
+                                token.getColumn());
+                    }
+
+                    visibility = tokens.consume(
+                            token.getType(),
+                            "Esperada visibilidade").getType();
+                }
+
+                case TokenType.STATIC -> {
+                    if (isStatic) {
+                        throw new SyntacticException(
+                                "Modificador 'static' repetido",
+                                token.getLine(),
+                                token.getColumn());
+                    }
+
+                    tokens.consume(TokenType.STATIC, "Esperado 'static'");
+                    isStatic = true;
+                }
+
+                case TokenType.FINAL -> {
+                    if (isFinal) {
+                        throw new SyntacticException(
+                                "Modificador 'final' repetido",
+                                token.getLine(),
+                                token.getColumn());
+                    }
+
+                    tokens.consume(TokenType.FINAL, "Esperado 'final'");
+                    isFinal = true;
+                }
+
+                default -> {
+                    return new ModifiersRecord(
+                            visibility,
+                            isStatic,
+                            isFinal);
+                }
+            }
+        }
+    }
+
+    private AttributeRecord attributeDeclaration(ModifiersRecord modifiers) {
+        TypeRecord type = typeReference();
+        Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado nome do atributo");
+        ExpressionInterface value = null;
+
+        if (tokens.verify(TokenType.ASSIGN)) {
+            tokens.consume(TokenType.ASSIGN, "Esperado '='");
+            value = expression();
+        }
+
+        tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos declaração do atributo");
+        return new AttributeRecord(modifiers.visibility(), modifiers.isStatic(),
+                modifiers.isFinal(), type, name.getLexeme(), value);
+    }
+
+    private FunctionRecord functionDeclaration(ModifiersRecord modifiers) {
+        TokenType visibility = modifiers.visibility() == null
+                ? TokenType.PUBLIC : modifiers.visibility();
         Token returnType;
         Token name;
-
-        if (tokens.verify(TokenType.PUBLIC) || tokens.verify(TokenType.PRIVATE)) {
-            visibility = tokens.consume(tokens.current().getType(), "Esperada visibilidade da funcao").getType();
-        }
 
         tokens.consume(TokenType.FUNC, "Esperado 'func' para declarar uma funcao");
 
@@ -102,7 +196,8 @@ public class Parser {
 
         BlockRecord block = block();
 
-        return new FunctionRecord(visibility, returnType.getType(), name.getLexeme(), parameters, block);
+        return new FunctionRecord(visibility, modifiers.isStatic(), modifiers.isFinal(),
+                returnType.getType(), name.getLexeme(), parameters, block);
     }
 
     private List<ParameterRecord> parameters() {
