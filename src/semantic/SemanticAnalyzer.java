@@ -21,10 +21,22 @@ import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.VariableRecord;
+import src.ast.records.VariableSymbolRecord;
 import src.ast.records.WhileRecord;
 import src.ast.visitor.ASTVisitor;
+import src.exceptions.SemanticException;
 
 public class SemanticAnalyzer implements ASTVisitor {
+
+    private Scope currentScope = new Scope(null);
+
+    private void enterScope() {
+        currentScope = new Scope(currentScope);
+    }
+
+    private void exitScope() {
+        currentScope = currentScope.getParent();
+    }
 
     @Override
     public void visit(ProgramRecord node) {
@@ -35,28 +47,60 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(ClassRecord node) {
-        for (AttributeRecord attribute : node.attributes()) {
-            attribute.accept(this);
-        }
-        for (FunctionRecord function : node.functions()) {
-            function.accept(this);
+        enterScope();
+
+        try {
+            for (AttributeRecord attribute : node.attributes()) {
+                attribute.accept(this);
+            }
+
+            for (FunctionRecord function : node.functions()) {
+                function.accept(this);
+            }
+        } finally {
+            exitScope();
         }
     }
 
     @Override
     public void visit(FunctionRecord node) {
-        node.block().accept(this);
-    }
+        enterScope();
 
-    @Override
-    public void visit(BlockRecord node) {
-        for (StatementInterface statement : node.commands()) {
-            statement.accept(this);
+        try {
+
+            for (ParameterRecord parameter : node.parameters()) {
+                parameter.accept(this);
+            }
+
+            for (StatementInterface statement : node.block().commands()) {
+                statement.accept(this);
+            }
+
+        } finally {
+            exitScope();
         }
     }
 
     @Override
-    public void visit(DeclarationRecord node) {
+    public void visit(BlockRecord node) {
+        enterScope();
+
+        try {
+            for (StatementInterface statement : node.commands()) {
+                statement.accept(this);
+            }
+        } finally {
+            exitScope();
+        }
+    }
+
+    @Override
+    public void visit(AttributeRecord node) {
+        VariableSymbolRecord symbol = new VariableSymbolRecord(
+                node.name(), node.type().name(), node.line(), node.column());
+
+        currentScope.define(symbol);
+
         if (node.value() != null) {
             node.value().accept(this);
         }
@@ -81,22 +125,50 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(VariableRecord node) {
-        // A verificação do uso da variável entrará aqui futuramente.
+        VariableSymbolRecord symbol = currentScope.resolve(node.name());
+
+        if (symbol == null) {
+            throw new SemanticException("Variavel '" + node.name() + "' nao definida.", node.line(), node.column());
+        }
+    }
+
+    @Override
+    public void visit(DeclarationRecord node) {
+        VariableSymbolRecord symbol = new VariableSymbolRecord(
+                node.name(), node.type().name(), node.line(), node.column());
+
+        currentScope.define(symbol);
+
+        if (node.value() != null) {
+            node.value().accept(this);
+        }
     }
 
     @Override
     public void visit(LiteralRecord node) {
-        // Folha: não possui filhos para visitar.
+        // Nó folha.
     }
 
     @Override
     public void visit(RegisterRecord node) {
-        // Folha: não possui filhos para visitar.
+        String name = node.name();
+
+        if (!name.matches("R[0-9]")) {
+            throw new SemanticException(
+                    "Registrador '" + name + "' invalido. Utilize R0 ate R9.",
+                    node.line(), node.column());
+        }
     }
 
     @Override
     public void visit(ParameterRecord node) {
+        VariableSymbolRecord symbol = new VariableSymbolRecord(
+                node.name(),
+                node.type().name(),
+                node.line(),
+                node.column());
 
+        currentScope.define(symbol);
     }
 
     @Override
@@ -108,7 +180,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(CallRecord node) {
-        throw new UnsupportedOperationException("Unimplemented method 'visit'");
+        // Verificar os argumentos quando analisarmos a estrutura do CallRecord.
     }
 
     @Override
@@ -128,26 +200,16 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(LabelRecord node) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'visit'");
+        // Nó sem filhos conhecidos.
     }
 
     @Override
     public void visit(JMPRecord node) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'visit'");
+        // Nó sem filhos conhecidos.
     }
 
     @Override
     public void visit(JERecord node) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'visit'");
-    }
-
-    @Override
-    public void visit(AttributeRecord node) {
-        if (node.value() != null) {
-            node.value().accept(this);
-        }
+        // Verificar os filhos conforme a estrutura do JERecord.
     }
 }

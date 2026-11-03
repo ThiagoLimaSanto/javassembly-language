@@ -6,7 +6,7 @@ import src.ast.visitor.ASTVisitor;
 
 public record ParameterRecord(
         TokenType type,
-        String name) implements ASTNode {
+        String name, int line, int column) implements ASTNode {
 
     @Override
     public void accept(ASTVisitor visitor) {

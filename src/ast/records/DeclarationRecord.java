@@ -8,7 +8,10 @@ import src.ast.visitor.ASTVisitor;
 public record DeclarationRecord(
         TokenType type,
         String name,
-        ExpressionInterface value) implements StatementInterface {
+        ExpressionInterface value,
+        int line,
+        int column
+    ) implements StatementInterface {
 
      @Override
     public void accept(ASTVisitor visitor) {

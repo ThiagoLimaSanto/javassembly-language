@@ -11,7 +11,10 @@ public record AttributeRecord(
         boolean isFinal,
         TypeRecord type,
         String name,
-        ExpressionInterface value) implements ASTNode {
+        ExpressionInterface value,
+        int line,
+        int column
+    ) implements ASTNode {
     @Override
 
     public void accept(ASTVisitor visitor) {

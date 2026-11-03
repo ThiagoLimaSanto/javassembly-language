@@ -165,12 +165,13 @@ public class Parser {
 
         tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos declaração do atributo");
         return new AttributeRecord(modifiers.visibility(), modifiers.isStatic(),
-                modifiers.isFinal(), type, name.getLexeme(), value);
+                modifiers.isFinal(), type, name.getLexeme(), value, name.getLine(), name.getColumn());
     }
 
     private FunctionRecord functionDeclaration(ModifiersRecord modifiers) {
         TokenType visibility = modifiers.visibility() == null
-                ? TokenType.PUBLIC : modifiers.visibility();
+                ? TokenType.PUBLIC
+                : modifiers.visibility();
         Token returnType;
         Token name;
 
@@ -211,7 +212,7 @@ public class Parser {
             Token type = type();
             Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado o nome do parametro");
 
-            parameters.add(new ParameterRecord(type.getType(), name.getLexeme()));
+            parameters.add(new ParameterRecord(type.getType(), name.getLexeme(), name.getLine(), name.getColumn()));
 
             if (!tokens.verify(TokenType.COMMA)) {
                 break;
@@ -345,7 +346,8 @@ public class Parser {
 
         tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos push");
 
-        return new PushRecord(type.getType(), new RegisterRecord(register.getLexeme()));
+        return new PushRecord(type.getType(),
+                new RegisterRecord(register.getLexeme(), register.getLine(), register.getColumn()));
     }
 
     private PopRecord popStatement() {
@@ -354,7 +356,8 @@ public class Parser {
 
         tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos pop");
 
-        return new PopRecord(type.getType(), new RegisterRecord(register.getLexeme()));
+        return new PopRecord(type.getType(),
+                new RegisterRecord(register.getLexeme(), register.getLine(), register.getColumn()));
     }
 
     private JMPRecord jumpStatement() {
@@ -388,7 +391,7 @@ public class Parser {
 
         tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos declaração");
 
-        return new DeclarationRecord(token.getType(), name.getLexeme(), value);
+        return new DeclarationRecord(token.getType(), name.getLexeme(), value, token.getLine(), token.getColumn());
     }
 
     private ExpressionInterface expression() {
@@ -464,12 +467,12 @@ public class Parser {
         if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
             return functionCall(name.getLexeme());
         }
-        return new VariableRecord(name.getLexeme());
+        return new VariableRecord(name.getLexeme(), name.getLine(), name.getColumn());
     }
 
     private ExpressionInterface registerExpression() {
         Token token = tokens.consume(TokenType.REGISTER, "Esperado um registrador");
-        return new RegisterRecord(token.getLexeme());
+        return new RegisterRecord(token.getLexeme(), token.getLine(), token.getColumn());
     }
 
     private ExpressionInterface comparison() {
