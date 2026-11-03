@@ -1,16 +1,20 @@
 public class Main{
+
+    private int a = 10;
+    private int b = 10;
+
     public func void main(){
-        String a = "Hello World";
+        int a = 2;
         int b = 20;
         int c = add a, mul b, 2;
         print c;
         while(cmp.eq c, 30){
             print c;
-            String a = 10.5;
+            String abc = "10";
         }
     }
 
-    public func int sum(int a, int b){
+    public func int sum(){
         return add a, b;
     }
 }

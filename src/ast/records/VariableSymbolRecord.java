@@ -1,4 +1,6 @@
 package src.ast.records;
 
-public record VariableSymbolRecord(String name, String type, int line, int column) {
+import src.lexer.TokenType;
+
+public record VariableSymbolRecord(String name, TokenType type, int line, int column) {
 }
