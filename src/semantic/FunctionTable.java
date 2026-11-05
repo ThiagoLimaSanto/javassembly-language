@@ -1,50 +1,36 @@
 package src.semantic;
 
-import java.util.HashMap;
-import java.util.Map;
-
 import src.ast.records.FunctionRecord;
 import src.ast.records.ParameterRecord;
-import src.exceptions.SemanticException;
 
-public class FunctionTable {
+public class FunctionTable extends SymbolTable<FunctionRecord> {
 
-    private final Map<String, FunctionRecord> functions = new HashMap<>();
+    @Override
+    protected String getKey(FunctionRecord function) {
+        return createSignature(function);
+    }
 
-    public void define(FunctionRecord function) {
+    @Override
+    protected int getLine(FunctionRecord function) {
+        return function.line();
+    }
 
-        if (function.name().equals("main")) {
+    @Override
+    protected int getColumn(FunctionRecord function) {
+        return function.column();
+    }
 
-            for (FunctionRecord existing : functions.values()) {
-                if (existing.name().equals("main")) {
-                    throw new SemanticException(
-                            "A funcao 'main' deve ser unica.",
-                            function.line(),
-                            function.column());
-                }
-            }
-        }
-
-        String signature = createSignature(function);
-
-        if (functions.containsKey(signature)) {
-            throw new SemanticException(
-                    "Funcao '" + signature + "' ja declarada.",
-                    function.line(),
-                    function.column());
-        }
-
-        functions.put(signature, function);
+    @Override
+    protected String getDuplicateMessage(FunctionRecord function) {
+        return "Funcao '" + createSignature(function) + "' ja declarada.";
     }
 
     private String createSignature(FunctionRecord function) {
-
         StringBuilder signature = new StringBuilder();
 
         signature.append(function.name()).append("(");
 
         for (int i = 0; i < function.parameters().size(); i++) {
-
             ParameterRecord parameter = function.parameters().get(i);
 
             signature.append(parameter.type().name());
@@ -57,5 +43,21 @@ public class FunctionTable {
         signature.append(")");
 
         return signature.toString();
+    }
+
+    @Override
+    public void define(FunctionRecord function) {
+        if (function.name().equals("main")) {
+            for (FunctionRecord existing : symbols.values()) {
+                if (existing.name().equals("main")) {
+                    throw new src.exceptions.SemanticException(
+                            "A funcao 'main' deve ser unica.",
+                            function.line(),
+                            function.column());
+                }
+            }
+        }
+
+        super.define(function);
     }
 }

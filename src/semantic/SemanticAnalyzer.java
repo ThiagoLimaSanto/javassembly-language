@@ -37,7 +37,7 @@ import src.lexer.TokenType;
 
 public class SemanticAnalyzer implements ASTVisitor {
 
-    private Scope currentScope = new Scope(null);
+    private VariableTable currentScope = new VariableTable(null);
     private final Map<String, FunctionTable> functionTables = new HashMap<>();
     private final Map<String, ClassRecord> classes = new HashMap<>();
     private String currentClass;
@@ -45,7 +45,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     private final TypeChecker typeChecker = new TypeChecker();
 
     private void enterScope() {
-        currentScope = new Scope(currentScope);
+        currentScope = new VariableTable(currentScope);
     }
 
     private void exitScope() {
@@ -237,25 +237,21 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(ClassRecord node) {
-
         enterScope();
 
+        String previousClass = currentClass;
         currentClass = node.name();
 
         FunctionTable functionTable = new FunctionTable();
-
         functionTables.put(currentClass, functionTable);
 
         try {
-
             for (AttributeRecord attribute : node.attributes()) {
                 attribute.accept(this);
             }
 
             for (FunctionRecord function : node.functions()) {
-
                 validateOverride(node, function);
-
                 functionTable.define(function);
             }
 
@@ -265,6 +261,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         } finally {
             exitScope();
+            currentClass = previousClass;
         }
     }
 
