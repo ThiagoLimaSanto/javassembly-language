@@ -9,8 +9,10 @@ import src.lexer.TokenType;
 public record ClassRecord(
         TokenType visibility,
         String name,
+        String superClass,
+        List<String> interfaces,
         List<AttributeRecord> attributes,
-        List<FunctionRecord> functions) implements ASTNode {
+        List<FunctionRecord> functions, int line, int column) implements ASTNode {
 
     @Override
     public void accept(ASTVisitor visitor) {

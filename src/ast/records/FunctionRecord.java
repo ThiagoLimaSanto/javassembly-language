@@ -13,7 +13,9 @@ public record FunctionRecord(
         TokenType returnType,
         String name,
         List<ParameterRecord> parameters,
-        BlockRecord block) implements ASTNode {
+        BlockRecord block,
+        int line,
+        int column) implements ASTNode {
 
     @Override
     public void accept(ASTVisitor visitor) {

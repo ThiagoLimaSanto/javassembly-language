@@ -8,6 +8,7 @@ import src.ast.records.ClassRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.FunctionRecord;
+import src.ast.records.InterfaceRecord;
 import src.ast.records.JERecord;
 import src.ast.records.JMPRecord;
 import src.ast.records.LabelRecord;
@@ -64,4 +65,6 @@ public interface ASTVisitor {
     void visit(JERecord node);
 
     void visit(AttributeRecord node);
+
+    void visit(InterfaceRecord node);
 }

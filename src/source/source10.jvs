@@ -1,0 +1,15 @@
+public class Animal {
+
+    private func void comer() {
+        print "Animal comendo";
+    }
+
+}
+
+public class Cachorro extends Animal {
+
+    public func void comer() {
+        print "Cachorro comendo";
+    }
+
+}

@@ -3,7 +3,7 @@ public class Main{
     private int a = 10;
     private int b = 10;
 
-    public func void main(){
+    public func void main(String args){
         int a = 2;
         int b = 20;
         int c = add a, mul b, 2;
@@ -15,6 +15,10 @@ public class Main{
     }
 
     public func int sum(){
+        return add a, b;
+    }
+
+     public func int sum(String a){
         return add a, b;
     }
 }

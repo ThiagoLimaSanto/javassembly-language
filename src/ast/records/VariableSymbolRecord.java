@@ -1,6 +1,6 @@
 package src.ast.records;
 
-import src.lexer.TokenType;
+import src.semantic.SemanticType;
 
-public record VariableSymbolRecord(String name, TokenType type, int line, int column) {
+public record VariableSymbolRecord(String name, SemanticType type, int line, int column) {
 }

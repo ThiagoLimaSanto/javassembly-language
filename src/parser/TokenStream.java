@@ -41,4 +41,12 @@ public class TokenStream {
         return token;
     }
 
+    public Token peekNext() {
+        if (position + 1 >= tokens.size()) {
+            return tokens.get(tokens.size() - 1);
+        }
+
+        return tokens.get(position + 1);
+    }
+
 }

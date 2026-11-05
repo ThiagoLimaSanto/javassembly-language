@@ -5,6 +5,7 @@ import java.util.List;
 
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
+import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
@@ -12,6 +13,7 @@ import src.ast.records.ClassRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.FunctionRecord;
+import src.ast.records.InterfaceRecord;
 import src.ast.records.JERecord;
 import src.ast.records.JMPRecord;
 import src.ast.records.LabelRecord;
@@ -27,7 +29,6 @@ import src.ast.records.ReturnRecord;
 import src.ast.records.TypeRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
-import src.ast.records.AttributeRecord;
 import src.exceptions.DoubleOutOfRangeException;
 import src.exceptions.IntegerOutOfRangeException;
 import src.exceptions.SyntacticException;
@@ -43,25 +44,82 @@ public class Parser {
 
     public ProgramRecord analyze() {
         List<ClassRecord> classes = new ArrayList<>();
-        while (tokens.verify(TokenType.CLASS)
-                || tokens.verify(TokenType.PUBLIC)
-                || tokens.verify(TokenType.PRIVATE)) {
-            classes.add(classDeclaration());
+        List<InterfaceRecord> interfaces = new ArrayList<>();
+
+        while (!tokens.verify(TokenType.EOF)) {
+
+            if (tokens.verify(TokenType.CLASS)
+                    || tokens.verify(TokenType.PUBLIC)
+                    || tokens.verify(TokenType.PRIVATE)) {
+
+                if (tokens.verify(TokenType.PUBLIC) || tokens.verify(TokenType.PRIVATE)) {
+                    TokenType next = tokens.peekNext().getType();
+
+                    if (next == TokenType.CLASS) {
+                        classes.add(classDeclaration());
+                    } else if (next == TokenType.INTERFACE) {
+                        interfaces.add(interfaceDeclaration());
+                    }
+                } else {
+                    classes.add(classDeclaration());
+                }
+
+            } else {
+                throw new RuntimeException("Declaração inesperada.");
+            }
         }
 
         tokens.consume(TokenType.EOF, "Esperado fim do código");
 
-        return new ProgramRecord(classes);
+        return new ProgramRecord(classes, interfaces);
     }
 
     private ClassRecord classDeclaration() {
         TokenType visibility = TokenType.PUBLIC;
+        List<String> interfaces = new ArrayList<>();
+
         if (tokens.verify(TokenType.PUBLIC) || tokens.verify(TokenType.PRIVATE)) {
-            visibility = tokens.consume(tokens.current().getType(), "Esperada visibilidade da funcao").getType();
+            visibility = tokens.consume(
+                    tokens.current().getType(),
+                    "Esperada visibilidade da classe").getType();
         }
+
         tokens.consume(TokenType.CLASS, "Esperado 'class'");
-        Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado o nome da classe");
-        tokens.consume(TokenType.OPEN_BRACE, "Esperado '{' apos nome da classe");
+
+        Token name = tokens.consume(
+                TokenType.IDENTIFIER,
+                "Esperado o nome da classe");
+
+        String superClass = null;
+
+        if (tokens.verify(TokenType.EXTENDS)) {
+            tokens.consume(TokenType.EXTENDS, "Esperado 'extends'");
+
+            superClass = tokens.consume(
+                    TokenType.IDENTIFIER,
+                    "Esperado o nome da classe pai").getLexeme();
+        }
+
+        if (tokens.verify(TokenType.IMPLEMENTS)) {
+            tokens.consume(TokenType.IMPLEMENTS, "Esperado 'implements'");
+
+            do {
+                Token interfaceName = tokens.consume(
+                        TokenType.IDENTIFIER,
+                        "Esperado o nome da interface");
+
+                interfaces.add(interfaceName.getLexeme());
+
+                if (!tokens.verify(TokenType.COMMA)) {
+                    break;
+                }
+
+                tokens.consume(TokenType.COMMA, "Esperado ','");
+
+            } while (true);
+        }
+
+        tokens.consume(TokenType.OPEN_BRACE, "Esperado '{' após declaração da classe");
 
         List<FunctionRecord> functions = new ArrayList<>();
         List<AttributeRecord> attributes = new ArrayList<>();
@@ -78,7 +136,50 @@ public class Parser {
 
         tokens.consume(TokenType.CLOSE_BRACE, "Esperado '}' para fechar a classe");
 
-        return new ClassRecord(visibility, name.getLexeme(), attributes, functions);
+        return new ClassRecord(
+                visibility,
+                name.getLexeme(),
+                superClass,
+                interfaces,
+                attributes,
+                functions, name.getLine(), name.getColumn());
+    }
+
+    private InterfaceRecord interfaceDeclaration() {
+        TokenType visibility = TokenType.PUBLIC;
+
+        if (tokens.verify(TokenType.PUBLIC) || tokens.verify(TokenType.PRIVATE)) {
+            visibility = tokens.consume(
+                    tokens.current().getType(),
+                    "Esperada visibilidade da interface").getType();
+        }
+
+        tokens.consume(TokenType.INTERFACE, "Esperado 'interface'");
+
+        Token name = tokens.consume(
+                TokenType.IDENTIFIER,
+                "Esperado o nome da interface");
+
+        tokens.consume(TokenType.OPEN_BRACE, "Esperado '{' após nome da interface");
+
+        List<FunctionRecord> functions = new ArrayList<>();
+
+        while (!tokens.verify(TokenType.CLOSE_BRACE) && !tokens.verify(TokenType.EOF)) {
+
+            if (tokens.verify(TokenType.FUNC)) {
+                functions.add(interfaceFunctionDeclaration());
+            } else {
+                throw new RuntimeException(
+                        "Interfaces permitem apenas declarações de funções.");
+            }
+        }
+
+        tokens.consume(TokenType.CLOSE_BRACE, "Esperado '}' para fechar a interface");
+
+        return new InterfaceRecord(
+                visibility,
+                name.getLexeme(),
+                functions);
     }
 
     private TypeRecord typeReference() {
@@ -168,6 +269,42 @@ public class Parser {
                 modifiers.isFinal(), type, name.getLexeme(), value, name.getLine(), name.getColumn());
     }
 
+    private FunctionRecord interfaceFunctionDeclaration() {
+        Token returnType;
+        Token name;
+
+        tokens.consume(TokenType.FUNC, "Esperado 'func' para declarar uma funcao");
+
+        if (tokens.verify(TokenType.VOID)) {
+            returnType = tokens.consume(TokenType.VOID, "Esperado 'void'");
+        } else {
+            returnType = type();
+        }
+
+        name = tokens.consume(TokenType.IDENTIFIER, "Esperado nome da funcao");
+
+        tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '(' apos nome da funcao");
+
+        List<ParameterRecord> parameters = parameters();
+
+        tokens.consume(TokenType.CLOSE_PARENTHESIS,
+                "Esperado ')' para fechar a declaracao da funcao");
+
+        tokens.consume(TokenType.SEMICOLON,
+                "Esperado ';' para finalizar assinatura da funcao");
+
+        return new FunctionRecord(
+                TokenType.PUBLIC,
+                false,
+                false,
+                returnType.getType(),
+                name.getLexeme(),
+                parameters,
+                null,
+                name.getLine(),
+                name.getColumn());
+    }
+
     private FunctionRecord functionDeclaration(ModifiersRecord modifiers) {
         TokenType visibility = modifiers.visibility() == null
                 ? TokenType.PUBLIC
@@ -198,7 +335,7 @@ public class Parser {
         BlockRecord block = block();
 
         return new FunctionRecord(visibility, modifiers.isStatic(), modifiers.isFinal(),
-                returnType.getType(), name.getLexeme(), parameters, block);
+                returnType.getType(), name.getLexeme(), parameters, block, name.getLine(), name.getColumn());
     }
 
     private List<ParameterRecord> parameters() {

@@ -17,6 +17,9 @@ public class Lexer {
     private List<Token> tokens = new ArrayList<>();
     private static final Map<String, TokenType> KEYWORDS = Map.ofEntries(
             Map.entry("class", TokenType.CLASS),
+            Map.entry("interface", TokenType.INTERFACE),
+            Map.entry("extends", TokenType.EXTENDS),
+            Map.entry("implements", TokenType.IMPLEMENTS),
             Map.entry("func", TokenType.FUNC),
             Map.entry("main", TokenType.MAIN),
             Map.entry("public", TokenType.PUBLIC),

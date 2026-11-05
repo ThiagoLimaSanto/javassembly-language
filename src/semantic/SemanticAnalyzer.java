@@ -1,5 +1,10 @@
 package src.semantic;
 
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Set;
+
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
 import src.ast.records.AttributeRecord;
@@ -10,6 +15,7 @@ import src.ast.records.ClassRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.FunctionRecord;
+import src.ast.records.InterfaceRecord;
 import src.ast.records.JERecord;
 import src.ast.records.JMPRecord;
 import src.ast.records.LabelRecord;
@@ -32,6 +38,10 @@ import src.lexer.TokenType;
 public class SemanticAnalyzer implements ASTVisitor {
 
     private Scope currentScope = new Scope(null);
+    private final Map<String, FunctionTable> functionTables = new HashMap<>();
+    private final Map<String, ClassRecord> classes = new HashMap<>();
+    private String currentClass;
+
     private final TypeChecker typeChecker = new TypeChecker();
 
     private void enterScope() {
@@ -42,10 +52,146 @@ public class SemanticAnalyzer implements ASTVisitor {
         currentScope = currentScope.getParent();
     }
 
-    private TokenType getExpressionType(ExpressionInterface expression) {
+    private SemanticType convertType(TypeRecord type) {
+        return convertType(type.name());
+    }
+
+    private SemanticType convertType(String type) {
+
+        String normalizedType = type.toUpperCase();
+
+        switch (normalizedType) {
+
+            case "INT":
+                return SemanticType.primitive(TokenType.INT);
+
+            case "DOUBLE":
+                return SemanticType.primitive(TokenType.DOUBLE);
+
+            case "STRING":
+                return SemanticType.primitive(TokenType.STRING);
+
+            case "BOOLEAN":
+                return SemanticType.primitive(TokenType.BOOLEAN);
+
+            default:
+                return SemanticType.classType(normalizedType);
+        }
+    }
+
+    private SemanticType convertType(TokenType type) {
+        return SemanticType.primitive(type);
+    }
+
+    private FunctionRecord findInheritedMethod(
+            String superClass,
+            FunctionRecord function) {
+
+        Set<String> visited = new HashSet<>();
+
+        while (superClass != null && visited.add(superClass)) {
+
+            ClassRecord parent = classes.get(superClass);
+
+            if (parent == null) {
+                return null;
+            }
+
+            for (FunctionRecord parentFunction : parent.functions()) {
+
+                if (parentFunction.visibility() == TokenType.PRIVATE) {
+                    continue;
+                }
+
+                if (sameSignature(parentFunction, function)) {
+                    return parentFunction;
+                }
+            }
+
+            superClass = parent.superClass();
+        }
+
+        return null;
+    }
+
+    private void validateOverride(
+            ClassRecord classNode,
+            FunctionRecord function) {
+
+        FunctionRecord inherited = findInheritedMethod(
+                classNode.superClass(),
+                function);
+
+        if (inherited == null) {
+            return;
+        }
+
+        if (inherited.isFinal()) {
+            throw new SemanticException(
+                    "O metodo '" + function.name()
+                            + "' nao pode ser sobrescrito porque e final.",
+                    function.line(),
+                    function.column());
+        }
+
+        if (inherited.returnType() != function.returnType()) {
+            throw new SemanticException(
+                    "Tipo de retorno incompatível na sobrescrita do metodo '"
+                            + function.name() + "'.",
+                    function.line(),
+                    function.column());
+        }
+
+        if (inherited.visibility() == TokenType.PUBLIC
+                && function.visibility() != TokenType.PUBLIC) {
+
+            throw new SemanticException(
+                    "O metodo '" + function.name()
+                            + "' nao pode reduzir sua visibilidade.",
+                    function.line(),
+                    function.column());
+        }
+
+        if (inherited.isStatic() != function.isStatic()) {
+            throw new SemanticException(
+                    "O metodo '" + function.name()
+                            + "' deve manter o modificador static da classe pai.",
+                    function.line(),
+                    function.column());
+        }
+    }
+
+    private boolean sameSignature(
+            FunctionRecord first,
+            FunctionRecord second) {
+
+        if (!first.name().equals(second.name())) {
+            return false;
+        }
+
+        if (first.parameters().size() != second.parameters().size()) {
+            return false;
+        }
+
+        for (int i = 0; i < first.parameters().size(); i++) {
+
+            if (first.parameters().get(i).type() != second.parameters().get(i).type()) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private SemanticType getExpressionType(ExpressionInterface expression) {
 
         if (expression instanceof LiteralRecord literal) {
-            return literal.getType();
+
+            TokenType type = literal.getType();
+
+            if (type != null) {
+                return convertType(type);
+            }
         }
 
         if (expression instanceof VariableRecord variable) {
@@ -65,20 +211,25 @@ public class SemanticAnalyzer implements ASTVisitor {
         return null;
     }
 
-    private TokenType convertType(TypeRecord type) {
-        return convertType(type.name());
-    }
-
-    private TokenType convertType(String type) {
-        return TokenType.valueOf(type.toUpperCase());
-    }
-
-    private TokenType convertType(TokenType type) {
-        return type;
-    }
-
     @Override
     public void visit(ProgramRecord node) {
+
+        for (ClassRecord classNode : node.classes()) {
+
+            if (classes.containsKey(classNode.name())) {
+                throw new SemanticException(
+                        "Classe '" + classNode.name() + "' ja declarada.",
+                        classNode.line(),
+                        classNode.column());
+            }
+
+            classes.put(classNode.name(), classNode);
+        }
+
+        for (InterfaceRecord interfaceNode : node.interfaces()) {
+            interfaceNode.accept(this);
+        }
+
         for (ClassRecord classNode : node.classes()) {
             classNode.accept(this);
         }
@@ -86,11 +237,26 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(ClassRecord node) {
+
         enterScope();
 
+        currentClass = node.name();
+
+        FunctionTable functionTable = new FunctionTable();
+
+        functionTables.put(currentClass, functionTable);
+
         try {
+
             for (AttributeRecord attribute : node.attributes()) {
                 attribute.accept(this);
+            }
+
+            for (FunctionRecord function : node.functions()) {
+
+                validateOverride(node, function);
+
+                functionTable.define(function);
             }
 
             for (FunctionRecord function : node.functions()) {
@@ -111,8 +277,10 @@ public class SemanticAnalyzer implements ASTVisitor {
                 parameter.accept(this);
             }
 
-            for (StatementInterface statement : node.block().commands()) {
-                statement.accept(this);
+            if (node.block() != null) {
+                for (StatementInterface statement : node.block().commands()) {
+                    statement.accept(this);
+                }
             }
 
         } finally {
@@ -122,9 +290,11 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(BlockRecord node) {
+
         enterScope();
 
         try {
+
             for (StatementInterface statement : node.commands()) {
                 statement.accept(this);
             }
@@ -137,7 +307,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(AttributeRecord node) {
 
-        TokenType declaredType = convertType(node.type());
+        SemanticType declaredType = convertType(node.type());
 
         VariableSymbolRecord symbol = new VariableSymbolRecord(
                 node.name(),
@@ -148,9 +318,10 @@ public class SemanticAnalyzer implements ASTVisitor {
         currentScope.define(symbol);
 
         if (node.value() != null) {
+
             node.value().accept(this);
 
-            TokenType valueType = getExpressionType(node.value());
+            SemanticType valueType = getExpressionType(node.value());
 
             if (valueType != null) {
                 typeChecker.validateType(
@@ -169,13 +340,17 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(WhileRecord node) {
+
         node.expression().accept(this);
+
         node.block().accept(this);
     }
 
     @Override
     public void visit(BinaryExpressionRecord node) {
+
         node.left().accept(this);
+
         node.right().accept(this);
     }
 
@@ -195,7 +370,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(DeclarationRecord node) {
 
-        TokenType declaredType = convertType(node.type());
+        SemanticType declaredType = convertType(node.type());
 
         VariableSymbolRecord symbol = new VariableSymbolRecord(
                 node.name(),
@@ -209,7 +384,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
             node.value().accept(this);
 
-            TokenType valueType = getExpressionType(node.value());
+            SemanticType valueType = getExpressionType(node.value());
 
             if (valueType != null) {
                 typeChecker.validateType(
@@ -233,7 +408,8 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         if (!name.matches("R[0-9]")) {
             throw new SemanticException(
-                    "Registrador '" + name + "' invalido. Utilize R0 ate R9.",
+                    "Registrador '" + name +
+                            "' invalido. Utilize R0 ate R9.",
                     0,
                     0);
         }
@@ -242,9 +418,11 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(ParameterRecord node) {
 
+        SemanticType parameterType = convertType(node.type());
+
         VariableSymbolRecord symbol = new VariableSymbolRecord(
                 node.name(),
-                convertType(node.type()),
+                parameterType,
                 node.line(),
                 node.column());
 
@@ -253,6 +431,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(ReturnRecord node) {
+
         if (node.value() != null) {
             node.value().accept(this);
         }
@@ -260,7 +439,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(CallRecord node) {
-        // Implementar a validação dos argumentos posteriormente.
+        // Implementar validação das funções e argumentos posteriormente.
     }
 
     @Override
@@ -291,5 +470,12 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(JERecord node) {
         // Implementar posteriormente.
+    }
+
+    @Override
+    public void visit(InterfaceRecord node) {
+        for (FunctionRecord function : node.functions()) {
+            function.accept(this);
+        }
     }
 }

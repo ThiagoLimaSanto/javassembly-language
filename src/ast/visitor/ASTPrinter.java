@@ -9,6 +9,7 @@ import src.ast.records.ClassRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.FunctionRecord;
+import src.ast.records.InterfaceRecord;
 import src.ast.records.JERecord;
 import src.ast.records.JMPRecord;
 import src.ast.records.LabelRecord;
@@ -54,6 +55,10 @@ public class ASTPrinter implements ASTVisitor {
     public void visit(ProgramRecord node) {
         printLine("Programa");
 
+        for (InterfaceRecord interfaceNode : node.interfaces()) {
+            visitChild(interfaceNode);
+        }
+
         for (ClassRecord classNode : node.classes()) {
             visitChild(classNode);
         }
@@ -61,32 +66,48 @@ public class ASTPrinter implements ASTVisitor {
 
     @Override
     public void visit(ClassRecord node) {
-        String visibility = node.visibility() == null
-                ? ""
-                : " [" + node.visibility() + "]";
+        System.out.println("Classe: " + node.name());
 
-        printLine("Classe " + node.name() + visibility);
-
-        for (AttributeRecord attribute : node.attributes()) {
-            visitChild(attribute);
+        if (node.superClass() != null) {
+            System.out.println("  Extends: " + node.superClass());
         }
 
+        if (!node.interfaces().isEmpty()) {
+            System.out.println("  Implements: " + String.join(", ", node.interfaces()));
+        }
+
+        System.out.println("  Atributos:");
+        for (AttributeRecord attribute : node.attributes()) {
+            attribute.accept(this);
+        }
+
+        System.out.println("  Funções:");
         for (FunctionRecord function : node.functions()) {
-            visitChild(function);
+            function.accept(this);
         }
     }
 
     @Override
     public void visit(FunctionRecord node) {
         String visibility = node.visibility() == null
-                ? "" : " [" + node.visibility() + "]";
+                ? ""
+                : " [" + node.visibility() + "]";
+
         printLine("Função " + node.name() + " → " + node.returnType() + visibility
                 + (node.isStatic() ? " [STATIC]" : "")
                 + (node.isFinal() ? " [FINAL]" : ""));
+
         for (ParameterRecord parameter : node.parameters()) {
             visitChild(parameter);
         }
-        visitChild(node.block());
+
+        if (node.block() != null) {
+            visitChild(node.block());
+        } else {
+            indentation++;
+            printLine("Assinatura (sem implementação)");
+            indentation--;
+        }
     }
 
     @Override
@@ -216,5 +237,22 @@ public class ASTPrinter implements ASTVisitor {
         if (node.value() != null) {
             visitChild(node.value());
         }
+    }
+
+    @Override
+    public void visit(InterfaceRecord node) {
+        printLine("Interface: " + node.name());
+
+        indentation++;
+
+        printLine("Funções:");
+
+        indentation++;
+
+        for (FunctionRecord function : node.functions()) {
+            function.accept(this);
+        }
+
+        indentation -= 2;
     }
 }
