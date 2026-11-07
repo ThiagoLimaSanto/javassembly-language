@@ -5,6 +5,7 @@ import java.util.List;
 
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
+import src.ast.records.AssignmentRecord;
 import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
@@ -26,6 +27,10 @@ import src.ast.records.ProgramRecord;
 import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
 import src.ast.records.ReturnRecord;
+import src.ast.records.SuperAttributeRecord;
+import src.ast.records.SuperCallRecord;
+import src.ast.records.ThisAttributeRecord;
+import src.ast.records.ThisRecord;
 import src.ast.records.TypeRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
@@ -36,617 +41,1187 @@ import src.lexer.Token;
 import src.lexer.TokenType;
 
 public class Parser {
-    private final TokenStream tokens;
 
-    public Parser(List<Token> tokens) {
-        this.tokens = new TokenStream(tokens);
-    }
+        private final TokenStream tokens;
 
-    public ProgramRecord analyze() {
-        List<ClassRecord> classes = new ArrayList<>();
-        List<InterfaceRecord> interfaces = new ArrayList<>();
+        public Parser(List<Token> tokens) {
+                this.tokens = new TokenStream(tokens);
+        }
 
-        while (!tokens.verify(TokenType.EOF)) {
+        // =========================================================
+        // PROGRAMA
+        // =========================================================
 
-            if (tokens.verify(TokenType.CLASS)
-                    || tokens.verify(TokenType.PUBLIC)
-                    || tokens.verify(TokenType.PRIVATE)) {
+        public ProgramRecord analyze() {
 
-                if (tokens.verify(TokenType.PUBLIC) || tokens.verify(TokenType.PRIVATE)) {
-                    TokenType next = tokens.peekNext().getType();
+                List<ClassRecord> classes = new ArrayList<>();
+                List<InterfaceRecord> interfaces = new ArrayList<>();
 
-                    if (next == TokenType.CLASS) {
-                        classes.add(classDeclaration());
-                    } else if (next == TokenType.INTERFACE) {
-                        interfaces.add(interfaceDeclaration());
-                    }
+                while (!tokens.verify(TokenType.EOF)) {
+
+                        if (tokens.verify(TokenType.CLASS)) {
+                                classes.add(classDeclaration());
+
+                        } else if (tokens.verify(TokenType.INTERFACE)) {
+                                interfaces.add(interfaceDeclaration());
+
+                        } else if (tokens.verify(TokenType.PUBLIC)
+                                        || tokens.verify(TokenType.PRIVATE)) {
+
+                                TokenType next = tokens.peekNext().getType();
+
+                                if (next == TokenType.CLASS) {
+                                        classes.add(classDeclaration());
+
+                                } else if (next == TokenType.INTERFACE) {
+                                        interfaces.add(interfaceDeclaration());
+
+                                } else {
+                                        throw syntacticError(
+                                                        "Esperado 'class' ou 'interface' após modificador de visibilidade");
+                                }
+
+                        } else {
+                                throw syntacticError("Declaração inesperada.");
+                        }
+                }
+
+                tokens.consume(TokenType.EOF, "Esperado fim do código");
+
+                return new ProgramRecord(classes, interfaces);
+        }
+
+        // =========================================================
+        // CLASSES
+        // =========================================================
+
+        private ClassRecord classDeclaration() {
+
+                TokenType visibility = TokenType.PUBLIC;
+
+                List<String> interfaces = new ArrayList<>();
+
+                if (isVisibility()) {
+                        visibility = consumeVisibility();
+                }
+
+                tokens.consume(
+                                TokenType.CLASS,
+                                "Esperado 'class'");
+
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado o nome da classe");
+
+                String superClass = null;
+
+                if (tokens.verify(TokenType.EXTENDS)) {
+
+                        tokens.consume(
+                                        TokenType.EXTENDS,
+                                        "Esperado 'extends'");
+
+                        superClass = tokens.consume(
+                                        TokenType.IDENTIFIER,
+                                        "Esperado o nome da classe pai").getLexeme();
+                }
+
+                if (tokens.verify(TokenType.IMPLEMENTS)) {
+
+                        tokens.consume(
+                                        TokenType.IMPLEMENTS,
+                                        "Esperado 'implements'");
+
+                        do {
+
+                                Token interfaceName = tokens.consume(
+                                                TokenType.IDENTIFIER,
+                                                "Esperado o nome da interface");
+
+                                interfaces.add(interfaceName.getLexeme());
+
+                                if (!tokens.verify(TokenType.COMMA)) {
+                                        break;
+                                }
+
+                                tokens.consume(
+                                                TokenType.COMMA,
+                                                "Esperado ',' entre interfaces");
+
+                        } while (true);
+                }
+
+                tokens.consume(
+                                TokenType.OPEN_BRACE,
+                                "Esperado '{' após declaração da classe");
+
+                List<FunctionRecord> functions = new ArrayList<>();
+                List<AttributeRecord> attributes = new ArrayList<>();
+
+                while (!tokens.verify(TokenType.CLOSE_BRACE)
+                                && !tokens.verify(TokenType.EOF)) {
+
+                        ModifiersRecord modifiers = modifiers();
+
+                        if (tokens.verify(TokenType.FUNC)) {
+                                functions.add(functionDeclaration(modifiers));
+
+                        } else {
+                                attributes.add(attributeDeclaration(modifiers));
+                        }
+                }
+
+                tokens.consume(
+                                TokenType.CLOSE_BRACE,
+                                "Esperado '}' para fechar a classe");
+
+                return new ClassRecord(
+                                visibility,
+                                name.getLexeme(),
+                                superClass,
+                                interfaces,
+                                attributes,
+                                functions,
+                                name.getLine(),
+                                name.getColumn());
+        }
+
+        // =========================================================
+        // INTERFACES
+        // =========================================================
+
+        private InterfaceRecord interfaceDeclaration() {
+
+                TokenType visibility = TokenType.PUBLIC;
+
+                if (isVisibility()) {
+                        visibility = consumeVisibility();
+                }
+
+                tokens.consume(
+                                TokenType.INTERFACE,
+                                "Esperado 'interface'");
+
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado o nome da interface");
+
+                tokens.consume(
+                                TokenType.OPEN_BRACE,
+                                "Esperado '{' após nome da interface");
+
+                List<FunctionRecord> functions = new ArrayList<>();
+
+                while (!tokens.verify(TokenType.CLOSE_BRACE)
+                                && !tokens.verify(TokenType.EOF)) {
+
+                        if (tokens.verify(TokenType.FUNC)) {
+                                functions.add(interfaceFunctionDeclaration());
+
+                        } else {
+                                throw syntacticError(
+                                                "Interfaces permitem apenas declarações de funções.");
+                        }
+                }
+
+                tokens.consume(
+                                TokenType.CLOSE_BRACE,
+                                "Esperado '}' para fechar a interface");
+
+                return new InterfaceRecord(
+                                visibility,
+                                name.getLexeme(),
+                                functions,
+                                name.getLine(),
+                                name.getColumn());
+        }
+
+        private FunctionRecord interfaceFunctionDeclaration() {
+
+                tokens.consume(
+                                TokenType.FUNC,
+                                "Esperado 'func' para declarar uma função");
+
+                TypeRecord returnType = returnType();
+
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado nome da função");
+
+                tokens.consume(
+                                TokenType.OPEN_PARENTHESIS,
+                                "Esperado '(' após nome da função");
+
+                List<ParameterRecord> parameters = parameters();
+
+                tokens.consume(
+                                TokenType.CLOSE_PARENTHESIS,
+                                "Esperado ')' para fechar os parâmetros");
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' para finalizar assinatura da função");
+
+                return new FunctionRecord(
+                                TokenType.PUBLIC,
+                                false,
+                                false,
+                                returnType,
+                                name.getLexeme(),
+                                parameters,
+                                null,
+                                name.getLine(),
+                                name.getColumn());
+        }
+
+        // =========================================================
+        // MODIFICADORES
+        // =========================================================
+
+        private ModifiersRecord modifiers() {
+
+                TokenType visibility = null;
+
+                boolean isStatic = false;
+                boolean isFinal = false;
+
+                while (true) {
+
+                        Token token = tokens.current();
+
+                        switch (token.getType()) {
+
+                                case PUBLIC, PRIVATE -> {
+
+                                        if (visibility != null) {
+                                                throw new SyntacticException(
+                                                                "Visibilidade repetida ou conflitante",
+                                                                token.getLine(),
+                                                                token.getColumn());
+                                        }
+
+                                        visibility = consumeVisibility();
+                                }
+
+                                case STATIC -> {
+
+                                        if (isStatic) {
+                                                throw new SyntacticException(
+                                                                "Modificador 'static' repetido",
+                                                                token.getLine(),
+                                                                token.getColumn());
+                                        }
+
+                                        tokens.consume(
+                                                        TokenType.STATIC,
+                                                        "Esperado 'static'");
+
+                                        isStatic = true;
+                                }
+
+                                case FINAL -> {
+
+                                        if (isFinal) {
+                                                throw new SyntacticException(
+                                                                "Modificador 'final' repetido",
+                                                                token.getLine(),
+                                                                token.getColumn());
+                                        }
+
+                                        tokens.consume(
+                                                        TokenType.FINAL,
+                                                        "Esperado 'final'");
+
+                                        isFinal = true;
+                                }
+
+                                default -> {
+                                        return new ModifiersRecord(
+                                                        visibility,
+                                                        isStatic,
+                                                        isFinal);
+                                }
+                        }
+                }
+        }
+
+        private boolean isVisibility() {
+                return tokens.verify(TokenType.PUBLIC)
+                                || tokens.verify(TokenType.PRIVATE);
+        }
+
+        private TokenType consumeVisibility() {
+
+                return tokens.consume(
+                                tokens.current().getType(),
+                                "Esperada visibilidade").getType();
+        }
+
+        // =========================================================
+        // TIPOS
+        // =========================================================
+
+        private TypeRecord type() {
+
+                Token token = tokens.current();
+
+                switch (token.getType()) {
+
+                        case INT:
+                        case DOUBLE:
+                        case BOOLEAN:
+                        case STRING:
+                        case IDENTIFIER:
+
+                                tokens.consume(
+                                                token.getType(),
+                                                "Esperado um tipo válido");
+
+                                return new TypeRecord(token.getLexeme());
+
+                        default:
+                                throw new SyntacticException(
+                                                "Esperado tipo primitivo ou nome de classe",
+                                                token.getLine(),
+                                                token.getColumn());
+                }
+        }
+
+        private TypeRecord returnType() {
+
+                if (tokens.verify(TokenType.VOID)) {
+
+                        Token token = tokens.consume(
+                                        TokenType.VOID,
+                                        "Esperado 'void'");
+
+                        return new TypeRecord(token.getLexeme());
+                }
+
+                return type();
+        }
+
+        // =========================================================
+        // ATRIBUTOS
+        // =========================================================
+
+        private AttributeRecord attributeDeclaration(
+                        ModifiersRecord modifiers) {
+
+                Token typeToken = tokens.current();
+
+                TypeRecord type = type();
+
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado nome do atributo");
+
+                ExpressionInterface value = null;
+
+                if (tokens.verify(TokenType.ASSIGN)) {
+
+                        tokens.consume(
+                                        TokenType.ASSIGN,
+                                        "Esperado '='");
+
+                        value = expression();
+                }
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após declaração do atributo");
+
+                return new AttributeRecord(
+                                modifiers.visibility(),
+                                modifiers.isStatic(),
+                                modifiers.isFinal(),
+                                type,
+                                name.getLexeme(),
+                                value,
+                                typeToken.getLine(),
+                                typeToken.getColumn());
+        }
+
+        // =========================================================
+        // FUNÇÕES
+        // =========================================================
+
+        private FunctionRecord functionDeclaration(
+                        ModifiersRecord modifiers) {
+
+                TokenType visibility = modifiers.visibility() == null
+                                ? TokenType.PUBLIC
+                                : modifiers.visibility();
+
+                tokens.consume(
+                                TokenType.FUNC,
+                                "Esperado 'func'");
+
+                TypeRecord returnType = returnType();
+
+                Token name;
+
+                if (tokens.verify(TokenType.MAIN)) {
+
+                        name = tokens.consume(
+                                        TokenType.MAIN,
+                                        "Esperado função 'main'");
+
                 } else {
-                    classes.add(classDeclaration());
+
+                        name = tokens.consume(
+                                        TokenType.IDENTIFIER,
+                                        "Esperado nome da função");
                 }
 
-            } else {
-                throw new RuntimeException("Declaração inesperada.");
-            }
+                tokens.consume(
+                                TokenType.OPEN_PARENTHESIS,
+                                "Esperado '(' após nome da função");
+
+                List<ParameterRecord> parameters = parameters();
+
+                tokens.consume(
+                                TokenType.CLOSE_PARENTHESIS,
+                                "Esperado ')' para fechar os parâmetros");
+
+                BlockRecord block = block();
+
+                return new FunctionRecord(
+                                visibility,
+                                modifiers.isStatic(),
+                                modifiers.isFinal(),
+                                returnType,
+                                name.getLexeme(),
+                                parameters,
+                                block,
+                                name.getLine(),
+                                name.getColumn());
         }
 
-        tokens.consume(TokenType.EOF, "Esperado fim do código");
+        private List<ParameterRecord> parameters() {
 
-        return new ProgramRecord(classes, interfaces);
-    }
+                List<ParameterRecord> parameters = new ArrayList<>();
 
-    private ClassRecord classDeclaration() {
-        TokenType visibility = TokenType.PUBLIC;
-        List<String> interfaces = new ArrayList<>();
-
-        if (tokens.verify(TokenType.PUBLIC) || tokens.verify(TokenType.PRIVATE)) {
-            visibility = tokens.consume(
-                    tokens.current().getType(),
-                    "Esperada visibilidade da classe").getType();
-        }
-
-        tokens.consume(TokenType.CLASS, "Esperado 'class'");
-
-        Token name = tokens.consume(
-                TokenType.IDENTIFIER,
-                "Esperado o nome da classe");
-
-        String superClass = null;
-
-        if (tokens.verify(TokenType.EXTENDS)) {
-            tokens.consume(TokenType.EXTENDS, "Esperado 'extends'");
-
-            superClass = tokens.consume(
-                    TokenType.IDENTIFIER,
-                    "Esperado o nome da classe pai").getLexeme();
-        }
-
-        if (tokens.verify(TokenType.IMPLEMENTS)) {
-            tokens.consume(TokenType.IMPLEMENTS, "Esperado 'implements'");
-
-            do {
-                Token interfaceName = tokens.consume(
-                        TokenType.IDENTIFIER,
-                        "Esperado o nome da interface");
-
-                interfaces.add(interfaceName.getLexeme());
-
-                if (!tokens.verify(TokenType.COMMA)) {
-                    break;
+                if (tokens.verify(TokenType.CLOSE_PARENTHESIS)) {
+                        return parameters;
                 }
 
-                tokens.consume(TokenType.COMMA, "Esperado ','");
+                do {
 
-            } while (true);
+                        TypeRecord type = type();
+
+                        Token name = tokens.consume(
+                                        TokenType.IDENTIFIER,
+                                        "Esperado nome do parâmetro");
+
+                        parameters.add(
+                                        new ParameterRecord(
+                                                        type,
+                                                        name.getLexeme(),
+                                                        name.getLine(),
+                                                        name.getColumn()));
+
+                        if (!tokens.verify(TokenType.COMMA)) {
+                                break;
+                        }
+
+                        tokens.consume(
+                                        TokenType.COMMA,
+                                        "Esperado ',' entre os parâmetros");
+
+                } while (true);
+
+                return parameters;
         }
 
-        tokens.consume(TokenType.OPEN_BRACE, "Esperado '{' após declaração da classe");
+        // =========================================================
+        // BLOCOS E COMANDOS
+        // =========================================================
 
-        List<FunctionRecord> functions = new ArrayList<>();
-        List<AttributeRecord> attributes = new ArrayList<>();
+        private BlockRecord block() {
 
-        while (!tokens.verify(TokenType.CLOSE_BRACE) && !tokens.verify(TokenType.EOF)) {
-            ModifiersRecord modifiers = modifiers();
+                tokens.consume(
+                                TokenType.OPEN_BRACE,
+                                "Esperado '{' para iniciar um bloco");
 
-            if (tokens.verify(TokenType.FUNC)) {
-                functions.add(functionDeclaration(modifiers));
-            } else {
-                attributes.add(attributeDeclaration(modifiers));
-            }
+                List<StatementInterface> commands = new ArrayList<>();
+
+                while (!tokens.verify(TokenType.CLOSE_BRACE)
+                                && !tokens.verify(TokenType.EOF)) {
+
+                        commands.add(statement());
+                }
+
+                tokens.consume(
+                                TokenType.CLOSE_BRACE,
+                                "Esperado '}' para fechar o bloco");
+
+                return new BlockRecord(commands);
         }
 
-        tokens.consume(TokenType.CLOSE_BRACE, "Esperado '}' para fechar a classe");
+        private StatementInterface statement() {
 
-        return new ClassRecord(
-                visibility,
-                name.getLexeme(),
-                superClass,
-                interfaces,
-                attributes,
-                functions, name.getLine(), name.getColumn());
-    }
+                return switch (tokens.current().getType()) {
 
-    private InterfaceRecord interfaceDeclaration() {
-        TokenType visibility = TokenType.PUBLIC;
+                        case INT, DOUBLE, BOOLEAN, STRING ->
+                                declaration();
 
-        if (tokens.verify(TokenType.PUBLIC) || tokens.verify(TokenType.PRIVATE)) {
-            visibility = tokens.consume(
-                    tokens.current().getType(),
-                    "Esperada visibilidade da interface").getType();
+                        case PRINT ->
+                                printStatement();
+
+                        case WHILE ->
+                                whileStatement();
+
+                        case RETURN ->
+                                returnStatement();
+
+                        case PUSH ->
+                                pushStatement();
+
+                        case POP ->
+                                popStatement();
+
+                        case IDENTIFIER -> {
+
+                                if (tokens.peekNext().getType() == TokenType.IDENTIFIER) {
+                                        yield declaration();
+                                }
+
+                                yield identifierStatement();
+                        }
+
+                        case JMP ->
+                                jumpStatement();
+
+                        case JE ->
+                                jumpEqualStatement();
+
+                        case CMP ->
+                                comparisonStatement();
+
+                        case SUPER -> {
+
+                                ExpressionInterface expression = superExpression();
+
+                                tokens.consume(
+                                                TokenType.SEMICOLON,
+                                                "Esperado ';' após acesso com super");
+
+                                yield new ExpressionStatementRecord(expression);
+                        }
+
+                        case THIS ->
+                                thisStatement();
+
+                        default -> throw syntacticError(
+                                        "Comando inválido ou não reconhecido.");
+                };
         }
 
-        tokens.consume(TokenType.INTERFACE, "Esperado 'interface'");
+        // =========================================================
+        // DECLARAÇÕES
+        // =========================================================
 
-        Token name = tokens.consume(
-                TokenType.IDENTIFIER,
-                "Esperado o nome da interface");
+        private StatementInterface thisStatement() {
 
-        tokens.consume(TokenType.OPEN_BRACE, "Esperado '{' após nome da interface");
+                Token thisToken = tokens.consume(
+                                TokenType.THIS,
+                                "Esperado 'this'");
 
-        List<FunctionRecord> functions = new ArrayList<>();
+                tokens.consume(
+                                TokenType.DOT,
+                                "Esperado '.' após this");
 
-        while (!tokens.verify(TokenType.CLOSE_BRACE) && !tokens.verify(TokenType.EOF)) {
+                Token attribute = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado nome do atributo após this.");
 
-            if (tokens.verify(TokenType.FUNC)) {
-                functions.add(interfaceFunctionDeclaration());
-            } else {
-                throw new RuntimeException(
-                        "Interfaces permitem apenas declarações de funções.");
-            }
+                ThisAttributeRecord target = new ThisAttributeRecord(
+                                attribute.getLexeme(),
+                                thisToken.getLine(),
+                                thisToken.getColumn());
+
+                tokens.consume(
+                                TokenType.ASSIGN,
+                                "Esperado '=' após atributo");
+
+                ExpressionInterface value = expression();
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após atribuição");
+
+                return new AssignmentRecord(
+                                target,
+                                value,
+                                thisToken.getLine(),
+                                thisToken.getColumn());
         }
 
-        tokens.consume(TokenType.CLOSE_BRACE, "Esperado '}' para fechar a interface");
+        private StatementInterface declaration() {
 
-        return new InterfaceRecord(
-                visibility,
-                name.getLexeme(),
-                functions, name.getLine(), name.getColumn());
-    }
+                Token typeToken = tokens.current();
 
-    private TypeRecord typeReference() {
-        Token token = tokens.current();
+                TypeRecord type = type();
 
-        return switch (token.getType()) {
-            case INT, DOUBLE, BOOLEAN, STRING, IDENTIFIER -> {
-                tokens.consume(token.getType(), "Esperado tipo");
-                yield new TypeRecord(token.getLexeme());
-            }
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado nome da variável");
 
-            default -> throw new SyntacticException(
-                    "Esperado tipo primitivo ou nome de classe",
-                    token.getLine(),
-                    token.getColumn());
-        };
-    }
+                ExpressionInterface value = null;
 
-    private ModifiersRecord modifiers() {
-        TokenType visibility = null;
-        boolean isStatic = false;
-        boolean isFinal = false;
+                if (tokens.verify(TokenType.ASSIGN)) {
 
-        while (true) {
-            Token token = tokens.current();
+                        tokens.consume(
+                                        TokenType.ASSIGN,
+                                        "Esperado sinal de atribuição '='");
 
-            switch (token.getType()) {
-                case TokenType.PUBLIC, TokenType.PRIVATE -> {
-                    if (visibility != null) {
-                        throw new SyntacticException(
-                                "Visibilidade repetida ou conflitante",
+                        value = expression();
+                }
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após declaração");
+
+                return new DeclarationRecord(
+                                type,
+                                name.getLexeme(),
+                                value,
+                                typeToken.getLine(),
+                                typeToken.getColumn());
+        }
+
+        // =========================================================
+        // RETURN
+        // =========================================================
+
+        private ReturnRecord returnStatement() {
+
+                tokens.consume(
+                                TokenType.RETURN,
+                                "Esperado 'return'");
+
+                ExpressionInterface value = null;
+
+                if (!tokens.verify(TokenType.SEMICOLON)) {
+                        value = expression();
+                }
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após return");
+
+                return new ReturnRecord(value);
+        }
+
+        // =========================================================
+        // CHAMADAS DE FUNÇÃO
+        // =========================================================
+
+        private CallRecord functionCall(String name) {
+
+                tokens.consume(
+                                TokenType.OPEN_PARENTHESIS,
+                                "Esperado '(' para chamar a função");
+
+                List<ExpressionInterface> arguments = arguments();
+
+                tokens.consume(
+                                TokenType.CLOSE_PARENTHESIS,
+                                "Esperado ')' para fechar a chamada da função");
+
+                return new CallRecord(name, arguments);
+        }
+
+        private List<ExpressionInterface> arguments() {
+
+                List<ExpressionInterface> arguments = new ArrayList<>();
+
+                if (tokens.verify(TokenType.CLOSE_PARENTHESIS)) {
+                        return arguments;
+                }
+
+                do {
+
+                        arguments.add(expression());
+
+                        if (!tokens.verify(TokenType.COMMA)) {
+                                break;
+                        }
+
+                        tokens.consume(
+                                        TokenType.COMMA,
+                                        "Esperado ',' entre os argumentos");
+
+                } while (true);
+
+                return arguments;
+        }
+
+        private StatementInterface identifierStatement() {
+
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado um identificador");
+
+                if (tokens.verify(TokenType.COLON)) {
+
+                        tokens.consume(
+                                        TokenType.COLON,
+                                        "Esperado ':' após identificador");
+
+                        return new LabelRecord(name.getLexeme());
+                }
+
+                CallRecord call = functionCall(name.getLexeme());
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após chamada de função");
+
+                return new ExpressionStatementRecord(call);
+        }
+
+        // =========================================================
+        // WHILE
+        // =========================================================
+
+        private StatementInterface whileStatement() {
+
+                tokens.consume(
+                                TokenType.WHILE,
+                                "Esperado 'while'");
+
+                tokens.consume(
+                                TokenType.OPEN_PARENTHESIS,
+                                "Esperado '(' após while");
+
+                ExpressionInterface expression = expression();
+
+                tokens.consume(
+                                TokenType.CLOSE_PARENTHESIS,
+                                "Esperado ')' após condição");
+
+                BlockRecord block = block();
+
+                return new WhileRecord(expression, block);
+        }
+
+        // =========================================================
+        // PRINT
+        // =========================================================
+
+        private StatementInterface printStatement() {
+
+                tokens.consume(
+                                TokenType.PRINT,
+                                "Esperado 'print'");
+
+                ExpressionInterface expression = expression();
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após print");
+
+                return new PrintRecord(expression);
+        }
+
+        // =========================================================
+        // PUSH E POP
+        // =========================================================
+
+        private PushRecord pushStatement() {
+
+                Token type = tokens.consume(
+                                TokenType.PUSH,
+                                "Esperado 'push'");
+
+                Token register = tokens.consume(
+                                TokenType.REGISTER,
+                                "Esperado um registrador");
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após push");
+
+                return new PushRecord(
+                                type.getType(),
+                                new RegisterRecord(
+                                                register.getLexeme(),
+                                                register.getLine(),
+                                                register.getColumn()));
+        }
+
+        private PopRecord popStatement() {
+
+                Token type = tokens.consume(
+                                TokenType.POP,
+                                "Esperado 'pop'");
+
+                Token register = tokens.consume(
+                                TokenType.REGISTER,
+                                "Esperado um registrador");
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após pop");
+
+                return new PopRecord(
+                                type.getType(),
+                                new RegisterRecord(
+                                                register.getLexeme(),
+                                                register.getLine(),
+                                                register.getColumn()));
+        }
+
+        // =========================================================
+        // SALTOS
+        // =========================================================
+
+        private JMPRecord jumpStatement() {
+
+                tokens.consume(
+                                TokenType.JMP,
+                                "Esperado 'jmp'");
+
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado um identificador");
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após jmp");
+
+                return new JMPRecord(name.getLexeme());
+        }
+
+        private JERecord jumpEqualStatement() {
+
+                tokens.consume(
+                                TokenType.JE,
+                                "Esperado 'je'");
+
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado um identificador");
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após je");
+
+                return new JERecord(name.getLexeme());
+        }
+
+        // =========================================================
+        // EXPRESSÕES
+        // =========================================================
+
+        private ExpressionInterface expression() {
+
+                return switch (tokens.current().getType()) {
+
+                        case NUMBER ->
+                                numberExpression();
+
+                        case TEXT ->
+                                textExpression();
+
+                        case IDENTIFIER ->
+                                identifierExpression();
+
+                        case REGISTER ->
+                                registerExpression();
+
+                        case TRUE, FALSE ->
+                                booleanExpression();
+
+                        case ADD, SUB, MUL, DIV, AND, OR ->
+                                operation();
+
+                        case CMP ->
+                                comparison();
+
+                        case OPEN_PARENTHESIS ->
+                                parenthesisExpression();
+
+                        case SUPER ->
+                                superExpression();
+
+                        case THIS ->
+                                thisExpression();
+
+                        default -> throw syntacticError(
+                                        "Expressão inválida.");
+                };
+        }
+
+        // =========================================================
+        // EXPRESSÃO SUPER
+        // =========================================================
+
+        private ExpressionInterface thisExpression() {
+
+                Token token = tokens.consume(
+                                TokenType.THIS,
+                                "Esperado 'this'");
+
+                if (tokens.verify(TokenType.DOT)) {
+
+                        tokens.consume(
+                                        TokenType.DOT,
+                                        "Esperado '.' após this");
+
+                        Token attribute = tokens.consume(
+                                        TokenType.IDENTIFIER,
+                                        "Esperado nome do atributo");
+
+                        return new ThisAttributeRecord(
+                                        attribute.getLexeme(),
+                                        token.getLine(),
+                                        token.getColumn());
+                }
+
+                return new ThisRecord(
                                 token.getLine(),
                                 token.getColumn());
-                    }
+        }
 
-                    visibility = tokens.consume(
-                            token.getType(),
-                            "Esperada visibilidade").getType();
+        private ExpressionInterface superExpression() {
+
+                tokens.consume(
+                                TokenType.SUPER,
+                                "Esperado 'super'");
+
+                tokens.consume(
+                                TokenType.DOT,
+                                "Esperado '.' após super");
+
+                Token member = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado nome do atributo ou método");
+
+                if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
+
+                        tokens.consume(
+                                        TokenType.OPEN_PARENTHESIS,
+                                        "Esperado '(' para chamada do método");
+
+                        List<ExpressionInterface> arguments = arguments();
+
+                        tokens.consume(
+                                        TokenType.CLOSE_PARENTHESIS,
+                                        "Esperado ')' para fechar chamada");
+
+                        return new SuperCallRecord(
+                                        member.getLexeme(),
+                                        arguments);
                 }
 
-                case TokenType.STATIC -> {
-                    if (isStatic) {
-                        throw new SyntacticException(
-                                "Modificador 'static' repetido",
+                return new SuperAttributeRecord(member.getLexeme());
+        }
+
+        // =========================================================
+        // EXPRESSÃO ENTRE PARÊNTESES
+        // =========================================================
+
+        private ExpressionInterface parenthesisExpression() {
+
+                tokens.consume(
+                                TokenType.OPEN_PARENTHESIS,
+                                "Esperado '('");
+
+                ExpressionInterface expression = expression();
+
+                tokens.consume(
+                                TokenType.CLOSE_PARENTHESIS,
+                                "Esperado ')'");
+
+                return expression;
+        }
+
+        // =========================================================
+        // LITERAIS
+        // =========================================================
+
+        private ExpressionInterface booleanExpression() {
+
+                Token token = tokens.consume(
+                                tokens.current().getType(),
+                                "Esperado um booleano");
+
+                return new LiteralRecord(
+                                token.getType() == TokenType.TRUE);
+        }
+
+        private ExpressionInterface numberExpression() {
+
+                Token token = tokens.consume(
+                                TokenType.NUMBER,
+                                "Esperado um número");
+
+                if (token.getLexeme().contains(".")) {
+
+                        double value = Double.parseDouble(token.getLexeme());
+
+                        if (!Double.isFinite(value)) {
+                                throw new DoubleOutOfRangeException(
+                                                token.getLexeme(),
+                                                token.getLine(),
+                                                token.getColumn());
+                        }
+
+                        return new LiteralRecord(value);
+                }
+
+                try {
+
+                        int value = Integer.parseInt(token.getLexeme());
+
+                        return new LiteralRecord(value);
+
+                } catch (NumberFormatException e) {
+
+                        throw new IntegerOutOfRangeException(
+                                        token.getLexeme(),
+                                        token.getLine(),
+                                        token.getColumn());
+                }
+        }
+
+        private ExpressionInterface textExpression() {
+
+                Token token = tokens.consume(
+                                TokenType.TEXT,
+                                "Esperado um literal de texto");
+
+                return new LiteralRecord(token.getLexeme());
+        }
+
+        // =========================================================
+        // OPERAÇÕES
+        // =========================================================
+
+        private ExpressionInterface operation() {
+
+                Token operator = tokens.consume(
+                                tokens.current().getType(),
+                                "Esperado operador");
+
+                ExpressionInterface left = expression();
+
+                tokens.consume(
+                                TokenType.COMMA,
+                                "Esperado ',' entre os operandos");
+
+                ExpressionInterface right = expression();
+
+                return new BinaryExpressionRecord(
+                                operator.getType(),
+                                left,
+                                right);
+        }
+
+        // =========================================================
+        // IDENTIFICADORES
+        // =========================================================
+
+        private ExpressionInterface identifierExpression() {
+
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado um identificador");
+
+                if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
+                        return functionCall(name.getLexeme());
+                }
+
+                return new VariableRecord(
+                                name.getLexeme(),
+                                name.getLine(),
+                                name.getColumn());
+        }
+
+        // =========================================================
+        // REGISTRADORES
+        // =========================================================
+
+        private ExpressionInterface registerExpression() {
+
+                Token token = tokens.consume(
+                                TokenType.REGISTER,
+                                "Esperado um registrador");
+
+                return new RegisterRecord(
+                                token.getLexeme(),
                                 token.getLine(),
                                 token.getColumn());
-                    }
+        }
 
-                    tokens.consume(TokenType.STATIC, "Esperado 'static'");
-                    isStatic = true;
+        // =========================================================
+        // COMPARAÇÕES
+        // =========================================================
+
+        private StatementInterface comparisonStatement() {
+
+                ExpressionInterface comparison = comparison();
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após comparação");
+
+                return new ExpressionStatementRecord(comparison);
+        }
+
+        private ExpressionInterface comparison() {
+
+                tokens.consume(
+                                TokenType.CMP,
+                                "Esperado 'cmp'");
+
+                tokens.consume(
+                                TokenType.DOT,
+                                "Esperado '.' após cmp");
+
+                Token operator;
+
+                switch (tokens.current().getType()) {
+
+                        case EQ, NE, LT, GT, LE, GE -> {
+
+                                operator = tokens.consume(
+                                                tokens.current().getType(),
+                                                "Esperada condição");
+                        }
+
+                        default -> throw syntacticError(
+                                        "Esperado eq, ne, lt, gt, le ou ge.");
                 }
 
-                case TokenType.FINAL -> {
-                    if (isFinal) {
-                        throw new SyntacticException(
-                                "Modificador 'final' repetido",
+                ExpressionInterface left = expression();
+
+                tokens.consume(
+                                TokenType.COMMA,
+                                "Esperado ',' entre os operandos");
+
+                ExpressionInterface right = expression();
+
+                return new BinaryExpressionRecord(
+                                operator.getType(),
+                                left,
+                                right);
+        }
+
+        // =========================================================
+        // ERROS SINTÁTICOS
+        // =========================================================
+
+        private SyntacticException syntacticError(String message) {
+
+                Token token = tokens.current();
+
+                return new SyntacticException(
+                                message,
                                 token.getLine(),
                                 token.getColumn());
-                    }
-
-                    tokens.consume(TokenType.FINAL, "Esperado 'final'");
-                    isFinal = true;
-                }
-
-                default -> {
-                    return new ModifiersRecord(
-                            visibility,
-                            isStatic,
-                            isFinal);
-                }
-            }
         }
-    }
-
-    private AttributeRecord attributeDeclaration(ModifiersRecord modifiers) {
-        TypeRecord type = typeReference();
-        Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado nome do atributo");
-        ExpressionInterface value = null;
-
-        if (tokens.verify(TokenType.ASSIGN)) {
-            tokens.consume(TokenType.ASSIGN, "Esperado '='");
-            value = expression();
-        }
-
-        tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos declaração do atributo");
-        return new AttributeRecord(modifiers.visibility(), modifiers.isStatic(),
-                modifiers.isFinal(), type, name.getLexeme(), value, name.getLine(), name.getColumn());
-    }
-
-    private FunctionRecord interfaceFunctionDeclaration() {
-        Token returnType;
-        Token name;
-
-        tokens.consume(TokenType.FUNC, "Esperado 'func' para declarar uma funcao");
-
-        if (tokens.verify(TokenType.VOID)) {
-            returnType = tokens.consume(TokenType.VOID, "Esperado 'void'");
-        } else {
-            returnType = type();
-        }
-
-        name = tokens.consume(TokenType.IDENTIFIER, "Esperado nome da funcao");
-
-        tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '(' apos nome da funcao");
-
-        List<ParameterRecord> parameters = parameters();
-
-        tokens.consume(TokenType.CLOSE_PARENTHESIS,
-                "Esperado ')' para fechar a declaracao da funcao");
-
-        tokens.consume(TokenType.SEMICOLON,
-                "Esperado ';' para finalizar assinatura da funcao");
-
-        return new FunctionRecord(
-                TokenType.PUBLIC,
-                false,
-                false,
-                returnType.getType(),
-                name.getLexeme(),
-                parameters,
-                null,
-                name.getLine(),
-                name.getColumn());
-    }
-
-    private FunctionRecord functionDeclaration(ModifiersRecord modifiers) {
-        TokenType visibility = modifiers.visibility() == null
-                ? TokenType.PUBLIC
-                : modifiers.visibility();
-        Token returnType;
-        Token name;
-
-        tokens.consume(TokenType.FUNC, "Esperado 'func' para declarar uma funcao");
-
-        if (tokens.verify(TokenType.VOID)) {
-            returnType = tokens.consume(TokenType.VOID, "Esperado 'void'");
-        } else {
-            returnType = type();
-        }
-
-        if (tokens.verify(TokenType.MAIN)) {
-            name = tokens.consume(TokenType.MAIN, "Esperado funcao 'main'");
-        } else {
-            name = tokens.consume(TokenType.IDENTIFIER, "Esperado nome da funcao");
-        }
-
-        tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '(' apos nome da funcao");
-
-        List<ParameterRecord> parameters = parameters();
-
-        tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')' para fechar a declaracao da funcao");
-
-        BlockRecord block = block();
-
-        return new FunctionRecord(visibility, modifiers.isStatic(), modifiers.isFinal(),
-                returnType.getType(), name.getLexeme(), parameters, block, name.getLine(), name.getColumn());
-    }
-
-    private List<ParameterRecord> parameters() {
-        List<ParameterRecord> parameters = new ArrayList<>();
-
-        if (tokens.verify(TokenType.CLOSE_PARENTHESIS)) {
-            return parameters;
-        }
-
-        do {
-            Token type = type();
-            Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado o nome do parametro");
-
-            parameters.add(new ParameterRecord(type.getType(), name.getLexeme(), name.getLine(), name.getColumn()));
-
-            if (!tokens.verify(TokenType.COMMA)) {
-                break;
-            }
-
-            tokens.consume(TokenType.COMMA, "Esperado ',' entre os parametros");
-        } while (true);
-
-        return parameters;
-    }
-
-    private ReturnRecord returnStatement() {
-        tokens.consume(TokenType.RETURN, "Esperado 'return'");
-
-        ExpressionInterface value = null;
-
-        if (!tokens.verify(TokenType.SEMICOLON)) {
-            value = expression();
-        }
-
-        tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos return");
-
-        return new ReturnRecord(value);
-    }
-
-    private CallRecord functionCall(String name) {
-        tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '(' para chamar a função");
-
-        List<ExpressionInterface> arguments = arguments();
-
-        tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')' para fechar a chamada da função");
-
-        return new CallRecord(name, arguments);
-    }
-
-    private List<ExpressionInterface> arguments() {
-        List<ExpressionInterface> arguments = new ArrayList<>();
-
-        if (tokens.verify(TokenType.CLOSE_PARENTHESIS)) {
-            return arguments;
-        }
-
-        do {
-            arguments.add(expression());
-
-            if (!tokens.verify(TokenType.COMMA)) {
-                break;
-            }
-
-            tokens.consume(TokenType.COMMA, "Esperado ',' entre os argumentos");
-        } while (true);
-
-        return arguments;
-    }
-
-    private BlockRecord block() {
-        tokens.consume(TokenType.OPEN_BRACE, "Esperado '{' para iniciar um bloco");
-
-        List<StatementInterface> commands = new ArrayList<>();
-
-        while (!tokens.verify(TokenType.CLOSE_BRACE) && !tokens.verify(TokenType.EOF)) {
-            commands.add(statement());
-        }
-
-        tokens.consume(TokenType.CLOSE_BRACE, "Esperado '}' para fechar o bloco");
-
-        return new BlockRecord(commands);
-    }
-
-    private StatementInterface statement() {
-        return switch (tokens.current().getType()) {
-            case TokenType.INT, TokenType.DOUBLE, TokenType.BOOLEAN, TokenType.STRING -> declaration();
-            case TokenType.PRINT -> printStatement();
-            case TokenType.WHILE -> whileStatement();
-            case TokenType.RETURN -> returnStatement();
-            case TokenType.PUSH -> pushStatement();
-            case TokenType.POP -> popStatement();
-            case TokenType.IDENTIFIER -> identifierStatement();
-            case TokenType.JMP -> jumpStatement();
-            case TokenType.JE -> jumpEqualStatement();
-            case TokenType.CMP -> comparisonStatement();
-            default -> throw new SyntacticException("Comando inválido ou não reconhecido.",
-                    tokens.current().getLine(), tokens.current().getColumn());
-        };
-    }
-
-    private StatementInterface comparisonStatement() {
-        ExpressionInterface comparison = comparison();
-
-        tokens.consume(
-                TokenType.SEMICOLON,
-                "Esperado ';' apos comparação");
-
-        return new ExpressionStatementRecord(comparison);
-    }
-
-    private StatementInterface identifierStatement() {
-        Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado um identificador");
-
-        if (tokens.verify(TokenType.COLON)) {
-            tokens.consume(TokenType.COLON, "Esperado ':' apos identificador");
-            return new LabelRecord(name.getLexeme());
-        }
-
-        CallRecord call = functionCall(name.getLexeme());
-
-        tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos chamada de função");
-
-        return new ExpressionStatementRecord(call);
-    }
-
-    private StatementInterface whileStatement() {
-        tokens.consume(TokenType.WHILE, "Esperado 'while'");
-        tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '(' apos while");
-        ExpressionInterface expression = expression();
-        tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')' apos condicao");
-        BlockRecord block = block();
-        return new WhileRecord(expression, block);
-    }
-
-    private StatementInterface printStatement() {
-        tokens.consume(TokenType.PRINT, "Esperado 'print'");
-        ExpressionInterface expression = expression();
-        tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos print");
-        return new PrintRecord(expression);
-    }
-
-    private PushRecord pushStatement() {
-        Token type = tokens.consume(TokenType.PUSH, "Esperado 'push'");
-        Token register = tokens.consume(TokenType.REGISTER, "Esperado um registrador");
-
-        tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos push");
-
-        return new PushRecord(type.getType(),
-                new RegisterRecord(register.getLexeme(), register.getLine(), register.getColumn()));
-    }
-
-    private PopRecord popStatement() {
-        Token type = tokens.consume(TokenType.POP, "Esperado 'pop'");
-        Token register = tokens.consume(TokenType.REGISTER, "Esperado um registrador");
-
-        tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos pop");
-
-        return new PopRecord(type.getType(),
-                new RegisterRecord(register.getLexeme(), register.getLine(), register.getColumn()));
-    }
-
-    private JMPRecord jumpStatement() {
-        tokens.consume(TokenType.JMP, "Esperado 'jmp'");
-        Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado um identificador");
-
-        tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos jmp");
-
-        return new JMPRecord(name.getLexeme());
-    }
-
-    private JERecord jumpEqualStatement() {
-        tokens.consume(TokenType.JE, "Esperado 'je'");
-        Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado um identificador");
-
-        tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos je");
-
-        return new JERecord(name.getLexeme());
-    }
-
-    private StatementInterface declaration() {
-        Token token = type();
-        Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado o nome da variável");
-
-        ExpressionInterface value = null;
-
-        if (tokens.verify(TokenType.ASSIGN)) {
-            tokens.consume(TokenType.ASSIGN, "Esperado sinal de atribuição '='");
-            value = expression();
-        }
-
-        tokens.consume(TokenType.SEMICOLON, "Esperado ';' apos declaração");
-
-        return new DeclarationRecord(token.getType(), name.getLexeme(), value, token.getLine(), token.getColumn());
-    }
-
-    private ExpressionInterface expression() {
-        return switch (tokens.current().getType()) {
-            case TokenType.NUMBER -> numberExpression();
-            case TokenType.TEXT -> textExpression();
-            case TokenType.IDENTIFIER -> identifierExpression();
-            case TokenType.REGISTER -> registerExpression();
-            case TokenType.TRUE, TokenType.FALSE -> booleanExpression();
-            case TokenType.ADD, TokenType.SUB, TokenType.MUL, TokenType.DIV, TokenType.AND, TokenType.OR -> operation();
-            case TokenType.CMP -> comparison();
-            case TokenType.OPEN_PARENTHESIS -> parenthesisExpression();
-            default -> throw new SyntacticException("Expressão inválida.",
-                    tokens.current().getLine(), tokens.current().getColumn());
-        };
-    }
-
-    private ExpressionInterface parenthesisExpression() {
-        tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '('");
-        ExpressionInterface expression = expression();
-        tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')'");
-        return expression;
-    }
-
-    private ExpressionInterface booleanExpression() {
-        Token token = tokens.consume(tokens.current().getType(), "Esperado um booleano");
-        return new LiteralRecord(token.getType() == TokenType.TRUE);
-    }
-
-    private ExpressionInterface numberExpression() {
-        Token token = tokens.consume(TokenType.NUMBER, "Esperado um número");
-        if (token.getLexeme().contains(".")) {
-            double value = Double.parseDouble(token.getLexeme());
-
-            if (!Double.isFinite(value)) {
-                throw new DoubleOutOfRangeException(
-                        token.getLexeme(),
-                        token.getLine(),
-                        token.getColumn());
-            }
-
-            return new LiteralRecord(value);
-        }
-        try {
-            int value = Integer.parseInt(token.getLexeme());
-            return new LiteralRecord(value);
-        } catch (NumberFormatException e) {
-            throw new IntegerOutOfRangeException(token.getLexeme(), token.getLine(), token.getColumn());
-        }
-    }
-
-    private ExpressionInterface textExpression() {
-        Token token = tokens.consume(TokenType.TEXT, "Esperado um literal de texto");
-        return new LiteralRecord(token.getLexeme());
-    }
-
-    private ExpressionInterface operation() {
-        Token operator = tokens.consume(tokens.current().getType(),
-                "Esperado operador. 'add, sub, mul, div, and, or'");
-
-        ExpressionInterface left = expression();
-
-        tokens.consume(TokenType.COMMA, "Esperado ',' entre os operandos");
-
-        ExpressionInterface right = expression();
-
-        return new BinaryExpressionRecord(operator.getType(), left, right);
-    }
-
-    private ExpressionInterface identifierExpression() {
-        Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado um identificador");
-
-        if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
-            return functionCall(name.getLexeme());
-        }
-        return new VariableRecord(name.getLexeme(), name.getLine(), name.getColumn());
-    }
-
-    private ExpressionInterface registerExpression() {
-        Token token = tokens.consume(TokenType.REGISTER, "Esperado um registrador");
-        return new RegisterRecord(token.getLexeme(), token.getLine(), token.getColumn());
-    }
-
-    private ExpressionInterface comparison() {
-        tokens.consume(TokenType.CMP, "Esperado 'cmp'");
-        tokens.consume(TokenType.DOT, "Esperado '.' apos cmp");
-
-        Token operator;
-        switch (tokens.current().getType()) {
-            case EQ:
-            case NE:
-            case LT:
-            case GT:
-            case LE:
-            case GE:
-                operator = tokens.consume(tokens.current().getType(), "Esperada condicao.");
-                break;
-
-            default:
-                throw new SyntacticException(
-                        "Esperado eq, ne, lt, gt, le ou ge.",
-                        tokens.current().getLine(), tokens.current().getColumn());
-        }
-
-        ExpressionInterface left = expression();
-        tokens.consume(TokenType.COMMA, "Esperado ',' entre os operandos");
-        ExpressionInterface right = expression();
-        return new BinaryExpressionRecord(operator.getType(), left, right);
-    }
-
-    private Token type() {
-        return switch (tokens.current().getType()) {
-            case TokenType.INT -> tokens.consume(TokenType.INT, "Esperado 'int'");
-            case TokenType.DOUBLE -> tokens.consume(TokenType.DOUBLE, "Esperado 'double'");
-            case TokenType.BOOLEAN -> tokens.consume(TokenType.BOOLEAN, "Esperado 'boolean'");
-            case TokenType.STRING -> tokens.consume(TokenType.STRING, "Esperado 'String'");
-            default -> throw new SyntacticException("Esperado declaração de tipo: int, double, boolean ou String.",
-                    tokens.current().getLine(), tokens.current().getColumn());
-        };
-    }
 }

@@ -1,6 +1,8 @@
 package src.ast.visitor;
 
 import src.ast.ASTNode;
+import src.ast.ExpressionInterface;
+import src.ast.records.AssignmentRecord;
 import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
@@ -21,6 +23,10 @@ import src.ast.records.ProgramRecord;
 import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
 import src.ast.records.ReturnRecord;
+import src.ast.records.SuperAttributeRecord;
+import src.ast.records.SuperCallRecord;
+import src.ast.records.ThisAttributeRecord;
+import src.ast.records.ThisRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
 
@@ -66,22 +72,22 @@ public class ASTPrinter implements ASTVisitor {
 
     @Override
     public void visit(ClassRecord node) {
-        System.out.println("Classe: " + node.name());
+        printLine("Classe: " + node.name());
 
         if (node.superClass() != null) {
-            System.out.println("  Extends: " + node.superClass());
+            printLine("  Extends: " + node.superClass());
         }
 
         if (!node.interfaces().isEmpty()) {
-            System.out.println("  Implements: " + String.join(", ", node.interfaces()));
+            printLine("  Implements: " + String.join(", ", node.interfaces()));
         }
 
-        System.out.println("  Atributos:");
+        printLine("  Atributos:");
         for (AttributeRecord attribute : node.attributes()) {
             attribute.accept(this);
         }
 
-        System.out.println("  Funções:");
+        printLine("  Funções:");
         for (FunctionRecord function : node.functions()) {
             function.accept(this);
         }
@@ -254,5 +260,39 @@ public class ASTPrinter implements ASTVisitor {
         }
 
         indentation -= 2;
+    }
+
+    @Override
+    public void visit(SuperAttributeRecord node) {
+        printLine("SuperAttribute: super." + node.name());
+    }
+
+    @Override
+    public void visit(SuperCallRecord node) {
+        printLine("SuperCall: super." + node.name());
+
+        for (ExpressionInterface argument : node.arguments()) {
+            argument.accept(this);
+        }
+    }
+
+    @Override
+    public void visit(ThisRecord record) {
+        printLine("This");
+    }
+
+    @Override
+    public void visit(ThisAttributeRecord record) {
+        printLine("ThisAttribute: " + record.name());
+    }
+
+    @Override
+    public void visit(AssignmentRecord record) {
+        printLine("Assignment");
+
+        indentation++;
+        record.target().accept(this);
+        record.value().accept(this);
+        indentation--;
     }
 }

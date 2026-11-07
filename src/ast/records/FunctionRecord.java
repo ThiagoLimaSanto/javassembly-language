@@ -10,7 +10,7 @@ public record FunctionRecord(
         TokenType visibility,
         boolean isStatic,
         boolean isFinal,
-        TokenType returnType,
+        TypeRecord returnType,
         String name,
         List<ParameterRecord> parameters,
         BlockRecord block,

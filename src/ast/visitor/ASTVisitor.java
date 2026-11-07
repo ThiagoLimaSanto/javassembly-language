@@ -1,5 +1,6 @@
 package src.ast.visitor;
 
+import src.ast.records.AssignmentRecord;
 import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
@@ -20,10 +21,15 @@ import src.ast.records.ProgramRecord;
 import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
 import src.ast.records.ReturnRecord;
+import src.ast.records.SuperAttributeRecord;
+import src.ast.records.SuperCallRecord;
+import src.ast.records.ThisAttributeRecord;
+import src.ast.records.ThisRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
 
 public interface ASTVisitor {
+
     void visit(ProgramRecord node);
 
     void visit(ClassRecord node);
@@ -67,4 +73,14 @@ public interface ASTVisitor {
     void visit(AttributeRecord node);
 
     void visit(InterfaceRecord node);
+
+    void visit(SuperAttributeRecord node);
+
+    void visit(SuperCallRecord node);
+
+    void visit(ThisRecord node);
+
+    void visit(ThisAttributeRecord node);
+
+    void visit(AssignmentRecord node);
 }
