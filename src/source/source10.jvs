@@ -1,15 +1,12 @@
 public class Animal implements Cachorro{
 
     private func void comer() {
+        int a = add "2", 5;
         print "Animal comendo";
     }
 
 }
 
-public interface Cachorro extends Animal{
-
-    public func void comer() {
-        print "Cachorro comendo";
-    }
-
+public interface Cachorro{
+    func void comer();
 }
