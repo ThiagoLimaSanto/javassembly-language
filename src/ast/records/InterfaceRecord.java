@@ -8,7 +8,7 @@ import src.lexer.TokenType;
 public record InterfaceRecord(
     TokenType visibility,
     String name,
-    List<FunctionRecord> functions
+    List<FunctionRecord> functions, int line, int column
 ) implements ASTNode {
 
     @Override

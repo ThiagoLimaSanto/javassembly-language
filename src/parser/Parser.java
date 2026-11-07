@@ -179,7 +179,7 @@ public class Parser {
         return new InterfaceRecord(
                 visibility,
                 name.getLexeme(),
-                functions);
+                functions, name.getLine(), name.getColumn());
     }
 
     private TypeRecord typeReference() {

@@ -1,4 +1,4 @@
-public class Animal {
+public class Animal implements Cachorro{
 
     private func void comer() {
         print "Animal comendo";
@@ -6,7 +6,7 @@ public class Animal {
 
 }
 
-public class Cachorro extends Animal {
+public interface Cachorro extends Animal{
 
     public func void comer() {
         print "Cachorro comendo";
