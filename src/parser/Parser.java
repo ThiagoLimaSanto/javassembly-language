@@ -1,7 +1,9 @@
 package src.parser;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
@@ -11,6 +13,7 @@ import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
 import src.ast.records.ClassRecord;
+import src.ast.records.ConstructorRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
@@ -19,6 +22,7 @@ import src.ast.records.InterfaceRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
 import src.ast.records.MemberCallRecord;
+import src.ast.records.NewObjectRecord;
 import src.ast.records.ModifiersRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PopRecord;
@@ -45,20 +49,42 @@ import src.lexer.TokenType;
 public class Parser {
 
         private final TokenStream tokens;
+        private String packageName = "";
+        private final Map<String, String> importedTypes = new HashMap<>();
+        private final List<String> imports = new ArrayList<>();
 
         public Parser(List<Token> tokens) {
                 this.tokens = new TokenStream(tokens);
         }
-
-        // =========================================================
-        // PROGRAMA
-        // =========================================================
 
         public ProgramRecord analyze() {
 
                 List<ClassRecord> classes = new ArrayList<>();
                 List<InterfaceRecord> interfaces = new ArrayList<>();
                 List<RegisterDeclarationRecord> registers = new ArrayList<>();
+
+                if (tokens.verify(TokenType.PACKAGE)) {
+                        tokens.consume(TokenType.PACKAGE, "Esperado 'package'");
+                        packageName = qualifiedName("package");
+                        tokens.consume(TokenType.SEMICOLON, "Esperado ';' após package");
+                }
+
+                while (tokens.verify(TokenType.IMPORT)) {
+                        tokens.consume(TokenType.IMPORT, "Esperado 'import'");
+                        String importedName = qualifiedName("import");
+                        tokens.consume(TokenType.SEMICOLON, "Esperado ';' após import");
+
+                        int separator = importedName.lastIndexOf('.');
+                        String simpleName = separator < 0
+                                        ? importedName
+                                        : importedName.substring(separator + 1);
+                        String previousImport = importedTypes.putIfAbsent(simpleName, importedName);
+                        if (previousImport != null && !previousImport.equals(importedName)) {
+                                throw syntacticError(
+                                                "Import ambíguo para o tipo '" + simpleName + "'.");
+                        }
+                        imports.add(importedName);
+                }
 
                 while (!tokens.verify(TokenType.EOF)) {
 
@@ -71,13 +97,16 @@ public class Parser {
                         } else if (tokens.verify(TokenType.INTERFACE)) {
                                 interfaces.add(interfaceDeclaration());
 
+                        } else if (tokens.verify(TokenType.ABSTRACT)) {
+                                classes.add(classDeclaration());
+
                         } else if (tokens.verify(TokenType.PUBLIC)
                                         || tokens.verify(TokenType.PRIVATE)
                                         || tokens.verify(TokenType.PROTECTED)) {
 
                                 TokenType next = tokens.peekNext().getType();
 
-                                if (next == TokenType.CLASS) {
+                                if (next == TokenType.CLASS || next == TokenType.ABSTRACT) {
                                         classes.add(classDeclaration());
 
                                 } else if (next == TokenType.INTERFACE) {
@@ -95,7 +124,34 @@ public class Parser {
 
                 tokens.consume(TokenType.EOF, "Esperado fim do código");
 
-                return new ProgramRecord(classes, interfaces, registers);
+                return new ProgramRecord(classes, interfaces, registers, packageName, imports);
+        }
+
+        private String qualifiedName(String declaration) {
+                StringBuilder name = new StringBuilder(tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado nome após '" + declaration + "'").getLexeme());
+
+                while (tokens.verify(TokenType.DOT)) {
+                        tokens.consume(TokenType.DOT, "Esperado '.' em nome qualificado");
+                        name.append('.').append(tokens.consume(
+                                        TokenType.IDENTIFIER,
+                                        "Esperado identificador após '.'").getLexeme());
+                }
+
+                return name.toString();
+        }
+
+        private String resolveTypeName(String name) {
+                String imported = importedTypes.get(name);
+                if (imported != null) {
+                        return imported;
+                }
+                return packageName.isEmpty() ? name : packageName + "." + name;
+        }
+
+        private String declaredTypeName(String name) {
+                return packageName.isEmpty() ? name : packageName + "." + name;
         }
 
         private RegisterDeclarationRecord registerDeclaration() {
@@ -121,26 +177,41 @@ public class Parser {
                                 value);
         }
 
-        // =========================================================
-        // CLASSES
-        // =========================================================
-
         private ClassRecord classDeclaration() {
 
                 TokenType visibility = null;
+                boolean isAbstract = false;
 
                 List<String> interfaces = new ArrayList<>();
 
-                if (isVisibility()) {
-                        visibility = consumeVisibility();
-
-                        if (visibility != TokenType.PUBLIC) {
-                                Token token = tokens.current();
-                                throw new SyntacticException(
-                                                "Uma classe de nível superior só pode ser public ou sem modificador.",
-                                                token.getLine(),
-                                                token.getColumn());
+                while (isVisibility() || tokens.verify(TokenType.ABSTRACT)) {
+                        Token modifier = tokens.current();
+                        if (isVisibility()) {
+                                if (visibility != null) {
+                                        throw new SyntacticException(
+                                                        "Visibilidade repetida ou conflitante",
+                                                        modifier.getLine(),
+                                                        modifier.getColumn());
+                                }
+                                visibility = consumeVisibility();
+                        } else {
+                                if (isAbstract) {
+                                        throw new SyntacticException(
+                                                        "Modificador 'abstract' repetido",
+                                                        modifier.getLine(),
+                                                        modifier.getColumn());
+                                }
+                                tokens.consume(TokenType.ABSTRACT, "Esperado 'abstract'");
+                                isAbstract = true;
                         }
+                }
+
+                if (visibility != null && visibility != TokenType.PUBLIC) {
+                        Token token = tokens.current();
+                        throw new SyntacticException(
+                                        "Uma classe de nível superior só pode ser public ou sem modificador.",
+                                        token.getLine(),
+                                        token.getColumn());
                 }
 
                 tokens.consume(
@@ -159,9 +230,9 @@ public class Parser {
                                         TokenType.EXTENDS,
                                         "Esperado 'extends'");
 
-                        superClass = tokens.consume(
+                        superClass = resolveTypeName(tokens.consume(
                                         TokenType.IDENTIFIER,
-                                        "Esperado o nome da classe pai").getLexeme();
+                                        "Esperado o nome da classe pai").getLexeme());
                 }
 
                 if (tokens.verify(TokenType.IMPLEMENTS)) {
@@ -176,7 +247,7 @@ public class Parser {
                                                 TokenType.IDENTIFIER,
                                                 "Esperado o nome da interface");
 
-                                interfaces.add(interfaceName.getLexeme());
+                                interfaces.add(resolveTypeName(interfaceName.getLexeme()));
 
                                 if (!tokens.verify(TokenType.COMMA)) {
                                         break;
@@ -195,6 +266,7 @@ public class Parser {
 
                 List<FunctionRecord> functions = new ArrayList<>();
                 List<AttributeRecord> attributes = new ArrayList<>();
+                List<ConstructorRecord> constructors = new ArrayList<>();
 
                 while (!tokens.verify(TokenType.CLOSE_BRACE)
                                 && !tokens.verify(TokenType.EOF)) {
@@ -204,7 +276,22 @@ public class Parser {
                         if (tokens.verify(TokenType.FUNC)) {
                                 functions.add(functionDeclaration(modifiers));
 
+                        } else if (tokens.verify(TokenType.IDENTIFIER)
+                                        && tokens.current().getLexeme().equals(name.getLexeme())
+                                        && tokens.peekNext().getType() == TokenType.OPEN_PARENTHESIS) {
+                                if (modifiers.isStatic() || modifiers.isFinal() || modifiers.isAbstract()) {
+                                        throw new SyntacticException(
+                                                        "Construtores não aceitam os modificadores static, final ou abstract.",
+                                                        tokens.current().getLine(),
+                                                        tokens.current().getColumn());
+                                }
+                                constructors.add(constructorDeclaration(modifiers.visibility()));
+
                         } else {
+                                if (modifiers.isAbstract()) {
+                                        throw syntacticError(
+                                                        "O modificador abstract só pode ser usado em classes e métodos.");
+                                }
                                 attributes.add(attributeDeclaration(modifiers));
                         }
                 }
@@ -215,18 +302,16 @@ public class Parser {
 
                 return new ClassRecord(
                                 visibility,
-                                name.getLexeme(),
+                                declaredTypeName(name.getLexeme()),
                                 superClass,
                                 interfaces,
                                 attributes,
                                 functions,
+                                constructors,
+                                isAbstract,
                                 name.getLine(),
                                 name.getColumn());
         }
-
-        // =========================================================
-        // INTERFACES
-        // =========================================================
 
         private InterfaceRecord interfaceDeclaration() {
 
@@ -276,7 +361,7 @@ public class Parser {
 
                 return new InterfaceRecord(
                                 visibility,
-                                name.getLexeme(),
+                                declaredTypeName(name.getLexeme()),
                                 functions,
                                 name.getLine(),
                                 name.getColumn());
@@ -316,13 +401,10 @@ public class Parser {
                                 name.getLexeme(),
                                 parameters,
                                 null,
+                                true,
                                 name.getLine(),
                                 name.getColumn());
         }
-
-        // =========================================================
-        // MODIFICADORES
-        // =========================================================
 
         private ModifiersRecord modifiers() {
 
@@ -330,6 +412,7 @@ public class Parser {
 
                 boolean isStatic = false;
                 boolean isFinal = false;
+                boolean isAbstract = false;
 
                 while (true) {
 
@@ -381,11 +464,23 @@ public class Parser {
                                         isFinal = true;
                                 }
 
+                                case ABSTRACT -> {
+                                        if (isAbstract) {
+                                                throw new SyntacticException(
+                                                                "Modificador 'abstract' repetido",
+                                                                token.getLine(),
+                                                                token.getColumn());
+                                        }
+                                        tokens.consume(TokenType.ABSTRACT, "Esperado 'abstract'");
+                                        isAbstract = true;
+                                }
+
                                 default -> {
                                         return new ModifiersRecord(
                                                         visibility,
                                                         isStatic,
-                                                        isFinal);
+                                                        isFinal,
+                                                        isAbstract);
                                 }
                         }
                 }
@@ -404,10 +499,6 @@ public class Parser {
                                 "Esperada visibilidade").getType();
         }
 
-        // =========================================================
-        // TIPOS
-        // =========================================================
-
         private TypeRecord type() {
 
                 Token token = tokens.current();
@@ -424,7 +515,10 @@ public class Parser {
                                                 token.getType(),
                                                 "Esperado um tipo válido");
 
-                                return new TypeRecord(token.getLexeme());
+                                return new TypeRecord(
+                                                token.getType() == TokenType.IDENTIFIER
+                                                                ? resolveTypeName(token.getLexeme())
+                                                                : token.getLexeme());
 
                         default:
                                 throw new SyntacticException(
@@ -447,10 +541,6 @@ public class Parser {
 
                 return type();
         }
-
-        // =========================================================
-        // ATRIBUTOS
-        // =========================================================
 
         private AttributeRecord attributeDeclaration(
                         ModifiersRecord modifiers) {
@@ -489,10 +579,6 @@ public class Parser {
                                 typeToken.getColumn());
         }
 
-        // =========================================================
-        // FUNÇÕES
-        // =========================================================
-
         private FunctionRecord functionDeclaration(
                         ModifiersRecord modifiers) {
 
@@ -529,7 +615,22 @@ public class Parser {
                                 TokenType.CLOSE_PARENTHESIS,
                                 "Esperado ')' para fechar os parâmetros");
 
-                BlockRecord block = block();
+                BlockRecord block;
+                if (modifiers.isAbstract()) {
+                        if (modifiers.isStatic() || modifiers.isFinal()
+                                        || visibility == TokenType.PRIVATE) {
+                                throw new SyntacticException(
+                                                "Método abstract não pode ser private, static ou final.",
+                                                name.getLine(),
+                                                name.getColumn());
+                        }
+                        tokens.consume(
+                                        TokenType.SEMICOLON,
+                                        "Esperado ';' após assinatura do método abstract");
+                        block = null;
+                } else {
+                        block = block();
+                }
 
                 return new FunctionRecord(
                                 visibility,
@@ -539,6 +640,22 @@ public class Parser {
                                 name.getLexeme(),
                                 parameters,
                                 block,
+                                modifiers.isAbstract(),
+                                name.getLine(),
+                                name.getColumn());
+        }
+
+        private ConstructorRecord constructorDeclaration(TokenType visibility) {
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado nome do construtor");
+                tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '(' após nome do construtor");
+                List<ParameterRecord> parameters = parameters();
+                tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')' após parâmetros");
+                return new ConstructorRecord(
+                                visibility,
+                                parameters,
+                                block(),
                                 name.getLine(),
                                 name.getColumn());
         }
@@ -578,10 +695,6 @@ public class Parser {
 
                 return parameters;
         }
-
-        // =========================================================
-        // BLOCOS E COMANDOS
-        // =========================================================
 
         private BlockRecord block() {
 
@@ -662,10 +775,6 @@ public class Parser {
                                         "Comando inválido ou não reconhecido.");
                 };
         }
-
-        // =========================================================
-        // DECLARAÇÕES
-        // =========================================================
 
         private StatementInterface thisStatement() {
 
@@ -791,10 +900,6 @@ public class Parser {
                                 typeToken.getColumn());
         }
 
-        // =========================================================
-        // RETURN
-        // =========================================================
-
         private ReturnRecord returnStatement() {
 
                 Token returnToken = tokens.consume(
@@ -816,10 +921,6 @@ public class Parser {
                                 returnToken.getLine(),
                                 returnToken.getColumn());
         }
-
-        // =========================================================
-        // CHAMADAS DE FUNÇÃO
-        // =========================================================
 
         private CallRecord functionCall(Token name) {
 
@@ -944,10 +1045,6 @@ public class Parser {
                 return new ExpressionStatementRecord(call);
         }
 
-        // =========================================================
-        // WHILE
-        // =========================================================
-
         private StatementInterface whileStatement() {
 
                 Token whileToken = tokens.consume(
@@ -1026,7 +1123,8 @@ public class Parser {
                                                 || current == TokenType.BOOLEAN
                                                 || current == TokenType.STRING
                                                 || (current == TokenType.IDENTIFIER
-                                                                && tokens.peekNext().getType() == TokenType.IDENTIFIER))) {
+                                                                && tokens.peekNext()
+                                                                                .getType() == TokenType.IDENTIFIER))) {
                         return declaration(false);
                 }
 
@@ -1039,10 +1137,6 @@ public class Parser {
                                                 ? "Inicialização do for deve ser uma declaração ou expressão."
                                                 : "Atualização do for deve ser uma expressão.");
         }
-
-        // =========================================================
-        // PRINT
-        // =========================================================
 
         private StatementInterface printStatement() {
 
@@ -1058,10 +1152,6 @@ public class Parser {
 
                 return new PrintRecord(expression);
         }
-
-        // =========================================================
-        // PUSH E POP
-        // =========================================================
 
         private PushRecord pushStatement() {
 
@@ -1107,10 +1197,6 @@ public class Parser {
                                                 register.getColumn()));
         }
 
-        // =========================================================
-        // EXPRESSÕES
-        // =========================================================
-
         private ExpressionInterface expression() {
 
                 return switch (tokens.current().getType()) {
@@ -1123,6 +1209,9 @@ public class Parser {
 
                         case IDENTIFIER ->
                                 identifierExpression();
+
+                        case NEW ->
+                                newObjectExpression();
 
                         case REGISTER ->
                                 registerExpression();
@@ -1149,10 +1238,6 @@ public class Parser {
                                         "Expressão inválida.");
                 };
         }
-
-        // =========================================================
-        // EXPRESSÃO SUPER
-        // =========================================================
 
         private ExpressionInterface thisExpression() {
 
@@ -1238,10 +1323,6 @@ public class Parser {
                                 superToken.getColumn());
         }
 
-        // =========================================================
-        // EXPRESSÃO ENTRE PARÊNTESES
-        // =========================================================
-
         private ExpressionInterface parenthesisExpression() {
 
                 tokens.consume(
@@ -1256,10 +1337,6 @@ public class Parser {
 
                 return expression;
         }
-
-        // =========================================================
-        // LITERAIS
-        // =========================================================
 
         private ExpressionInterface booleanExpression() {
 
@@ -1315,10 +1392,6 @@ public class Parser {
                 return new LiteralRecord(token.getLexeme());
         }
 
-        // =========================================================
-        // OPERAÇÕES
-        // =========================================================
-
         private ExpressionInterface operation() {
 
                 Token operator = tokens.consume(
@@ -1341,10 +1414,6 @@ public class Parser {
                                 operator.getColumn());
         }
 
-        // =========================================================
-        // IDENTIFICADORES
-        // =========================================================
-
         private ExpressionInterface identifierExpression() {
 
                 Token name = tokens.consume(
@@ -1365,6 +1434,25 @@ public class Parser {
                 }
 
                 return expression;
+        }
+
+        private ExpressionInterface newObjectExpression() {
+                Token newToken = tokens.consume(TokenType.NEW, "Esperado 'new'");
+                TypeRecord objectType = type();
+
+                tokens.consume(
+                                TokenType.OPEN_PARENTHESIS,
+                                "Esperado '(' após o tipo do objeto");
+                List<ExpressionInterface> constructorArguments = arguments();
+                tokens.consume(
+                                TokenType.CLOSE_PARENTHESIS,
+                                "Esperado ')' após argumentos do construtor");
+
+                return new NewObjectRecord(
+                                objectType,
+                                constructorArguments,
+                                newToken.getLine(),
+                                newToken.getColumn());
         }
 
         private ExpressionInterface memberAccess(ExpressionInterface receiver) {
@@ -1400,10 +1488,6 @@ public class Parser {
                                 member.getColumn());
         }
 
-        // =========================================================
-        // REGISTRADORES
-        // =========================================================
-
         private ExpressionInterface registerExpression() {
 
                 Token token = tokens.consume(
@@ -1415,10 +1499,6 @@ public class Parser {
                                 token.getLine(),
                                 token.getColumn());
         }
-
-        // =========================================================
-        // COMPARAÇÕES
-        // =========================================================
 
         private StatementInterface comparisonStatement() {
 
@@ -1471,10 +1551,6 @@ public class Parser {
                                 operator.getLine(),
                                 operator.getColumn());
         }
-
-        // =========================================================
-        // ERROS SINTÁTICOS
-        // =========================================================
 
         private SyntacticException syntacticError(String message) {
 

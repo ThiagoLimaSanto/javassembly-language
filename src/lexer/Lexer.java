@@ -18,6 +18,9 @@ public class Lexer {
     private static final Map<String, TokenType> KEYWORDS = Map.ofEntries(
             Map.entry("class", TokenType.CLASS),
             Map.entry("interface", TokenType.INTERFACE),
+            Map.entry("abstract", TokenType.ABSTRACT),
+            Map.entry("package", TokenType.PACKAGE),
+            Map.entry("import", TokenType.IMPORT),
             Map.entry("extends", TokenType.EXTENDS),
             Map.entry("implements", TokenType.IMPLEMENTS),
             Map.entry("func", TokenType.FUNC),

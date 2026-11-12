@@ -6,6 +6,7 @@ import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
 import src.ast.records.ClassRecord;
+import src.ast.records.ConstructorRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
@@ -14,6 +15,7 @@ import src.ast.records.InterfaceRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
 import src.ast.records.MemberCallRecord;
+import src.ast.records.NewObjectRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PopRecord;
 import src.ast.records.PrintRecord;
@@ -35,6 +37,10 @@ public interface ASTVisitor {
     void visit(ProgramRecord node);
 
     void visit(ClassRecord node);
+
+    void visit(ConstructorRecord node);
+
+    void visit(NewObjectRecord node);
 
     void visit(FunctionRecord node);
 

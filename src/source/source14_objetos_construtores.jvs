@@ -1,0 +1,30 @@
+public abstract class FormaBase {
+    protected int medida = 0;
+
+    public FormaBase(int medida) {
+        this.medida = medida;
+    }
+
+    public FormaBase() {
+    }
+
+    public abstract func int calcular();
+}
+
+public class Quadrado extends FormaBase {
+    public Quadrado(int lado) {
+        this.medida = lado;
+    }
+
+    public func int calcular() {
+        return mul medida, medida;
+    }
+}
+
+public class TesteObjetos {
+    public static func void main() {
+        FormaBase forma = new Quadrado(4);
+        int area = forma.calcular();
+        return;
+    }
+}

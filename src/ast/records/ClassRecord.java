@@ -12,7 +12,23 @@ public record ClassRecord(
         String superClass,
         List<String> interfaces,
         List<AttributeRecord> attributes,
-        List<FunctionRecord> functions, int line, int column) implements ASTNode {
+        List<FunctionRecord> functions,
+        List<ConstructorRecord> constructors,
+        boolean isAbstract,
+        int line,
+        int column) implements ASTNode {
+
+    public ClassRecord(
+            TokenType visibility,
+            String name,
+            String superClass,
+            List<String> interfaces,
+            List<AttributeRecord> attributes,
+            List<FunctionRecord> functions,
+            int line,
+            int column) {
+        this(visibility, name, superClass, interfaces, attributes, functions, List.of(), false, line, column);
+    }
 
     @Override
     public void accept(ASTVisitor visitor) {

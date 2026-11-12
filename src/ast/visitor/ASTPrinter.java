@@ -8,6 +8,7 @@ import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
 import src.ast.records.ClassRecord;
+import src.ast.records.ConstructorRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
@@ -16,6 +17,7 @@ import src.ast.records.InterfaceRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
 import src.ast.records.MemberCallRecord;
+import src.ast.records.NewObjectRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PopRecord;
 import src.ast.records.PrintRecord;
@@ -78,7 +80,7 @@ public class ASTPrinter implements ASTVisitor {
 
     @Override
     public void visit(ClassRecord node) {
-        printLine("Classe: " + node.name());
+        printLine("Classe: " + node.name() + (node.isAbstract() ? " [ABSTRACT]" : ""));
 
         if (node.superClass() != null) {
             printLine("  Extends: " + node.superClass());
@@ -97,6 +99,20 @@ public class ASTPrinter implements ASTVisitor {
         for (FunctionRecord function : node.functions()) {
             function.accept(this);
         }
+
+        printLine("Construtores:");
+        for (ConstructorRecord constructor : node.constructors()) {
+            constructor.accept(this);
+        }
+    }
+
+    @Override
+    public void visit(ConstructorRecord node) {
+        printLine("Construtor [" + (node.visibility() == null ? "PACKAGE" : node.visibility()) + "]");
+        for (ParameterRecord parameter : node.parameters()) {
+            visitChild(parameter);
+        }
+        visitChild(node.block());
     }
 
     @Override
@@ -107,7 +123,8 @@ public class ASTPrinter implements ASTVisitor {
 
         printLine("Função " + node.name() + " → " + node.returnType() + visibility
                 + (node.isStatic() ? " [STATIC]" : "")
-                + (node.isFinal() ? " [FINAL]" : ""));
+                + (node.isFinal() ? " [FINAL]" : "")
+                + (node.isAbstract() ? " [ABSTRACT]" : ""));
 
         for (ParameterRecord parameter : node.parameters()) {
             visitChild(parameter);
@@ -199,6 +216,14 @@ public class ASTPrinter implements ASTVisitor {
     public void visit(MemberCallRecord node) {
         printLine("Chamada de método: " + node.name());
         visitChild(node.receiver());
+        for (ExpressionInterface argument : node.arguments()) {
+            visitChild(argument);
+        }
+    }
+
+    @Override
+    public void visit(NewObjectRecord node) {
+        printLine("Instanciar: " + node.type().name());
         for (ExpressionInterface argument : node.arguments()) {
             visitChild(argument);
         }
