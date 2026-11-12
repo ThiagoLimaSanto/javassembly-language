@@ -19,7 +19,7 @@ public class Registradores {
     }
 }
 
-private class Auxiliar {
+class Auxiliar {
     public func int identidade(int valor) {
         return valor;
     }

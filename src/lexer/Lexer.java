@@ -26,6 +26,7 @@ public class Lexer {
             Map.entry("static", TokenType.STATIC),
             Map.entry("final", TokenType.FINAL),
             Map.entry("private", TokenType.PRIVATE),
+            Map.entry("protected", TokenType.PROTECTED),
             Map.entry("int", TokenType.INT),
             Map.entry("double", TokenType.DOUBLE),
             Map.entry("boolean", TokenType.BOOLEAN),

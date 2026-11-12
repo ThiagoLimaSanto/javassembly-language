@@ -143,6 +143,19 @@ public class SemanticAnalyzer implements ASTVisitor {
                         && currentAttribute.isStatic());
     }
 
+    private int visibilityLevel(TokenType visibility) {
+        if (visibility == TokenType.PUBLIC) {
+            return 3;
+        }
+        if (visibility == TokenType.PROTECTED) {
+            return 2;
+        }
+        if (visibility == null) {
+            return 1;
+        }
+        return 0;
+    }
+
     private void validateFieldAccess(
             AttributeRecord attribute,
             int line,
@@ -233,6 +246,182 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         return null;
+    }
+
+    private AttributeRecord resolveObjectAttribute(MemberAccessRecord access) {
+        SemanticType receiverType = getExpressionType(access.receiver());
+
+        if (receiverType == null || !receiverType.isClass()) {
+            throw new SemanticException(
+                    "Acesso a atributo exige um objeto de classe.",
+                    access.line(),
+                    access.column());
+        }
+
+        AttributeRecord attribute = findInheritedAttribute(
+                receiverType.className(),
+                access.name());
+
+        if (attribute == null) {
+            throw new SemanticException(
+                    "A classe '" + receiverType.className()
+                            + "' não possui o atributo '" + access.name() + "'.",
+                    access.line(),
+                    access.column());
+        }
+
+        ClassRecord declaringClass = findDeclaringClass(
+                receiverType.className(),
+                access.name());
+        validateMemberVisibility(
+                attribute.visibility(),
+                declaringClass == null ? null : declaringClass.name(),
+                access.name(),
+                access.line(),
+                access.column());
+
+        return attribute;
+    }
+
+    private FunctionRecord resolveObjectMethod(MemberCallRecord call) {
+        SemanticType receiverType = getExpressionType(call.receiver());
+
+        if (receiverType == null || !receiverType.isClass()) {
+            throw new SemanticException(
+                    "Chamada de método exige um objeto de classe.",
+                    call.line(),
+                    call.column());
+        }
+
+        List<SemanticType> argumentTypes = new ArrayList<>();
+
+        for (ExpressionInterface argument : call.arguments()) {
+            SemanticType argumentType = getExpressionType(argument);
+
+            if (argumentType == null) {
+                throw new SemanticException(
+                        "Não foi possível determinar o tipo de um argumento.",
+                        call.line(),
+                        call.column());
+            }
+
+            argumentTypes.add(argumentType);
+        }
+
+        InterfaceRecord interfaceNode = interfaces.get(receiverType.className());
+
+        if (interfaceNode != null) {
+            for (FunctionRecord function : interfaceNode.functions()) {
+                if (matchesCall(function, call.name(), argumentTypes)) {
+                    return function;
+                }
+            }
+
+            throw new SemanticException(
+                    "Método '" + call.name() + "' não encontrado na interface '"
+                            + receiverType.className() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        String className = receiverType.className();
+        boolean methodNameFound = false;
+        boolean matchingArityFound = false;
+        Set<String> visited = new HashSet<>();
+
+        while (className != null && visited.add(className)) {
+            ClassRecord classNode = classes.get(className);
+
+            if (classNode == null) {
+                break;
+            }
+
+            for (FunctionRecord function : classNode.functions()) {
+                if (!function.name().equals(call.name())
+                        || function.visibility() == TokenType.PRIVATE) {
+                    continue;
+                }
+
+                methodNameFound = true;
+
+                if (function.parameters().size() != argumentTypes.size()) {
+                    continue;
+                }
+                matchingArityFound = true;
+
+                if (matchesCall(function, call.name(), argumentTypes)) {
+                    validateMemberVisibility(
+                            function.visibility(),
+                            classNode.name(),
+                            call.name(),
+                            call.line(),
+                            call.column());
+                    return function;
+                }
+            }
+
+            className = classNode.superClass();
+        }
+
+        if (!methodNameFound) {
+            throw new SemanticException(
+                    "Método '" + call.name() + "' não encontrado ou inacessível na classe '"
+                            + receiverType.className() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        if (!matchingArityFound) {
+            throw new SemanticException(
+                    "Quantidade de argumentos incompatível para o método '"
+                            + call.name() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        throw new SemanticException(
+                "Tipos dos argumentos incompatíveis na chamada do método '"
+                        + call.name() + "'.",
+                call.line(),
+                call.column());
+    }
+
+    private boolean matchesCall(
+            FunctionRecord function,
+            String name,
+            List<SemanticType> argumentTypes) {
+        if (!function.name().equals(name)
+                || function.parameters().size() != argumentTypes.size()) {
+            return false;
+        }
+
+        for (int i = 0; i < argumentTypes.size(); i++) {
+            SemanticType expected = convertType(
+                    function.parameters().get(i).type());
+            if (!isAssignable(expected, argumentTypes.get(i))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private void validateMemberVisibility(
+            TokenType visibility,
+            String declaringClass,
+            String memberName,
+            int line,
+            int column) {
+        if (visibility == TokenType.PRIVATE
+                && !java.util.Objects.equals(currentClass, declaringClass)) {
+            throw new SemanticException(
+                    "O membro privado '" + memberName
+                            + "' não é acessível nesta classe.",
+                    line,
+                    column);
+        }
+
+        // All top-level types currently share the same implicit package.
     }
 
     private void validateTypeExists(
@@ -757,8 +946,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                     function.column());
         }
 
-        if (inherited.visibility() == TokenType.PUBLIC
-                && function.visibility() != TokenType.PUBLIC) {
+        if (visibilityLevel(function.visibility())
+                < visibilityLevel(inherited.visibility())) {
 
             throw new SemanticException(
                     "O método '" + function.name()
@@ -822,6 +1011,14 @@ public class SemanticAnalyzer implements ASTVisitor {
                     variable.line(),
                     variable.column());
             return symbol.type();
+        }
+
+        if (expression instanceof MemberAccessRecord access) {
+            return convertType(resolveObjectAttribute(access).type());
+        }
+
+        if (expression instanceof MemberCallRecord call) {
+            return convertType(resolveObjectMethod(call).returnType());
         }
 
         if (expression instanceof ThisRecord record) {
@@ -1391,6 +1588,16 @@ public class SemanticAnalyzer implements ASTVisitor {
         // Literais não precisam de validação adicional.
     }
 
+    @Override
+    public void visit(MemberAccessRecord node) {
+        getExpressionType(node);
+    }
+
+    @Override
+    public void visit(MemberCallRecord node) {
+        getExpressionType(node);
+    }
+
     // =========================================================
     // REGISTRADORES
     // =========================================================
@@ -1683,6 +1890,16 @@ public class SemanticAnalyzer implements ASTVisitor {
         String assignedFieldName = null;
         if (node.target() instanceof ThisAttributeRecord attributeExpression) {
             assignedFieldName = attributeExpression.name();
+        } else if (node.target() instanceof MemberAccessRecord memberAccess) {
+            AttributeRecord attribute = resolveObjectAttribute(memberAccess);
+
+            if (attribute.isFinal()) {
+                throw new SemanticException(
+                        "Não é permitido modificar o atributo final '"
+                                + attribute.name() + "'.",
+                        node.line(),
+                        node.column());
+            }
         } else if (node.target() instanceof VariableRecord variable
                 && !resolvesToLocalVariable(variable.name())) {
             assignedFieldName = variable.name();
@@ -1703,6 +1920,7 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         if (!(node.target() instanceof ThisAttributeRecord)
+                && !(node.target() instanceof MemberAccessRecord)
                 && !(node.target() instanceof VariableRecord)
                 && !(node.target() instanceof RegisterRecord)) {
             throw new SemanticException(

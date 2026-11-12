@@ -19,6 +19,8 @@ import src.ast.records.JERecord;
 import src.ast.records.JMPRecord;
 import src.ast.records.LabelRecord;
 import src.ast.records.LiteralRecord;
+import src.ast.records.MemberAccessRecord;
+import src.ast.records.MemberCallRecord;
 import src.ast.records.ModifiersRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PopRecord;
@@ -72,7 +74,8 @@ public class Parser {
                                 interfaces.add(interfaceDeclaration());
 
                         } else if (tokens.verify(TokenType.PUBLIC)
-                                        || tokens.verify(TokenType.PRIVATE)) {
+                                        || tokens.verify(TokenType.PRIVATE)
+                                        || tokens.verify(TokenType.PROTECTED)) {
 
                                 TokenType next = tokens.peekNext().getType();
 
@@ -126,12 +129,20 @@ public class Parser {
 
         private ClassRecord classDeclaration() {
 
-                TokenType visibility = TokenType.PUBLIC;
+                TokenType visibility = null;
 
                 List<String> interfaces = new ArrayList<>();
 
                 if (isVisibility()) {
                         visibility = consumeVisibility();
+
+                        if (visibility != TokenType.PUBLIC) {
+                                Token token = tokens.current();
+                                throw new SyntacticException(
+                                                "Uma classe de nível superior só pode ser public ou sem modificador.",
+                                                token.getLine(),
+                                                token.getColumn());
+                        }
                 }
 
                 tokens.consume(
@@ -221,10 +232,18 @@ public class Parser {
 
         private InterfaceRecord interfaceDeclaration() {
 
-                TokenType visibility = TokenType.PUBLIC;
+                TokenType visibility = null;
 
                 if (isVisibility()) {
                         visibility = consumeVisibility();
+
+                        if (visibility != TokenType.PUBLIC) {
+                                Token token = tokens.current();
+                                throw new SyntacticException(
+                                                "Uma interface de nível superior só pode ser public ou sem modificador.",
+                                                token.getLine(),
+                                                token.getColumn());
+                        }
                 }
 
                 tokens.consume(
@@ -320,7 +339,7 @@ public class Parser {
 
                         switch (token.getType()) {
 
-                                case PUBLIC, PRIVATE -> {
+                                case PUBLIC, PRIVATE, PROTECTED -> {
 
                                         if (visibility != null) {
                                                 throw new SyntacticException(
@@ -376,7 +395,8 @@ public class Parser {
 
         private boolean isVisibility() {
                 return tokens.verify(TokenType.PUBLIC)
-                                || tokens.verify(TokenType.PRIVATE);
+                                || tokens.verify(TokenType.PRIVATE)
+                                || tokens.verify(TokenType.PROTECTED);
         }
 
         private TokenType consumeVisibility() {
@@ -478,9 +498,7 @@ public class Parser {
         private FunctionRecord functionDeclaration(
                         ModifiersRecord modifiers) {
 
-                TokenType visibility = modifiers.visibility() == null
-                                ? TokenType.PUBLIC
-                                : modifiers.visibility();
+                TokenType visibility = modifiers.visibility();
 
                 tokens.consume(
                                 TokenType.FUNC,
@@ -882,6 +900,37 @@ public class Parser {
                                         name.getColumn());
                 }
 
+                if (tokens.verify(TokenType.DOT)) {
+                        ExpressionInterface member = new VariableRecord(
+                                        name.getLexeme(),
+                                        name.getLine(),
+                                        name.getColumn());
+
+                        while (tokens.verify(TokenType.DOT)) {
+                                member = memberAccess(member);
+                        }
+
+                        if (tokens.verify(TokenType.ASSIGN)) {
+                                tokens.consume(
+                                                TokenType.ASSIGN,
+                                                "Esperado '='");
+                                ExpressionInterface value = expression();
+                                tokens.consume(
+                                                TokenType.SEMICOLON,
+                                                "Esperado ';' após atribuição");
+                                return new AssignmentRecord(
+                                                member,
+                                                value,
+                                                name.getLine(),
+                                                name.getColumn());
+                        }
+
+                        tokens.consume(
+                                        TokenType.SEMICOLON,
+                                        "Esperado ';' após acesso ao membro");
+                        return new ExpressionStatementRecord(member);
+                }
+
                 CallRecord call = functionCall(name);
 
                 tokens.consume(
@@ -1273,10 +1322,49 @@ public class Parser {
                         return functionCall(name);
                 }
 
-                return new VariableRecord(
+                ExpressionInterface expression = new VariableRecord(
                                 name.getLexeme(),
                                 name.getLine(),
                                 name.getColumn());
+
+                while (tokens.verify(TokenType.DOT)) {
+                        expression = memberAccess(expression);
+                }
+
+                return expression;
+        }
+
+        private ExpressionInterface memberAccess(ExpressionInterface receiver) {
+                tokens.consume(
+                                TokenType.DOT,
+                                "Esperado '.' antes do membro");
+
+                Token member = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado nome do atributo ou método");
+
+                if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
+                        tokens.consume(
+                                        TokenType.OPEN_PARENTHESIS,
+                                        "Esperado '(' após nome do método");
+                        List<ExpressionInterface> methodArguments = arguments();
+                        tokens.consume(
+                                        TokenType.CLOSE_PARENTHESIS,
+                                        "Esperado ')' após argumentos");
+
+                        return new MemberCallRecord(
+                                        receiver,
+                                        member.getLexeme(),
+                                        methodArguments,
+                                        member.getLine(),
+                                        member.getColumn());
+                }
+
+                return new MemberAccessRecord(
+                                receiver,
+                                member.getLexeme(),
+                                member.getLine(),
+                                member.getColumn());
         }
 
         // =========================================================

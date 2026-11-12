@@ -16,6 +16,8 @@ import src.ast.records.JERecord;
 import src.ast.records.JMPRecord;
 import src.ast.records.LabelRecord;
 import src.ast.records.LiteralRecord;
+import src.ast.records.MemberAccessRecord;
+import src.ast.records.MemberCallRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PopRecord;
 import src.ast.records.PrintRecord;
@@ -102,7 +104,7 @@ public class ASTPrinter implements ASTVisitor {
     @Override
     public void visit(FunctionRecord node) {
         String visibility = node.visibility() == null
-                ? ""
+                ? " [PACKAGE]"
                 : " [" + node.visibility() + "]";
 
         printLine("Função " + node.name() + " → " + node.returnType() + visibility
@@ -171,6 +173,21 @@ public class ASTPrinter implements ASTVisitor {
             printLine("Literal: \"" + escaped + "\"");
         } else {
             printLine("Literal: " + value);
+        }
+    }
+
+    @Override
+    public void visit(MemberAccessRecord node) {
+        printLine("Acesso a membro: " + node.name());
+        visitChild(node.receiver());
+    }
+
+    @Override
+    public void visit(MemberCallRecord node) {
+        printLine("Chamada de método: " + node.name());
+        visitChild(node.receiver());
+        for (ExpressionInterface argument : node.arguments()) {
+            visitChild(argument);
         }
     }
 
@@ -247,7 +264,9 @@ public class ASTPrinter implements ASTVisitor {
 
     @Override
     public void visit(AttributeRecord node) {
-        String visibility = node.visibility() == null ? "" : " [" + node.visibility() + "]";
+        String visibility = node.visibility() == null
+                ? " [PACKAGE]"
+                : " [" + node.visibility() + "]";
         printLine("Atributo: " + node.type().name() + " " + node.name() + visibility
                 + (node.isStatic() ? " [STATIC]" : "")
                 + (node.isFinal() ? " [FINAL]" : "")

@@ -14,6 +14,8 @@ import src.ast.records.JERecord;
 import src.ast.records.JMPRecord;
 import src.ast.records.LabelRecord;
 import src.ast.records.LiteralRecord;
+import src.ast.records.MemberAccessRecord;
+import src.ast.records.MemberCallRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PopRecord;
 import src.ast.records.PrintRecord;
@@ -49,6 +51,10 @@ public interface ASTVisitor {
     void visit(BinaryExpressionRecord node);
 
     void visit(LiteralRecord node);
+
+    void visit(MemberAccessRecord node);
+
+    void visit(MemberCallRecord node);
 
     void visit(VariableRecord node);
 

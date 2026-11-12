@@ -21,6 +21,7 @@ public enum TokenType {
     SUPER,
     PUBLIC,
     PRIVATE,
+    PROTECTED,
     DOUBLE,
     BOOLEAN,
     NUMBER,
