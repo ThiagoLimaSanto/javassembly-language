@@ -45,19 +45,4 @@ public class FunctionTable extends SymbolTable<FunctionRecord> {
         return signature.toString();
     }
 
-    @Override
-    public void define(FunctionRecord function) {
-        if (function.name().equals("main")) {
-            for (FunctionRecord existing : symbols.values()) {
-                if (existing.name().equals("main")) {
-                    throw new src.exceptions.SemanticException(
-                            "A funcao 'main' deve ser unica.",
-                            function.line(),
-                            function.column());
-                }
-            }
-        }
-
-        super.define(function);
-    }
 }

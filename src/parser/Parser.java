@@ -19,6 +19,7 @@ import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
 import src.ast.records.FunctionRecord;
+import src.ast.records.IfRecord;
 import src.ast.records.InterfaceRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
@@ -763,6 +764,9 @@ public class Parser {
                         case PRINT ->
                                 printStatement();
 
+                        case IF ->
+                                ifStatement();
+
                         case WHILE ->
                                 whileStatement();
 
@@ -810,6 +814,33 @@ public class Parser {
                         default -> throw syntacticError(
                                         "Comando inválido ou não reconhecido.");
                 };
+        }
+
+        private IfRecord ifStatement() {
+                Token ifToken = tokens.consume(TokenType.IF, "Esperado 'if'");
+                tokens.consume(
+                                TokenType.OPEN_PARENTHESIS,
+                                "Esperado '(' após 'if'");
+                ExpressionInterface condition = expression();
+                tokens.consume(
+                                TokenType.CLOSE_PARENTHESIS,
+                                "Esperado ')' após condição do if");
+
+                StatementInterface thenBranch = block();
+                StatementInterface elseBranch = null;
+                if (tokens.verify(TokenType.ELSE)) {
+                        tokens.consume(TokenType.ELSE, "Esperado 'else'");
+                        elseBranch = tokens.verify(TokenType.IF)
+                                        ? ifStatement()
+                                        : block();
+                }
+
+                return new IfRecord(
+                                condition,
+                                thenBranch,
+                                elseBranch,
+                                ifToken.getLine(),
+                                ifToken.getColumn());
         }
 
         private StatementInterface thisStatement() {

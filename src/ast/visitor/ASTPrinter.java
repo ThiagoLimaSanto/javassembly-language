@@ -13,6 +13,7 @@ import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
 import src.ast.records.FunctionRecord;
+import src.ast.records.IfRecord;
 import src.ast.records.InterfaceRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
@@ -175,6 +176,16 @@ public class ASTPrinter implements ASTVisitor {
         printLine("While");
         visitNamedChild("Condição", node.expression());
         visitChild(node.block());
+    }
+
+    @Override
+    public void visit(IfRecord node) {
+        printLine("If");
+        visitNamedChild("Condição", node.condition());
+        visitNamedChild("Então", node.thenBranch());
+        if (node.elseBranch() != null) {
+            visitNamedChild("Senão", node.elseBranch());
+        }
     }
 
     @Override

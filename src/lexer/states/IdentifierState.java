@@ -20,7 +20,8 @@ public class IdentifierState implements LexerState {
             text.append(lexer.advance());
         }
 
-        lexer.addToken(new Token(lexer.getType(text.toString()), text.toString(), line, column));
+        String lexeme = text.toString();
+        lexer.addToken(new Token(lexer.getType(lexeme), lexeme, line, column));
 
         lexer.changeState(new InitialState());
     }

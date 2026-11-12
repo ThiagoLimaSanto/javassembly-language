@@ -20,15 +20,13 @@ public abstract class SymbolTable<T> {
     public void define(T symbol) {
         String key = getKey(symbol);
 
-        if (symbols.containsKey(key)) {
+        if (symbols.putIfAbsent(key, symbol) != null) {
             throw new SemanticException(
                 getDuplicateMessage(symbol),
                 getLine(symbol),
                 getColumn(symbol)
             );
         }
-
-        symbols.put(key, symbol);
     }
 
     public T resolve(String key) {

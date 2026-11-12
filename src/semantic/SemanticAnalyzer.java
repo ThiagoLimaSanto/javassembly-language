@@ -22,6 +22,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     private final Map<String, ClassRecord> classes = new HashMap<>();
     private final Map<String, InterfaceRecord> interfaces = new HashMap<>();
     private final Map<String, SemanticType> registers = new HashMap<>();
+    private final Map<String, Set<String>> assignableTypes = new HashMap<>();
 
     private String currentClass;
     private FunctionRecord currentFunction;
@@ -158,6 +159,29 @@ public class SemanticAnalyzer implements ASTVisitor {
         return separator < 0 ? "" : qualifiedName.substring(0, separator);
     }
 
+    private void validateMainFunctions(List<ClassRecord> classRecords) {
+        Map<String, FunctionRecord> mainByPackage = new HashMap<>();
+        for (ClassRecord classRecord : classRecords) {
+            String packageName = packageName(classRecord.name());
+            for (FunctionRecord function : classRecord.functions()) {
+                if (!function.name().equals("main")) {
+                    continue;
+                }
+                FunctionRecord previous = mainByPackage.putIfAbsent(packageName, function);
+                if (previous != null) {
+                    String displayPackage = packageName.isEmpty()
+                            ? "<default>"
+                            : packageName;
+                    throw new SemanticException(
+                            "O package '" + displayPackage
+                                    + "' pode declarar apenas uma função main.",
+                            function.line(),
+                            function.column());
+                }
+            }
+        }
+    }
+
     private boolean samePackage(String firstType, String secondType) {
         return java.util.Objects.equals(
                 packageName(firstType),
@@ -165,19 +189,32 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private boolean isSubclassOf(String className, String expectedSuperClass) {
-        Set<String> visited = new HashSet<>();
-        String current = className;
+        return className != null
+                && getAssignableTypes(className).contains(expectedSuperClass);
+    }
 
-        while (current != null && visited.add(current)) {
-            if (current.equals(expectedSuperClass)) {
-                return true;
-            }
-
-            ClassRecord classNode = classes.get(current);
-            current = classNode == null ? null : classNode.superClass();
+    private Set<String> getAssignableTypes(String className) {
+        Set<String> cachedTypes = assignableTypes.get(className);
+        if (cachedTypes != null) {
+            return cachedTypes;
         }
 
-        return false;
+        Set<String> compatibleTypes = new HashSet<>();
+        Set<String> visited = new HashSet<>();
+        String currentName = className;
+        while (currentName != null && visited.add(currentName)) {
+            compatibleTypes.add(currentName);
+            ClassRecord currentClassNode = classes.get(currentName);
+            if (currentClassNode == null) {
+                break;
+            }
+            compatibleTypes.addAll(currentClassNode.interfaces());
+            currentName = currentClassNode.superClass();
+        }
+
+        Set<String> immutableTypes = Set.copyOf(compatibleTypes);
+        assignableTypes.put(className, immutableTypes);
+        return immutableTypes;
     }
 
     private boolean isTypeAccessible(
@@ -453,6 +490,21 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
         if (statement instanceof BlockRecord block) {
             return canCompleteNormally(block);
+        }
+        if (statement instanceof IfRecord conditional) {
+            if (conditional.elseBranch() == null) {
+                return isAlwaysTrue(conditional.condition())
+                        ? canCompleteNormally(conditional.thenBranch())
+                        : true;
+            }
+            if (isAlwaysTrue(conditional.condition())) {
+                return canCompleteNormally(conditional.thenBranch());
+            }
+            if (isAlwaysFalse(conditional.condition())) {
+                return canCompleteNormally(conditional.elseBranch());
+            }
+            return canCompleteNormally(conditional.thenBranch())
+                    || canCompleteNormally(conditional.elseBranch());
         }
         if (statement instanceof WhileRecord loop) {
             return !isAlwaysTrue(loop.expression());
@@ -1979,28 +2031,8 @@ public class SemanticAnalyzer implements ASTVisitor {
             return false;
         }
 
-        String className = received.className();
-        Set<String> visitedClasses = new HashSet<>();
-
-        while (className != null && visitedClasses.add(className)) {
-            if (className.equals(expected.className())) {
-                return true;
-            }
-
-            ClassRecord classNode = classes.get(className);
-
-            if (classNode == null) {
-                return false;
-            }
-
-            if (classNode.interfaces().contains(expected.className())) {
-                return true;
-            }
-
-            className = classNode.superClass();
-        }
-
-        return false;
+        return getAssignableTypes(received.className())
+                .contains(expected.className());
     }
 
     private void validateAssignableType(
@@ -2042,6 +2074,8 @@ public class SemanticAnalyzer implements ASTVisitor {
 
             classes.put(classNode.name(), classNode);
         }
+
+        validateMainFunctions(node.classes());
 
         for (RegisterDeclarationRecord register : node.registers()) {
             register.accept(this);
@@ -2322,7 +2356,29 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(PrintRecord node) {
-        getExpressionType(node.expression());
+        SemanticType expressionType = getExpressionType(node.expression());
+        if (expressionType.isPrimitive()
+                && expressionType.primitiveType() == TokenType.VOID) {
+            int line = currentFunction == null ? 1 : currentFunction.line();
+            int column = currentFunction == null ? 1 : currentFunction.column();
+            if (node.expression() instanceof CallRecord call) {
+                line = call.line();
+                column = call.column();
+            } else if (node.expression() instanceof MemberCallRecord call) {
+                line = call.line();
+                column = call.column();
+            } else if (node.expression() instanceof ThisCallRecord call) {
+                line = call.line();
+                column = call.column();
+            } else if (node.expression() instanceof SuperCallRecord call) {
+                line = call.line();
+                column = call.column();
+            }
+            throw new SemanticException(
+                    "A expressão do print não pode ser void.",
+                    line,
+                    column);
+        }
     }
 
 
@@ -2350,6 +2406,45 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     @Override
+    public void visit(IfRecord node) {
+        SemanticType conditionType = getExpressionType(node.condition());
+        if (!isBoolean(conditionType)) {
+            throw new SemanticException(
+                    "A condição do if deve ser do tipo boolean.",
+                    node.line(),
+                    node.column());
+        }
+
+        Set<VariableSymbolRecord> assignedBeforeBranches =
+                new HashSet<>(definitelyAssignedVariables);
+        definitelyAssignedVariables = new HashSet<>(assignedBeforeBranches);
+        node.thenBranch().accept(this);
+        Set<VariableSymbolRecord> assignedAfterThen =
+                new HashSet<>(definitelyAssignedVariables);
+
+        if (node.elseBranch() == null) {
+            definitelyAssignedVariables = isAlwaysTrue(node.condition())
+                    ? assignedAfterThen
+                    : assignedBeforeBranches;
+            return;
+        }
+
+        definitelyAssignedVariables = new HashSet<>(assignedBeforeBranches);
+        node.elseBranch().accept(this);
+        Set<VariableSymbolRecord> assignedAfterElse =
+                new HashSet<>(definitelyAssignedVariables);
+
+        if (isAlwaysTrue(node.condition())) {
+            definitelyAssignedVariables = assignedAfterThen;
+        } else if (isAlwaysFalse(node.condition())) {
+            definitelyAssignedVariables = assignedAfterElse;
+        } else {
+            assignedAfterThen.retainAll(assignedAfterElse);
+            definitelyAssignedVariables = assignedAfterThen;
+        }
+    }
+
+    @Override
     public void visit(ForRecord node) {
         enterScope();
 
@@ -2373,6 +2468,11 @@ public class SemanticAnalyzer implements ASTVisitor {
             loopDepth++;
             try {
                 node.block().accept(this);
+                Set<VariableSymbolRecord> assignedAfterBody =
+                        new HashSet<>(definitelyAssignedVariables);
+                definitelyAssignedVariables = isAlwaysFalse(node.condition())
+                        ? assignedBeforeLoop
+                        : assignedAfterBody;
                 if (node.update() != null) {
                     node.update().accept(this);
                 }
@@ -2385,6 +2485,10 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
     }
 
+    private boolean isAlwaysFalse(ExpressionInterface expression) {
+        return expression instanceof LiteralRecord literal
+                && Boolean.FALSE.equals(literal.value());
+    }
 
     @Override
     public void visit(BinaryExpressionRecord node) {
@@ -2467,9 +2571,13 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private void validateRegisterName(RegisterRecord register) {
-        if (!register.name().matches("R[0-9]")) {
+        String name = register.name();
+        if (name.length() != 2
+                || name.charAt(0) != 'R'
+                || name.charAt(1) < '0'
+                || name.charAt(1) > '9') {
             throw new SemanticException(
-                    "Registrador '" + register.name()
+                    "Registrador '" + name
                             + "' inválido. Utilize R0 até R9.",
                     register.line(),
                     register.column());

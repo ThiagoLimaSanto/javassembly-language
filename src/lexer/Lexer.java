@@ -35,6 +35,8 @@ public class Lexer {
             Map.entry("boolean", TokenType.BOOLEAN),
             Map.entry("String", TokenType.STRING),
             Map.entry("void", TokenType.VOID),
+            Map.entry("if", TokenType.IF),
+            Map.entry("else", TokenType.ELSE),
 
             Map.entry("add", TokenType.ADD),
             Map.entry("sub", TokenType.SUB),
@@ -156,10 +158,22 @@ public class Lexer {
     }
 
     public boolean isSymbol(char character) {
-        return SYMBOLS.containsKey(String.valueOf(character));
+        return switch (character) {
+            case '{', '}', '(', ')', ';', ',', '.', '=', '"', '\'' -> true;
+            default -> false;
+        };
     }
 
     private boolean isRegister(String lexeme) {
-        return lexeme.matches("R\\d+");
+        if (lexeme.length() < 2 || lexeme.charAt(0) != 'R') {
+            return false;
+        }
+        for (int index = 1; index < lexeme.length(); index++) {
+            char character = lexeme.charAt(index);
+            if (character < '0' || character > '9') {
+                return false;
+            }
+        }
+        return true;
     }
 }

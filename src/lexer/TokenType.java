@@ -3,6 +3,8 @@ public enum TokenType {
 
     FUNC,
     INT,
+    IF,
+    ELSE,
     WHILE,
     FOR,
     RETURN,

@@ -11,6 +11,7 @@ import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
 import src.ast.records.FunctionRecord;
+import src.ast.records.IfRecord;
 import src.ast.records.InterfaceRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
@@ -53,6 +54,8 @@ public interface ASTVisitor {
     void visit(WhileRecord node);
 
     void visit(ForRecord node);
+
+    void visit(IfRecord node);
 
     void visit(BinaryExpressionRecord node);
 
