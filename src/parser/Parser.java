@@ -27,10 +27,8 @@ import src.ast.records.MemberCallRecord;
 import src.ast.records.NewObjectRecord;
 import src.ast.records.ModifiersRecord;
 import src.ast.records.ParameterRecord;
-import src.ast.records.PopRecord;
 import src.ast.records.PrintRecord;
 import src.ast.records.ProgramRecord;
-import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
 import src.ast.records.RegisterDeclarationRecord;
 import src.ast.records.ReturnRecord;
@@ -99,7 +97,8 @@ public class Parser {
                         } else if (tokens.verify(TokenType.INTERFACE)) {
                                 interfaces.add(interfaceDeclaration());
 
-                        } else if (tokens.verify(TokenType.ABSTRACT)) {
+                        } else if (tokens.verify(TokenType.ABSTRACT)
+                                        || tokens.verify(TokenType.FINAL)) {
                                 classes.add(classDeclaration());
 
                         } else if (tokens.verify(TokenType.PUBLIC)
@@ -108,7 +107,9 @@ public class Parser {
 
                                 TokenType next = tokens.peekNext().getType();
 
-                                if (next == TokenType.CLASS || next == TokenType.ABSTRACT) {
+                                if (next == TokenType.CLASS
+                                                || next == TokenType.ABSTRACT
+                                                || next == TokenType.FINAL) {
                                         classes.add(classDeclaration());
 
                                 } else if (next == TokenType.INTERFACE) {
@@ -183,10 +184,13 @@ public class Parser {
 
                 TokenType visibility = null;
                 boolean isAbstract = false;
+                boolean isFinal = false;
 
                 List<String> interfaces = new ArrayList<>();
 
-                while (isVisibility() || tokens.verify(TokenType.ABSTRACT)) {
+                while (isVisibility()
+                                || tokens.verify(TokenType.ABSTRACT)
+                                || tokens.verify(TokenType.FINAL)) {
                         Token modifier = tokens.current();
                         if (isVisibility()) {
                                 if (visibility != null) {
@@ -196,7 +200,7 @@ public class Parser {
                                                         modifier.getColumn());
                                 }
                                 visibility = consumeVisibility();
-                        } else {
+                        } else if (tokens.verify(TokenType.ABSTRACT)) {
                                 if (isAbstract) {
                                         throw new SyntacticException(
                                                         "Modificador 'abstract' repetido",
@@ -205,7 +209,23 @@ public class Parser {
                                 }
                                 tokens.consume(TokenType.ABSTRACT, "Esperado 'abstract'");
                                 isAbstract = true;
+                        } else {
+                                if (isFinal) {
+                                        throw new SyntacticException(
+                                                        "Modificador 'final' repetido",
+                                                        modifier.getLine(),
+                                                        modifier.getColumn());
+                                }
+                                tokens.consume(TokenType.FINAL, "Esperado 'final'");
+                                isFinal = true;
                         }
+                }
+
+                if (isAbstract && isFinal) {
+                        throw new SyntacticException(
+                                        "Uma classe não pode ser abstract e final.",
+                                        tokens.current().getLine(),
+                                        tokens.current().getColumn());
                 }
 
                 if (visibility != null && visibility != TokenType.PUBLIC) {
@@ -311,6 +331,7 @@ public class Parser {
                                 functions,
                                 constructors,
                                 isAbstract,
+                                isFinal,
                                 name.getLine(),
                                 name.getColumn());
         }
@@ -517,10 +538,19 @@ public class Parser {
                                                 token.getType(),
                                                 "Esperado um tipo válido");
 
-                                return new TypeRecord(
-                                                token.getType() == TokenType.IDENTIFIER
-                                                                ? resolveTypeName(token.getLexeme())
-                                                                : token.getLexeme());
+                                String typeName = token.getType() == TokenType.IDENTIFIER
+                                                ? resolveTypeName(token.getLexeme())
+                                                : token.getLexeme();
+                                while (tokens.verify(TokenType.OPEN_BRACKET)) {
+                                        tokens.consume(
+                                                        TokenType.OPEN_BRACKET,
+                                                        "Esperado '[' no tipo de array");
+                                        tokens.consume(
+                                                        TokenType.CLOSE_BRACKET,
+                                                        "Esperado ']' no tipo de array");
+                                        typeName += "[]";
+                                }
+                                return new TypeRecord(typeName);
 
                         default:
                                 throw new SyntacticException(
@@ -775,12 +805,6 @@ public class Parser {
 
                         case RETURN ->
                                 returnStatement();
-
-                        case PUSH ->
-                                pushStatement();
-
-                        case POP ->
-                                popStatement();
 
                         case REGISTER ->
                                 registerAssignment();
@@ -1218,50 +1242,6 @@ public class Parser {
                                 "Esperado ';' após print");
 
                 return new PrintRecord(expression);
-        }
-
-        private PushRecord pushStatement() {
-
-                Token type = tokens.consume(
-                                TokenType.PUSH,
-                                "Esperado 'push'");
-
-                Token register = tokens.consume(
-                                TokenType.REGISTER,
-                                "Esperado um registrador");
-
-                tokens.consume(
-                                TokenType.SEMICOLON,
-                                "Esperado ';' após push");
-
-                return new PushRecord(
-                                type.getType(),
-                                new RegisterRecord(
-                                                register.getLexeme(),
-                                                register.getLine(),
-                                                register.getColumn()));
-        }
-
-        private PopRecord popStatement() {
-
-                Token type = tokens.consume(
-                                TokenType.POP,
-                                "Esperado 'pop'");
-
-                Token register = tokens.consume(
-                                TokenType.REGISTER,
-                                "Esperado um registrador");
-
-                tokens.consume(
-                                TokenType.SEMICOLON,
-                                "Esperado ';' após pop");
-
-                return new PopRecord(
-                                type.getType(),
-                                new RegisterRecord(
-                                                register.getLexeme(),
-                                                register.getLine(),
-                                                register.getColumn()));
         }
 
         private ExpressionInterface expression() {

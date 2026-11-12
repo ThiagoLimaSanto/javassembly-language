@@ -1,6 +1,6 @@
 public class Funcoes {
-    public func void main() {
-        anunciar(10, 20);
+    public static func void main() {
+        anunciar();
         int resultado = soma(10, dobro(5));
         print soma(resultado, add 2, 3);
         print media(2.5, 7.5);
@@ -8,24 +8,24 @@ public class Funcoes {
         return;
     }
 
-    private func void anunciar() {
+    private static func void anunciar() {
         print "Testando chamadas";
         return;
     }
 
-    public func int soma(int a, int b) {
+    public static func int soma(int a, int b) {
         return add a, b;
     }
 
-    private func int dobro(int valor) {
+    private static func int dobro(int valor) {
         return mul valor, 2;
     }
 
-    public func double media(double a, double b) {
+    public static func double media(double a, double b) {
         return div (add a, b), 2.0;
     }
 
-    public func String escolher(boolean ativo, String texto) {
+    public static func String escolher(boolean ativo, String texto) {
         print ativo;
         return texto;
     }

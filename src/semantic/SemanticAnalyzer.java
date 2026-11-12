@@ -30,6 +30,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     private VariableTable classScope;
     private boolean currentConstructor;
     private boolean currentConstructorDelegatesToThis;
+    private boolean currentConstructorInvocationArguments;
     private int loopDepth;
     private Set<String> assignedFinalFields = new HashSet<>();
     private Set<VariableSymbolRecord> definitelyAssignedVariables = new HashSet<>();
@@ -167,6 +168,20 @@ public class SemanticAnalyzer implements ASTVisitor {
                 if (!function.name().equals("main")) {
                     continue;
                 }
+                boolean validParameters = function.parameters().isEmpty()
+                        || (function.parameters().size() == 1
+                                && (function.parameters().get(0).type().name().equals("String")
+                                        || function.parameters().get(0).type().name().equals("String[]")));
+                if (function.visibility() != TokenType.PUBLIC
+                        || !function.isStatic()
+                        || !function.returnType().name().equals("void")
+                        || !validParameters) {
+                    throw new SemanticException(
+                            "A função main deve ser public static, retornar void e não receber "
+                                    + "parâmetros ou receber apenas um String.",
+                            function.line(),
+                            function.column());
+                }
                 FunctionRecord previous = mainByPackage.putIfAbsent(packageName, function);
                 if (previous != null) {
                     String displayPackage = packageName.isEmpty()
@@ -255,6 +270,7 @@ public class SemanticAnalyzer implements ASTVisitor {
         ClassRecord declaringClass = findDeclaringClass(currentClass, attribute.name());
         if (!currentConstructor
                 || currentConstructorDelegatesToThis
+                || attribute.isStatic()
                 || attribute.value() != null
                 || declaringClass == null
                 || !declaringClass.name().equals(currentClass)) {
@@ -520,10 +536,50 @@ public class SemanticAnalyzer implements ASTVisitor {
                 && Boolean.TRUE.equals(literal.value());
     }
 
+    private boolean isAlwaysFalse(ExpressionInterface expression) {
+        return expression instanceof LiteralRecord literal
+                && Boolean.FALSE.equals(literal.value());
+    }
+
+    private <T> Set<T> mergeBranchState(
+            ExpressionInterface condition,
+            Set<T> before,
+            Set<T> thenState,
+            boolean thenCompletesNormally,
+            Set<T> elseState,
+            boolean elseCompletesNormally) {
+        if (isAlwaysTrue(condition)) {
+            return new HashSet<>(thenState);
+        }
+        if (isAlwaysFalse(condition)) {
+            return new HashSet<>(elseState);
+        }
+        if (thenCompletesNormally && !elseCompletesNormally) {
+            return new HashSet<>(thenState);
+        }
+        if (!thenCompletesNormally && elseCompletesNormally) {
+            return new HashSet<>(elseState);
+        }
+        if (!thenCompletesNormally) {
+            return new HashSet<>(before);
+        }
+
+        Set<T> merged = new HashSet<>(thenState);
+        merged.retainAll(elseState);
+        return merged;
+    }
+
     private void validateFieldAccess(
             AttributeRecord attribute,
             int line,
             int column) {
+        if (currentConstructorInvocationArguments && !attribute.isStatic()) {
+            throw new SemanticException(
+                    "Um membro de instância não pode ser acessado nos argumentos "
+                            + "de this(...) ou super(...).",
+                    line,
+                    column);
+        }
         if (isStaticContext() && !attribute.isStatic()) {
             throw new SemanticException(
                     "Um membro de instância não pode ser acessado de um contexto estático.",
@@ -968,6 +1024,13 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     private void validateThisContext(int line, int column) {
 
+        if (currentConstructorInvocationArguments) {
+            throw new SemanticException(
+                    "'this' não pode ser utilizado nos argumentos de this(...) ou super(...).",
+                    line,
+                    column);
+        }
+
         if (currentClass == null) {
             throw new SemanticException(
                     "'this' só pode ser utilizado dentro de uma classe.",
@@ -1052,9 +1115,13 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         FunctionRecord bestMatch = mostSpecificMethod(candidates);
         if (bestMatch != null) {
-            if (isStaticContext() && !bestMatch.isStatic()) {
+            if ((isStaticContext() || currentConstructorInvocationArguments)
+                    && !bestMatch.isStatic()) {
                 throw new SemanticException(
-                        "Um método de instância não pode ser chamado de um contexto estático.",
+                        currentConstructorInvocationArguments
+                                ? "Um método de instância não pode ser chamado nos argumentos "
+                                        + "de this(...) ou super(...)."
+                                : "Um método de instância não pode ser chamado de um contexto estático.",
                         call.line(),
                         call.column());
             }
@@ -1327,6 +1394,13 @@ public class SemanticAnalyzer implements ASTVisitor {
                         current.column());
             }
 
+            if (parent.isFinal()) {
+                throw new SemanticException(
+                        "A classe final '" + parent.name() + "' não pode ser estendida.",
+                        current.line(),
+                        current.column());
+            }
+
             current = parent;
         }
 
@@ -1488,11 +1562,17 @@ public class SemanticAnalyzer implements ASTVisitor {
             targetClass = classes.get(currentClassNode.superClass());
         }
 
-        ConstructorRecord targetConstructor = resolveConstructorInvocation(
-                targetClass,
-                invocation.arguments(),
-                invocation.line(),
-                invocation.column());
+        ConstructorRecord targetConstructor;
+        currentConstructorInvocationArguments = true;
+        try {
+            targetConstructor = resolveConstructorInvocation(
+                    targetClass,
+                    invocation.arguments(),
+                    invocation.line(),
+                    invocation.column());
+        } finally {
+            currentConstructorInvocationArguments = false;
+        }
         if (targetConstructor != null
                 && !isConstructorAccessible(
                         targetConstructor,
@@ -2234,10 +2314,12 @@ public class SemanticAnalyzer implements ASTVisitor {
         FunctionRecord previousFunction = currentFunction;
         boolean previousConstructor = currentConstructor;
         boolean previousDelegation = currentConstructorDelegatesToThis;
+        boolean previousInvocationArguments = currentConstructorInvocationArguments;
         Set<String> previousAssignedFinalFields = assignedFinalFields;
         Set<VariableSymbolRecord> previousAssignedVariables =
                 definitelyAssignedVariables;
         currentConstructor = true;
+        currentConstructorInvocationArguments = false;
         currentConstructorDelegatesToThis = node.invocation() != null
                 && node.invocation().delegatesToThis();
         assignedFinalFields = new HashSet<>();
@@ -2265,27 +2347,33 @@ public class SemanticAnalyzer implements ASTVisitor {
                         constructorSignature(delegatedConstructor));
             }
             node.block().accept(this);
-            if (node.invocation() == null
-                    || !node.invocation().delegatesToThis()) {
-                for (AttributeRecord attribute : getCurrentClass().attributes()) {
-                    if (attribute.isFinal()
-                            && attribute.value() == null
-                            && !assignedFinalFields.contains(attribute.name())) {
-                        throw new SemanticException(
-                                "O atributo final '" + attribute.name()
-                                        + "' precisa ser inicializado em todo construtor.",
-                                node.line(),
-                                node.column());
-                    }
-                }
+            if ((node.invocation() == null
+                    || !node.invocation().delegatesToThis())
+                    && canCompleteNormally(node.block())) {
+                validateFinalFieldsInitialized(node.line(), node.column());
             }
         } finally {
             exitScope();
             currentFunction = previousFunction;
             currentConstructor = previousConstructor;
             currentConstructorDelegatesToThis = previousDelegation;
+            currentConstructorInvocationArguments = previousInvocationArguments;
             assignedFinalFields = previousAssignedFinalFields;
             definitelyAssignedVariables = previousAssignedVariables;
+        }
+    }
+
+    private void validateFinalFieldsInitialized(int line, int column) {
+        for (AttributeRecord attribute : getCurrentClass().attributes()) {
+            if (attribute.isFinal()
+                    && attribute.value() == null
+                    && !assignedFinalFields.contains(attribute.name())) {
+                throw new SemanticException(
+                        "O atributo final '" + attribute.name()
+                                + "' precisa ser inicializado em todo construtor.",
+                        line,
+                        column);
+            }
         }
     }
 
@@ -2296,9 +2384,16 @@ public class SemanticAnalyzer implements ASTVisitor {
         enterScope();
 
         try {
-
+            boolean reachable = true;
             for (StatementInterface statement : node.commands()) {
+                if (!reachable) {
+                    throw new SemanticException(
+                            "Código inalcançável.",
+                            currentFunction == null ? 1 : currentFunction.line(),
+                            currentFunction == null ? 1 : currentFunction.column());
+                }
                 statement.accept(this);
+                reachable = canCompleteNormally(statement);
             }
 
         } finally {
@@ -2315,6 +2410,14 @@ public class SemanticAnalyzer implements ASTVisitor {
                 false,
                 node.line(),
                 node.column());
+
+        if (node.isStatic() && node.isFinal() && node.value() == null) {
+            throw new SemanticException(
+                    "O atributo static final '" + node.name()
+                            + "' precisa ser inicializado na declaração.",
+                    node.line(),
+                    node.column());
+        }
 
         if (node.isFinal()
                 && node.value() == null
@@ -2417,31 +2520,56 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         Set<VariableSymbolRecord> assignedBeforeBranches =
                 new HashSet<>(definitelyAssignedVariables);
+        Set<String> finalFieldsBeforeBranches = new HashSet<>(assignedFinalFields);
+
         definitelyAssignedVariables = new HashSet<>(assignedBeforeBranches);
+        assignedFinalFields = new HashSet<>(finalFieldsBeforeBranches);
         node.thenBranch().accept(this);
         Set<VariableSymbolRecord> assignedAfterThen =
                 new HashSet<>(definitelyAssignedVariables);
+        Set<String> finalFieldsAfterThen = new HashSet<>(assignedFinalFields);
+        boolean thenCompletesNormally = canCompleteNormally(node.thenBranch());
 
         if (node.elseBranch() == null) {
-            definitelyAssignedVariables = isAlwaysTrue(node.condition())
-                    ? assignedAfterThen
-                    : assignedBeforeBranches;
+            definitelyAssignedVariables = mergeBranchState(
+                    node.condition(),
+                    assignedBeforeBranches,
+                    assignedAfterThen,
+                    thenCompletesNormally,
+                    assignedBeforeBranches,
+                    true);
+            assignedFinalFields = mergeBranchState(
+                    node.condition(),
+                    finalFieldsBeforeBranches,
+                    finalFieldsAfterThen,
+                    thenCompletesNormally,
+                    finalFieldsBeforeBranches,
+                    true);
             return;
         }
 
         definitelyAssignedVariables = new HashSet<>(assignedBeforeBranches);
+        assignedFinalFields = new HashSet<>(finalFieldsBeforeBranches);
         node.elseBranch().accept(this);
         Set<VariableSymbolRecord> assignedAfterElse =
                 new HashSet<>(definitelyAssignedVariables);
+        Set<String> finalFieldsAfterElse = new HashSet<>(assignedFinalFields);
+        boolean elseCompletesNormally = canCompleteNormally(node.elseBranch());
 
-        if (isAlwaysTrue(node.condition())) {
-            definitelyAssignedVariables = assignedAfterThen;
-        } else if (isAlwaysFalse(node.condition())) {
-            definitelyAssignedVariables = assignedAfterElse;
-        } else {
-            assignedAfterThen.retainAll(assignedAfterElse);
-            definitelyAssignedVariables = assignedAfterThen;
-        }
+        definitelyAssignedVariables = mergeBranchState(
+                node.condition(),
+                assignedBeforeBranches,
+                assignedAfterThen,
+                thenCompletesNormally,
+                assignedAfterElse,
+                elseCompletesNormally);
+        assignedFinalFields = mergeBranchState(
+                node.condition(),
+                finalFieldsBeforeBranches,
+                finalFieldsAfterThen,
+                thenCompletesNormally,
+                finalFieldsAfterElse,
+                elseCompletesNormally);
     }
 
     @Override
@@ -2483,11 +2611,6 @@ public class SemanticAnalyzer implements ASTVisitor {
         } finally {
             exitScope();
         }
-    }
-
-    private boolean isAlwaysFalse(ExpressionInterface expression) {
-        return expression instanceof LiteralRecord literal
-                && Boolean.FALSE.equals(literal.value());
     }
 
     @Override
@@ -2611,11 +2734,20 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(ParameterRecord node) {
 
-        validateTypeExists(
-                node.type(),
-                false,
-                node.line(),
-                node.column());
+        if (node.type().name().equals("String[]")) {
+            if (currentFunction == null || !currentFunction.name().equals("main")) {
+                throw new SemanticException(
+                        "Arrays são suportados apenas como parâmetro de main.",
+                        node.line(),
+                        node.column());
+            }
+        } else {
+            validateTypeExists(
+                    node.type(),
+                    false,
+                    node.line(),
+                    node.column());
+        }
 
         SemanticType parameterType = convertType(node.type());
 
@@ -2638,6 +2770,10 @@ public class SemanticAnalyzer implements ASTVisitor {
                     "Comando return fora de uma função.",
                     node.line(),
                     node.column());
+        }
+
+        if (currentConstructor && !currentConstructorDelegatesToThis) {
+            validateFinalFieldsInitialized(node.line(), node.column());
         }
 
         SemanticType expectedType = convertType(
@@ -2689,18 +2825,6 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(ExpressionStatementRecord node) {
         node.expression().accept(this);
-    }
-
-
-    @Override
-    public void visit(PushRecord node) {
-        node.register().accept(this);
-    }
-
-
-    @Override
-    public void visit(PopRecord node) {
-        node.register().accept(this);
     }
 
 

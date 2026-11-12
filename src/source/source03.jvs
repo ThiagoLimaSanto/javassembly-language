@@ -1,5 +1,5 @@
 public class Literais {
-    public func void main() {
+    public static func void main() {
         int quantidade = 10;
         double preco = 2.5;
         String mensagem = "Teste de literais";

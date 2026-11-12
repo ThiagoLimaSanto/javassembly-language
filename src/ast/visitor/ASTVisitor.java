@@ -18,10 +18,8 @@ import src.ast.records.MemberAccessRecord;
 import src.ast.records.MemberCallRecord;
 import src.ast.records.NewObjectRecord;
 import src.ast.records.ParameterRecord;
-import src.ast.records.PopRecord;
 import src.ast.records.PrintRecord;
 import src.ast.records.ProgramRecord;
-import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
 import src.ast.records.RegisterDeclarationRecord;
 import src.ast.records.ReturnRecord;
@@ -78,10 +76,6 @@ public interface ASTVisitor {
     void visit(CallRecord node);
 
     void visit(ExpressionStatementRecord node);
-
-    void visit(PushRecord node);
-
-    void visit(PopRecord node);
 
     void visit(AttributeRecord node);
 

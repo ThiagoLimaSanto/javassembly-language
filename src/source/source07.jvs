@@ -1,18 +1,11 @@
 public class Registradores {
-    public func void main() {
-        push R0;
-        push R1;
-        push R2;
-
+    public static func void main() {
         mostrar();
 
-        pop R2;
-        pop R1;
-        pop R0;
         return;
     }
 
-    private func void mostrar() {
+    private static func void mostrar() {
         print R0;
         print R1;
         print R2;

@@ -39,8 +39,6 @@ public enum TokenType {
     SUB,
     MUL,
     DIV,
-    PUSH,
-    POP,
     CMP,
     PRINT,
 
@@ -60,6 +58,8 @@ public enum TokenType {
 
     OPEN_BRACE,
     CLOSE_BRACE,
+    OPEN_BRACKET,
+    CLOSE_BRACKET,
     OPEN_PARENTHESIS,
     CLOSE_PARENTHESIS,
 

@@ -19,6 +19,7 @@ import src.ast.records.RegisterDeclarationRecord;
 import src.exceptions.SemanticException;
 import src.lexer.Lexer;
 import src.lexer.Token;
+import src.lexer.TokenType;
 import src.parser.Parser;
 
 final class SourceProjectLoader {
@@ -83,6 +84,20 @@ final class SourceProjectLoader {
             if (!typeExists) {
                 throw new SemanticException(
                         "O arquivo importado não declara o tipo '" + importedType + "'.",
+                        1,
+                        1);
+            }
+
+            boolean typeIsPublic = importedUnit.classes().stream()
+                    .anyMatch(classNode -> simpleName(classNode.name()).equals(expectedType)
+                            && classNode.visibility() == TokenType.PUBLIC)
+                    || importedUnit.interfaces().stream()
+                            .anyMatch(interfaceNode -> simpleName(interfaceNode.name()).equals(expectedType)
+                                    && interfaceNode.visibility() == TokenType.PUBLIC);
+            if (!expectedPackage.equals(unit.packageName()) && !typeIsPublic) {
+                throw new SemanticException(
+                        "O tipo '" + importedType
+                                + "' não é público e não pode ser importado de outro package.",
                         1,
                         1);
             }

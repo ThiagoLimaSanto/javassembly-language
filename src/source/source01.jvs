@@ -1,10 +1,10 @@
 public class Main{
 
-    private int a = 10;
-    private int b = 10;
+    private static int a = 10;
+    private static int b = 10;
 
-    public func void main(String args){
-        int result = sum(5);
+    public static func void main(String args){
+        int result = sum(5, 10);
         String text = text();
         int a = 2;
         int b = a;
@@ -16,11 +16,11 @@ public class Main{
         }
     }
 
-    public func int sum(int a, int b){
+    public static func int sum(int a, int b){
         return add a, b;
     }
 
-    public func String text(){
+    public static func String text(){
         return "texto";
     }
 }

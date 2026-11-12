@@ -45,8 +45,6 @@ public class Lexer {
             Map.entry("mov", TokenType.MOV),
             Map.entry("cmp", TokenType.CMP),
             Map.entry("print", TokenType.PRINT),
-            Map.entry("push", TokenType.PUSH),
-            Map.entry("pop", TokenType.POP),
 
             Map.entry("return", TokenType.RETURN),
             Map.entry("while", TokenType.WHILE),
@@ -69,6 +67,8 @@ public class Lexer {
     private static final Map<String, TokenType> SYMBOLS = Map.ofEntries(
             Map.entry("{", TokenType.OPEN_BRACE),
             Map.entry("}", TokenType.CLOSE_BRACE),
+            Map.entry("[", TokenType.OPEN_BRACKET),
+            Map.entry("]", TokenType.CLOSE_BRACKET),
             Map.entry("(", TokenType.OPEN_PARENTHESIS),
             Map.entry(")", TokenType.CLOSE_PARENTHESIS),
             Map.entry(";", TokenType.SEMICOLON),
@@ -159,7 +159,7 @@ public class Lexer {
 
     public boolean isSymbol(char character) {
         return switch (character) {
-            case '{', '}', '(', ')', ';', ',', '.', '=', '"', '\'' -> true;
+            case '{', '}', '[', ']', '(', ')', ';', ',', '.', '=', '"', '\'' -> true;
             default -> false;
         };
     }

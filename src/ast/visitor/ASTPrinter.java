@@ -20,10 +20,8 @@ import src.ast.records.MemberAccessRecord;
 import src.ast.records.MemberCallRecord;
 import src.ast.records.NewObjectRecord;
 import src.ast.records.ParameterRecord;
-import src.ast.records.PopRecord;
 import src.ast.records.PrintRecord;
 import src.ast.records.ProgramRecord;
-import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
 import src.ast.records.RegisterDeclarationRecord;
 import src.ast.records.ReturnRecord;
@@ -81,7 +79,9 @@ public class ASTPrinter implements ASTVisitor {
 
     @Override
     public void visit(ClassRecord node) {
-        printLine("Classe: " + node.name() + (node.isAbstract() ? " [ABSTRACT]" : ""));
+        printLine("Classe: " + node.name()
+                + (node.isAbstract() ? " [ABSTRACT]" : "")
+                + (node.isFinal() ? " [FINAL]" : ""));
 
         if (node.superClass() != null) {
             printLine("  Extends: " + node.superClass());
@@ -290,18 +290,6 @@ public class ASTPrinter implements ASTVisitor {
     public void visit(ExpressionStatementRecord node) {
         printLine("Comando de expressão");
         visitChild(node.expression());
-    }
-
-    @Override
-    public void visit(PushRecord node) {
-        printLine("Push");
-        visitChild(node.register());
-    }
-
-    @Override
-    public void visit(PopRecord node) {
-        printLine("Pop");
-        visitChild(node.register());
     }
 
     @Override

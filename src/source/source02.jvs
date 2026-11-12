@@ -1,10 +1,9 @@
 R0 = 0;
 
 class Main{
-    public func void main(){
+    public static func void main(){
         int a = 0;
         while (and cmp.ge a, 0, cmp.lt a, 10) {
-            push R0;
             a = add a, 1;
         }
     }

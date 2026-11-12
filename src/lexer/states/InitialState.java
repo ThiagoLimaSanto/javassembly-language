@@ -19,7 +19,7 @@ public class InitialState implements LexerState {
             return;
         }
 
-        if (Character.isLetter(currentCharacter)) {
+        if (Character.isLetter(currentCharacter) || currentCharacter == '_') {
             lexer.changeState(new IdentifierState(this.line, this.column));
             return;
         }

@@ -15,6 +15,7 @@ public record ClassRecord(
         List<FunctionRecord> functions,
         List<ConstructorRecord> constructors,
         boolean isAbstract,
+        boolean isFinal,
         int line,
         int column) implements ASTNode {
 
@@ -25,9 +26,45 @@ public record ClassRecord(
             List<String> interfaces,
             List<AttributeRecord> attributes,
             List<FunctionRecord> functions,
+            List<ConstructorRecord> constructors,
+            boolean isAbstract,
             int line,
             int column) {
-        this(visibility, name, superClass, interfaces, attributes, functions, List.of(), false, line, column);
+        this(
+                visibility,
+                name,
+                superClass,
+                interfaces,
+                attributes,
+                functions,
+                constructors,
+                isAbstract,
+                false,
+                line,
+                column);
+    }
+
+    public ClassRecord(
+            TokenType visibility,
+            String name,
+            String superClass,
+            List<String> interfaces,
+            List<AttributeRecord> attributes,
+            List<FunctionRecord> functions,
+            int line,
+            int column) {
+        this(
+                visibility,
+                name,
+                superClass,
+                interfaces,
+                attributes,
+                functions,
+                List.of(),
+                false,
+                false,
+                line,
+                column);
     }
 
     @Override

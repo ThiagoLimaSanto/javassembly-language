@@ -16,7 +16,11 @@ public class IdentifierState implements LexerState {
     public void process(Lexer lexer) {
         StringBuilder text = new StringBuilder();
 
-        while (!lexer.finished() && Character.isLetterOrDigit(lexer.current())) {
+        while (!lexer.finished()) {
+            char character = lexer.current();
+            if (!Character.isLetterOrDigit(character) && character != '_') {
+                break;
+            }
             text.append(lexer.advance());
         }
 
