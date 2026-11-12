@@ -9,6 +9,7 @@ import src.lexer.TokenType;
 public record ConstructorRecord(
         TokenType visibility,
         List<ParameterRecord> parameters,
+        ConstructorInvocationRecord invocation,
         BlockRecord block,
         int line,
         int column) implements ASTNode {

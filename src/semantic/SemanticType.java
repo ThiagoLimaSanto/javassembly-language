@@ -15,11 +15,19 @@ public record SemanticType(
         return new SemanticType(null, name);
     }
 
+    public static SemanticType nullType() {
+        return new SemanticType(TokenType.NULL, null);
+    }
+
     public boolean isPrimitive() {
-        return primitiveType != null;
+        return primitiveType != null && primitiveType != TokenType.NULL;
     }
 
     public boolean isClass() {
         return className != null;
+    }
+
+    public boolean isNull() {
+        return primitiveType == TokenType.NULL;
     }
 }

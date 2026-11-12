@@ -23,6 +23,10 @@ public record LiteralRecord(Object value) implements ExpressionInterface {
             return TokenType.BOOLEAN;
         }
 
+        if (value == null) {
+            return TokenType.NULL;
+        }
+
         return null;
     }
 

@@ -14,6 +14,7 @@ import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
 import src.ast.records.ClassRecord;
 import src.ast.records.ConstructorRecord;
+import src.ast.records.ConstructorInvocationRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
@@ -652,10 +653,45 @@ public class Parser {
                 tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '(' após nome do construtor");
                 List<ParameterRecord> parameters = parameters();
                 tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')' após parâmetros");
+
+                tokens.consume(TokenType.OPEN_BRACE, "Esperado '{' no construtor");
+                ConstructorInvocationRecord invocation = null;
+                if ((tokens.verify(TokenType.THIS) || tokens.verify(TokenType.SUPER))
+                                && tokens.peekNext().getType() == TokenType.OPEN_PARENTHESIS) {
+                        Token invocationToken = tokens.current();
+                        boolean delegatesToThis = tokens.verify(TokenType.THIS);
+                        tokens.consume(
+                                        invocationToken.getType(),
+                                        "Esperado 'this' ou 'super'");
+                        tokens.consume(
+                                        TokenType.OPEN_PARENTHESIS,
+                                        "Esperado '(' após invocação do construtor");
+                        List<ExpressionInterface> invocationArguments = arguments();
+                        tokens.consume(
+                                        TokenType.CLOSE_PARENTHESIS,
+                                        "Esperado ')' após argumentos do construtor");
+                        tokens.consume(
+                                        TokenType.SEMICOLON,
+                                        "Esperado ';' após invocação do construtor");
+                        invocation = new ConstructorInvocationRecord(
+                                        delegatesToThis,
+                                        invocationArguments,
+                                        invocationToken.getLine(),
+                                        invocationToken.getColumn());
+                }
+
+                List<StatementInterface> commands = new ArrayList<>();
+                while (!tokens.verify(TokenType.CLOSE_BRACE)
+                                && !tokens.verify(TokenType.EOF)) {
+                        commands.add(statement());
+                }
+                tokens.consume(TokenType.CLOSE_BRACE, "Esperado '}' após construtor");
+
                 return new ConstructorRecord(
                                 visibility,
                                 parameters,
-                                block(),
+                                invocation,
+                                new BlockRecord(commands),
                                 name.getLine(),
                                 name.getColumn());
         }
@@ -1218,6 +1254,11 @@ public class Parser {
 
                         case TRUE, FALSE ->
                                 booleanExpression();
+
+                        case NULL -> {
+                                tokens.consume(TokenType.NULL, "Esperado 'null'");
+                                yield new LiteralRecord(null);
+                        }
 
                         case ADD, SUB, MUL, DIV, AND, OR ->
                                 operation();

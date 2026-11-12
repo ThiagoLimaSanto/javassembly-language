@@ -1,7 +1,6 @@
 package src.lexer;
 public enum TokenType {
 
-    // Palavras-chave
     FUNC,
     INT,
     WHILE,
@@ -33,7 +32,6 @@ public enum TokenType {
     VOID,
     MAIN,
 
-    // Instruções Assembly
     MOV,
     ADD,
     SUB,
@@ -44,36 +42,30 @@ public enum TokenType {
     CMP,
     PRINT,
 
-    // Condições do CMP
-    EQ,     // equal
-    NE,     // not equal
-    LT,     // less than
-    GT,     // greater than
-    LE,     // less or equal
-    GE,     // greater or equal
+    EQ,
+    NE,
+    LT,
+    GT,
+    LE,
+    GE,
 
-    // Registradores e identificadores
     REGISTER,
     IDENTIFIER,
 
-    // Operadores
     ASSIGN,
     AND,
     OR,
 
-    // Delimitadores
     OPEN_BRACE,
     CLOSE_BRACE,
     OPEN_PARENTHESIS,
     CLOSE_PARENTHESIS,
 
-    // Separadores
     SEMICOLON,
     COMMA,
     DOT,
     QUOTE,
     SINGLE_QUOTE,
 
-    // Fim de arquivo
     EOF
 }

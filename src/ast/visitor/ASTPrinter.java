@@ -112,6 +112,14 @@ public class ASTPrinter implements ASTVisitor {
         for (ParameterRecord parameter : node.parameters()) {
             visitChild(parameter);
         }
+        if (node.invocation() != null) {
+            printLine(node.invocation().delegatesToThis()
+                    ? "Delegação this(...)"
+                    : "Chamada super(...)");
+            for (ExpressionInterface argument : node.invocation().arguments()) {
+                visitChild(argument);
+            }
+        }
         visitChild(node.block());
     }
 

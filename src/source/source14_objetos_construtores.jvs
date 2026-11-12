@@ -5,14 +5,12 @@ public abstract class FormaBase {
         this.medida = medida;
     }
 
-    public FormaBase() {
-    }
-
     public abstract func int calcular();
 }
 
 public class Quadrado extends FormaBase {
-    public Quadrado(int lado) {
+    public Quadrado(int lado, int medida) {
+        super(medida);
         this.medida = lado;
     }
 
@@ -23,7 +21,7 @@ public class Quadrado extends FormaBase {
 
 public class TesteObjetos {
     public static func void main() {
-        FormaBase forma = new Quadrado(4);
+        FormaBase forma = new Quadrado(4, 5);
         int area = forma.calcular();
         return;
     }
