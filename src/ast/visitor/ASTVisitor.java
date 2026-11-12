@@ -8,11 +8,9 @@ import src.ast.records.CallRecord;
 import src.ast.records.ClassRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
+import src.ast.records.ForRecord;
 import src.ast.records.FunctionRecord;
 import src.ast.records.InterfaceRecord;
-import src.ast.records.JERecord;
-import src.ast.records.JMPRecord;
-import src.ast.records.LabelRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
 import src.ast.records.MemberCallRecord;
@@ -48,6 +46,8 @@ public interface ASTVisitor {
 
     void visit(WhileRecord node);
 
+    void visit(ForRecord node);
+
     void visit(BinaryExpressionRecord node);
 
     void visit(LiteralRecord node);
@@ -73,12 +73,6 @@ public interface ASTVisitor {
     void visit(PushRecord node);
 
     void visit(PopRecord node);
-
-    void visit(LabelRecord node);
-
-    void visit(JMPRecord node);
-
-    void visit(JERecord node);
 
     void visit(AttributeRecord node);
 

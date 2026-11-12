@@ -1,19 +1,16 @@
-public class Saltos {
+public class Iteracoes {
     public func void main() {
-        int a = 10;
-        int b = 20;
+        int soma = 0;
 
-        cmp.eq a, b;
-        je iguais;
+        for (int i = 0; cmp.lt i, 5; i = add i, 1) {
+            soma = add soma, i;
+        }
 
-        print "Valores diferentes";
-        jmp fim;
+        while (cmp.lt soma, 20) {
+            soma = add soma, 1;
+        }
 
-        iguais:
-        print "Valores iguais";
-
-        fim:
-        print "Fim da comparacao";
+        print soma;
         return;
     }
 }

@@ -10,11 +10,9 @@ import src.ast.records.CallRecord;
 import src.ast.records.ClassRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
+import src.ast.records.ForRecord;
 import src.ast.records.FunctionRecord;
 import src.ast.records.InterfaceRecord;
-import src.ast.records.JERecord;
-import src.ast.records.JMPRecord;
-import src.ast.records.LabelRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
 import src.ast.records.MemberCallRecord;
@@ -155,6 +153,21 @@ public class ASTPrinter implements ASTVisitor {
     }
 
     @Override
+    public void visit(ForRecord node) {
+        printLine("For");
+        if (node.initializer() != null) {
+            visitNamedChild("Inicialização", node.initializer());
+        }
+        if (node.condition() != null) {
+            visitNamedChild("Condição", node.condition());
+        }
+        if (node.update() != null) {
+            visitNamedChild("Atualização", node.update());
+        }
+        visitChild(node.block());
+    }
+
+    @Override
     public void visit(BinaryExpressionRecord node) {
         printLine(node.operator().toString());
         visitChild(node.left());
@@ -245,21 +258,6 @@ public class ASTPrinter implements ASTVisitor {
     public void visit(PopRecord node) {
         printLine("Pop");
         visitChild(node.register());
-    }
-
-    @Override
-    public void visit(LabelRecord node) {
-        printLine("Label: " + node.name());
-    }
-
-    @Override
-    public void visit(JMPRecord node) {
-        printLine("JMP → " + node.target());
-    }
-
-    @Override
-    public void visit(JERecord node) {
-        printLine("JE → " + node.target());
     }
 
     @Override

@@ -1,5 +1,5 @@
 public class Cadastro {
-    private static final Pessoa pessoa;
+    private static Pessoa pessoa;
     public final static int limite = 100;
     private double taxa = 2.5;
     private String titulo = "Cadastro de pessoas";

@@ -13,11 +13,9 @@ import src.ast.records.CallRecord;
 import src.ast.records.ClassRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
+import src.ast.records.ForRecord;
 import src.ast.records.FunctionRecord;
 import src.ast.records.InterfaceRecord;
-import src.ast.records.JERecord;
-import src.ast.records.JMPRecord;
-import src.ast.records.LabelRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
 import src.ast.records.MemberCallRecord;
@@ -619,6 +617,9 @@ public class Parser {
                         case WHILE ->
                                 whileStatement();
 
+                        case FOR ->
+                                forStatement();
+
                         case RETURN ->
                                 returnStatement();
 
@@ -639,12 +640,6 @@ public class Parser {
 
                                 yield identifierStatement();
                         }
-
-                        case JMP ->
-                                jumpStatement();
-
-                        case JE ->
-                                jumpEqualStatement();
 
                         case CMP ->
                                 comparisonStatement();
@@ -758,6 +753,10 @@ public class Parser {
         }
 
         private StatementInterface declaration() {
+                return declaration(true);
+        }
+
+        private StatementInterface declaration(boolean consumeSemicolon) {
 
                 Token typeToken = tokens.current();
 
@@ -778,9 +777,11 @@ public class Parser {
                         value = expression();
                 }
 
-                tokens.consume(
-                                TokenType.SEMICOLON,
-                                "Esperado ';' após declaração");
+                if (consumeSemicolon) {
+                        tokens.consume(
+                                        TokenType.SEMICOLON,
+                                        "Esperado ';' após declaração");
+                }
 
                 return new DeclarationRecord(
                                 type,
@@ -865,19 +866,14 @@ public class Parser {
         }
 
         private StatementInterface identifierStatement() {
+                return identifierStatement(true);
+        }
+
+        private StatementInterface identifierStatement(boolean consumeSemicolon) {
 
                 Token name = tokens.consume(
                                 TokenType.IDENTIFIER,
                                 "Esperado um identificador");
-
-                if (tokens.verify(TokenType.COLON)) {
-
-                        tokens.consume(
-                                        TokenType.COLON,
-                                        "Esperado ':' após identificador");
-
-                        return new LabelRecord(name.getLexeme());
-                }
 
                 if (tokens.verify(TokenType.ASSIGN)) {
                         tokens.consume(
@@ -886,9 +882,11 @@ public class Parser {
 
                         ExpressionInterface value = expression();
 
-                        tokens.consume(
-                                        TokenType.SEMICOLON,
-                                        "Esperado ';' após atribuição");
+                        if (consumeSemicolon) {
+                                tokens.consume(
+                                                TokenType.SEMICOLON,
+                                                "Esperado ';' após atribuição");
+                        }
 
                         return new AssignmentRecord(
                                         new VariableRecord(
@@ -915,9 +913,11 @@ public class Parser {
                                                 TokenType.ASSIGN,
                                                 "Esperado '='");
                                 ExpressionInterface value = expression();
-                                tokens.consume(
-                                                TokenType.SEMICOLON,
-                                                "Esperado ';' após atribuição");
+                                if (consumeSemicolon) {
+                                        tokens.consume(
+                                                        TokenType.SEMICOLON,
+                                                        "Esperado ';' após atribuição");
+                                }
                                 return new AssignmentRecord(
                                                 member,
                                                 value,
@@ -925,17 +925,21 @@ public class Parser {
                                                 name.getColumn());
                         }
 
-                        tokens.consume(
-                                        TokenType.SEMICOLON,
-                                        "Esperado ';' após acesso ao membro");
+                        if (consumeSemicolon) {
+                                tokens.consume(
+                                                TokenType.SEMICOLON,
+                                                "Esperado ';' após acesso ao membro");
+                        }
                         return new ExpressionStatementRecord(member);
                 }
 
                 CallRecord call = functionCall(name);
 
-                tokens.consume(
-                                TokenType.SEMICOLON,
-                                "Esperado ';' após chamada de função");
+                if (consumeSemicolon) {
+                        tokens.consume(
+                                        TokenType.SEMICOLON,
+                                        "Esperado ';' após chamada de função");
+                }
 
                 return new ExpressionStatementRecord(call);
         }
@@ -967,6 +971,73 @@ public class Parser {
                                 block,
                                 whileToken.getLine(),
                                 whileToken.getColumn());
+        }
+
+        private StatementInterface forStatement() {
+                Token forToken = tokens.consume(
+                                TokenType.FOR,
+                                "Esperado 'for'");
+
+                tokens.consume(
+                                TokenType.OPEN_PARENTHESIS,
+                                "Esperado '(' após 'for'");
+
+                StatementInterface initializer = null;
+                if (!tokens.verify(TokenType.SEMICOLON)) {
+                        initializer = forClause(true);
+                }
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após inicialização do for");
+
+                ExpressionInterface condition = null;
+                if (!tokens.verify(TokenType.SEMICOLON)) {
+                        condition = expression();
+                }
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após condição do for");
+
+                StatementInterface update = null;
+                if (!tokens.verify(TokenType.CLOSE_PARENTHESIS)) {
+                        update = forClause(false);
+                }
+
+                tokens.consume(
+                                TokenType.CLOSE_PARENTHESIS,
+                                "Esperado ')' após cabeçalho do for");
+
+                return new ForRecord(
+                                initializer,
+                                condition,
+                                update,
+                                block(),
+                                forToken.getLine(),
+                                forToken.getColumn());
+        }
+
+        private StatementInterface forClause(boolean allowDeclaration) {
+                TokenType current = tokens.current().getType();
+                if (allowDeclaration
+                                && (current == TokenType.INT
+                                                || current == TokenType.DOUBLE
+                                                || current == TokenType.BOOLEAN
+                                                || current == TokenType.STRING
+                                                || (current == TokenType.IDENTIFIER
+                                                                && tokens.peekNext().getType() == TokenType.IDENTIFIER))) {
+                        return declaration(false);
+                }
+
+                if (current == TokenType.IDENTIFIER) {
+                        return identifierStatement(false);
+                }
+
+                throw syntacticError(
+                                allowDeclaration
+                                                ? "Inicialização do for deve ser uma declaração ou expressão."
+                                                : "Atualização do for deve ser uma expressão.");
         }
 
         // =========================================================
@@ -1034,44 +1105,6 @@ public class Parser {
                                                 register.getLexeme(),
                                                 register.getLine(),
                                                 register.getColumn()));
-        }
-
-        // =========================================================
-        // SALTOS
-        // =========================================================
-
-        private JMPRecord jumpStatement() {
-
-                tokens.consume(
-                                TokenType.JMP,
-                                "Esperado 'jmp'");
-
-                Token name = tokens.consume(
-                                TokenType.IDENTIFIER,
-                                "Esperado um identificador");
-
-                tokens.consume(
-                                TokenType.SEMICOLON,
-                                "Esperado ';' após jmp");
-
-                return new JMPRecord(name.getLexeme());
-        }
-
-        private JERecord jumpEqualStatement() {
-
-                tokens.consume(
-                                TokenType.JE,
-                                "Esperado 'je'");
-
-                Token name = tokens.consume(
-                                TokenType.IDENTIFIER,
-                                "Esperado um identificador");
-
-                tokens.consume(
-                                TokenType.SEMICOLON,
-                                "Esperado ';' após je");
-
-                return new JERecord(name.getLexeme());
         }
 
         // =========================================================

@@ -39,8 +39,6 @@ public class Lexer {
             Map.entry("div", TokenType.DIV),
             Map.entry("mov", TokenType.MOV),
             Map.entry("cmp", TokenType.CMP),
-            Map.entry("jmp", TokenType.JMP),
-            Map.entry("je", TokenType.JE),
             Map.entry("print", TokenType.PRINT),
             Map.entry("push", TokenType.PUSH),
             Map.entry("pop", TokenType.POP),
@@ -71,7 +69,6 @@ public class Lexer {
             Map.entry(";", TokenType.SEMICOLON),
             Map.entry(",", TokenType.COMMA),
             Map.entry(".", TokenType.DOT),
-            Map.entry(":", TokenType.COLON),
             Map.entry("=", TokenType.ASSIGN),
             Map.entry("\"", TokenType.QUOTE),
             Map.entry("'", TokenType.SINGLE_QUOTE));

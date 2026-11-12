@@ -1150,10 +1150,10 @@ public class SemanticAnalyzer implements ASTVisitor {
 
             case AND:
             case OR:
-                if (left.primitiveType() != TokenType.BOOLEAN
-                        || right.primitiveType() != TokenType.BOOLEAN) {
+                if (!isBoolean(left) || !isBoolean(right)) {
                     throw new SemanticException(
-                            "Operação lógica exige operandos booleanos.",
+                            "O operador '" + operator.name().toLowerCase()
+                                    + "' exige operandos booleanos.",
                             operation.line(),
                             operation.column());
                 }
@@ -1206,6 +1206,12 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         return type.primitiveType() == TokenType.INT
                 || type.primitiveType() == TokenType.DOUBLE;
+    }
+
+    private boolean isBoolean(SemanticType type) {
+        return type != null
+                && type.isPrimitive()
+                && type.primitiveType() == TokenType.BOOLEAN;
     }
 
     private void validateRegisterAssignment(
@@ -1460,6 +1466,15 @@ public class SemanticAnalyzer implements ASTVisitor {
                 node.line(),
                 node.column());
 
+        if (node.isFinal() && node.value() == null) {
+            throw new SemanticException(
+                    "O atributo final '" + node.name()
+                            + "' deve ser inicializado na declaração; "
+                            + "construtores ainda não estão disponíveis.",
+                    node.line(),
+                    node.column());
+        }
+
         SemanticType declaredType = convertType(node.type());
 
         VariableSymbolRecord symbol = new VariableSymbolRecord(
@@ -1504,8 +1519,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     public void visit(WhileRecord node) {
         SemanticType conditionType = getExpressionType(node.expression());
 
-        if (conditionType == null
-                || conditionType.primitiveType() != TokenType.BOOLEAN) {
+        if (!isBoolean(conditionType)) {
 
             throw new SemanticException(
                     "A condição do while deve ser do tipo boolean.",
@@ -1514,6 +1528,35 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         node.block().accept(this);
+    }
+
+    @Override
+    public void visit(ForRecord node) {
+        enterScope();
+
+        try {
+            if (node.initializer() != null) {
+                node.initializer().accept(this);
+            }
+
+            if (node.condition() != null) {
+                SemanticType conditionType = getExpressionType(node.condition());
+                if (!isBoolean(conditionType)) {
+                    throw new SemanticException(
+                            "A condição do for deve ser do tipo boolean.",
+                            node.line(),
+                            node.column());
+                }
+            }
+
+            node.block().accept(this);
+
+            if (node.update() != null) {
+                node.update().accept(this);
+            }
+        } finally {
+            exitScope();
+        }
     }
 
     // =========================================================
@@ -1749,30 +1792,6 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(PopRecord node) {
         node.register().accept(this);
-    }
-
-    // =========================================================
-    // LABEL
-    // =========================================================
-
-    @Override
-    public void visit(LabelRecord node) {
-    }
-
-    // =========================================================
-    // JMP
-    // =========================================================
-
-    @Override
-    public void visit(JMPRecord node) {
-    }
-
-    // =========================================================
-    // JE
-    // =========================================================
-
-    @Override
-    public void visit(JERecord node) {
     }
 
     // =========================================================
