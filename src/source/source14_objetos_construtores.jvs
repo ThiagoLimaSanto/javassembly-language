@@ -20,7 +20,7 @@ public class Quadrado extends FormaBase {
 }
 
 public class TesteObjetos {
-    public static func void main() {
+    public static func void main(String[] args) {
         FormaBase forma = new Quadrado(4, 5);
         int area = forma.calcular();
         return;

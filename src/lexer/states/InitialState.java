@@ -37,6 +37,33 @@ public class InitialState implements LexerState {
             return;
         }
 
+        if (currentCharacter == '/' && lexer.nextIs('/')) {
+            lexer.advance();
+            lexer.advance();
+            while (!lexer.finished()
+                    && !lexer.isLineTerminator(lexer.current())) {
+                lexer.advance();
+            }
+            return;
+        }
+
+        if (currentCharacter == '/' && lexer.nextIs('*')) {
+            lexer.advance();
+            lexer.advance();
+            while (!lexer.finished()) {
+                if (lexer.current() == '*' && lexer.nextIs('/')) {
+                    lexer.advance();
+                    lexer.advance();
+                    return;
+                }
+                lexer.advance();
+            }
+            throw new LexicalException(
+                    "Faltando delimitador de comentário.",
+                    this.line,
+                    this.column);
+        }
+
         if (lexer.isSymbol(currentCharacter)) {
             String lexeme = String.valueOf(lexer.advance());
 

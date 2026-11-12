@@ -84,7 +84,7 @@ class ClienteRepositorio {
 }
 
 public class Programa {
-    public static func void main() {
+    public static func void main(String[] args) {
         R0 = add R0, 5;
         print R0;
         print and True, or False, True;

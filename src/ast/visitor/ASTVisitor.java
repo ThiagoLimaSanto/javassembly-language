@@ -1,6 +1,9 @@
 package src.ast.visitor;
 
 import src.ast.records.AssignmentRecord;
+import src.ast.records.ArrayAccessRecord;
+import src.ast.records.ArrayCreationRecord;
+import src.ast.records.ArrayInitializerRecord;
 import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
@@ -92,4 +95,10 @@ public interface ASTVisitor {
     void visit(ThisCallRecord node);
 
     void visit(AssignmentRecord node);
+
+    void visit(ArrayAccessRecord node);
+
+    void visit(ArrayCreationRecord node);
+
+    void visit(ArrayInitializerRecord node);
 }

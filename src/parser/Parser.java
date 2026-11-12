@@ -8,6 +8,9 @@ import java.util.Map;
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
 import src.ast.records.AssignmentRecord;
+import src.ast.records.ArrayAccessRecord;
+import src.ast.records.ArrayCreationRecord;
+import src.ast.records.ArrayInitializerRecord;
 import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
@@ -523,6 +526,10 @@ public class Parser {
         }
 
         private TypeRecord type() {
+                return type(true);
+        }
+
+        private TypeRecord type(boolean allowArray) {
 
                 Token token = tokens.current();
 
@@ -541,7 +548,7 @@ public class Parser {
                                 String typeName = token.getType() == TokenType.IDENTIFIER
                                                 ? resolveTypeName(token.getLexeme())
                                                 : token.getLexeme();
-                                while (tokens.verify(TokenType.OPEN_BRACKET)) {
+                                while (allowArray && tokens.verify(TokenType.OPEN_BRACKET)) {
                                         tokens.consume(
                                                         TokenType.OPEN_BRACKET,
                                                         "Esperado '[' no tipo de array");
@@ -622,20 +629,9 @@ public class Parser {
 
                 TypeRecord returnType = returnType();
 
-                Token name;
-
-                if (tokens.verify(TokenType.MAIN)) {
-
-                        name = tokens.consume(
-                                        TokenType.MAIN,
-                                        "Esperado função 'main'");
-
-                } else {
-
-                        name = tokens.consume(
-                                        TokenType.IDENTIFIER,
-                                        "Esperado nome da função");
-                }
+                Token name = tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado nome da função");
 
                 tokens.consume(
                                 TokenType.OPEN_PARENTHESIS,
@@ -811,7 +807,7 @@ public class Parser {
 
                         case IDENTIFIER -> {
 
-                                if (tokens.peekNext().getType() == TokenType.IDENTIFIER) {
+                                if (isVariableDeclarationStart()) {
                                         yield declaration();
                                 }
 
@@ -823,7 +819,28 @@ public class Parser {
 
                         case SUPER -> {
 
+                                Token superToken = tokens.current();
                                 ExpressionInterface expression = superExpression();
+                                expression = postfixExpression(expression);
+                                if (tokens.verify(TokenType.ASSIGN)) {
+                                        tokens.consume(
+                                                        TokenType.ASSIGN,
+                                                        "Esperado '=' após destino");
+                                        ExpressionInterface value = expression();
+                                        tokens.consume(
+                                                        TokenType.SEMICOLON,
+                                                        "Esperado ';' após atribuição");
+                                        yield new AssignmentRecord(
+                                                        expression,
+                                                        value,
+                                                        superToken.getLine(),
+                                                        superToken.getColumn());
+                                }
+                                if (!(expression instanceof SuperCallRecord)
+                                                && !(expression instanceof MemberCallRecord)) {
+                                        throw syntacticError(
+                                                        "Um acesso a atributo não pode ser usado como comando.");
+                                }
 
                                 tokens.consume(
                                                 TokenType.SEMICOLON,
@@ -881,6 +898,7 @@ public class Parser {
                                 TokenType.IDENTIFIER,
                                 "Esperado nome de atributo ou método após this.");
 
+                ExpressionInterface expression;
                 if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
                         tokens.consume(
                                         TokenType.OPEN_PARENTHESIS,
@@ -891,38 +909,47 @@ public class Parser {
                         tokens.consume(
                                         TokenType.CLOSE_PARENTHESIS,
                                         "Esperado ')' após argumentos");
-                        tokens.consume(
-                                        TokenType.SEMICOLON,
-                                        "Esperado ';' após chamada do método");
-
-                        return new ExpressionStatementRecord(
-                                        new ThisCallRecord(
-                                                        member.getLexeme(),
-                                                        arguments,
-                                                        thisToken.getLine(),
-                                                        thisToken.getColumn()));
+                        expression = new ThisCallRecord(
+                                        member.getLexeme(),
+                                        arguments,
+                                        thisToken.getLine(),
+                                        thisToken.getColumn());
+                } else {
+                        expression = new ThisAttributeRecord(
+                                        member.getLexeme(),
+                                        thisToken.getLine(),
+                                        thisToken.getColumn());
                 }
 
-                ThisAttributeRecord target = new ThisAttributeRecord(
-                                member.getLexeme(),
-                                thisToken.getLine(),
-                                thisToken.getColumn());
+                expression = postfixExpression(expression);
 
-                tokens.consume(
-                                TokenType.ASSIGN,
-                                "Esperado '=' após atributo");
+                if (tokens.verify(TokenType.ASSIGN)) {
+                        tokens.consume(
+                                        TokenType.ASSIGN,
+                                        "Esperado '=' após atributo");
 
-                ExpressionInterface value = expression();
+                        ExpressionInterface value = expression();
 
+                        tokens.consume(
+                                        TokenType.SEMICOLON,
+                                        "Esperado ';' após atribuição");
+
+                        return new AssignmentRecord(
+                                        expression,
+                                        value,
+                                        thisToken.getLine(),
+                                        thisToken.getColumn());
+                }
+
+                if (!(expression instanceof ThisCallRecord)
+                                && !(expression instanceof MemberCallRecord)) {
+                        throw syntacticError(
+                                        "Um acesso a atributo não pode ser usado como comando.");
+                }
                 tokens.consume(
                                 TokenType.SEMICOLON,
-                                "Esperado ';' após atribuição");
-
-                return new AssignmentRecord(
-                                target,
-                                value,
-                                thisToken.getLine(),
-                                thisToken.getColumn());
+                                "Esperado ';' após chamada do método");
+                return new ExpressionStatementRecord(expression);
         }
 
         private StatementInterface registerAssignment() {
@@ -1067,6 +1094,17 @@ public class Parser {
                                 TokenType.IDENTIFIER,
                                 "Esperado um identificador");
 
+                ExpressionInterface targetOrCall;
+                if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
+                        targetOrCall = functionCall(name);
+                } else {
+                        targetOrCall = new VariableRecord(
+                                        name.getLexeme(),
+                                        name.getLine(),
+                                        name.getColumn());
+                }
+                targetOrCall = postfixExpression(targetOrCall);
+
                 if (tokens.verify(TokenType.ASSIGN)) {
                         tokens.consume(
                                         TokenType.ASSIGN,
@@ -1081,59 +1119,28 @@ public class Parser {
                         }
 
                         return new AssignmentRecord(
-                                        new VariableRecord(
-                                                        name.getLexeme(),
-                                                        name.getLine(),
-                                                        name.getColumn()),
+                                        targetOrCall,
                                         value,
                                         name.getLine(),
                                         name.getColumn());
                 }
 
-                if (tokens.verify(TokenType.DOT)) {
-                        ExpressionInterface member = new VariableRecord(
-                                        name.getLexeme(),
-                                        name.getLine(),
-                                        name.getColumn());
-
-                        while (tokens.verify(TokenType.DOT)) {
-                                member = memberAccess(member);
+                if (!(targetOrCall instanceof CallRecord)
+                                && !(targetOrCall instanceof MemberCallRecord)) {
+                        if (targetOrCall instanceof MemberAccessRecord) {
+                                throw syntacticError(
+                                                "Um acesso a atributo não pode ser usado como comando.");
                         }
-
-                        if (tokens.verify(TokenType.ASSIGN)) {
-                                tokens.consume(
-                                                TokenType.ASSIGN,
-                                                "Esperado '='");
-                                ExpressionInterface value = expression();
-                                if (consumeSemicolon) {
-                                        tokens.consume(
-                                                        TokenType.SEMICOLON,
-                                                        "Esperado ';' após atribuição");
-                                }
-                                return new AssignmentRecord(
-                                                member,
-                                                value,
-                                                name.getLine(),
-                                                name.getColumn());
-                        }
+                        throw syntacticError(
+                                        "A expressão não pode ser usada como comando.");
+                }
 
                         if (consumeSemicolon) {
                                 tokens.consume(
                                                 TokenType.SEMICOLON,
-                                                "Esperado ';' após acesso ao membro");
+                                                "Esperado ';' após chamada");
                         }
-                        return new ExpressionStatementRecord(member);
-                }
-
-                CallRecord call = functionCall(name);
-
-                if (consumeSemicolon) {
-                        tokens.consume(
-                                        TokenType.SEMICOLON,
-                                        "Esperado ';' após chamada de função");
-                }
-
-                return new ExpressionStatementRecord(call);
+                return new ExpressionStatementRecord(targetOrCall);
         }
 
         private StatementInterface whileStatement() {
@@ -1214,8 +1221,7 @@ public class Parser {
                                                 || current == TokenType.BOOLEAN
                                                 || current == TokenType.STRING
                                                 || (current == TokenType.IDENTIFIER
-                                                                && tokens.peekNext()
-                                                                                .getType() == TokenType.IDENTIFIER))) {
+                                                                && isVariableDeclarationStart()))) {
                         return declaration(false);
                 }
 
@@ -1245,8 +1251,7 @@ public class Parser {
         }
 
         private ExpressionInterface expression() {
-
-                return switch (tokens.current().getType()) {
+                ExpressionInterface primary = switch (tokens.current().getType()) {
 
                         case NUMBER ->
                                 numberExpression();
@@ -1280,6 +1285,9 @@ public class Parser {
                         case OPEN_PARENTHESIS ->
                                 parenthesisExpression();
 
+                        case OPEN_BRACE ->
+                                arrayInitializer();
+
                         case SUPER ->
                                 superExpression();
 
@@ -1289,6 +1297,30 @@ public class Parser {
                         default -> throw syntacticError(
                                         "Expressão inválida.");
                 };
+                return postfixExpression(primary);
+        }
+
+        private ExpressionInterface postfixExpression(ExpressionInterface expression) {
+                while (true) {
+                        if (tokens.verify(TokenType.OPEN_BRACKET)) {
+                                Token bracket = tokens.consume(
+                                                TokenType.OPEN_BRACKET,
+                                                "Esperado '[' antes do índice");
+                                ExpressionInterface index = expression();
+                                tokens.consume(
+                                                TokenType.CLOSE_BRACKET,
+                                                "Esperado ']' após o índice");
+                                expression = new ArrayAccessRecord(
+                                                expression,
+                                                index,
+                                                bracket.getLine(),
+                                                bracket.getColumn());
+                        } else if (tokens.verify(TokenType.DOT)) {
+                                expression = memberAccess(expression);
+                        } else {
+                                return expression;
+                        }
+                }
         }
 
         private ExpressionInterface thisExpression() {
@@ -1476,21 +1508,57 @@ public class Parser {
                         return functionCall(name);
                 }
 
-                ExpressionInterface expression = new VariableRecord(
+                return new VariableRecord(
                                 name.getLexeme(),
                                 name.getLine(),
                                 name.getColumn());
-
-                while (tokens.verify(TokenType.DOT)) {
-                        expression = memberAccess(expression);
-                }
-
-                return expression;
         }
 
         private ExpressionInterface newObjectExpression() {
                 Token newToken = tokens.consume(TokenType.NEW, "Esperado 'new'");
-                TypeRecord objectType = type();
+                TypeRecord objectType = type(false);
+
+                if (tokens.verify(TokenType.OPEN_BRACKET)) {
+                        List<ExpressionInterface> dimensions = new ArrayList<>();
+                        boolean sawEmptyDimension = false;
+                        int dimensionCount = 0;
+                        while (tokens.verify(TokenType.OPEN_BRACKET)) {
+                                tokens.consume(TokenType.OPEN_BRACKET, "Esperado '['");
+                                dimensionCount++;
+                                if (tokens.verify(TokenType.CLOSE_BRACKET)) {
+                                        sawEmptyDimension = true;
+                                        dimensions.add(null);
+                                } else {
+                                        if (sawEmptyDimension) {
+                                                throw syntacticError(
+                                                                "Dimensões com tamanho não podem vir após dimensões vazias.");
+                                        }
+                                        dimensions.add(expression());
+                                }
+                                tokens.consume(
+                                                TokenType.CLOSE_BRACKET,
+                                                "Esperado ']' após dimensão");
+                        }
+
+                        ExpressionInterface initializer = null;
+                        if (tokens.verify(TokenType.OPEN_BRACE)) {
+                                if (!dimensions.isEmpty() && dimensions.get(0) != null) {
+                                        throw syntacticError(
+                                                        "Um array com inicializador não pode declarar tamanho na primeira dimensão.");
+                                }
+                                initializer = arrayInitializer();
+                        } else if (dimensions.stream().allMatch(dimension -> dimension == null)) {
+                                throw syntacticError(
+                                                "A criação de array precisa de pelo menos uma dimensão ou inicializador.");
+                        }
+
+                        return new ArrayCreationRecord(
+                                        new TypeRecord(objectType.name() + "[]".repeat(dimensionCount)),
+                                        dimensions.stream().filter(dimension -> dimension != null).toList(),
+                                        initializer,
+                                        newToken.getLine(),
+                                        newToken.getColumn());
+                }
 
                 tokens.consume(
                                 TokenType.OPEN_PARENTHESIS,
@@ -1538,6 +1606,45 @@ public class Parser {
                                 member.getLexeme(),
                                 member.getLine(),
                                 member.getColumn());
+        }
+
+        private ArrayInitializerRecord arrayInitializer() {
+                Token openingBrace = tokens.consume(
+                                TokenType.OPEN_BRACE,
+                                "Esperado '{' para iniciar o array");
+                List<ExpressionInterface> elements = new ArrayList<>();
+                if (!tokens.verify(TokenType.CLOSE_BRACE)) {
+                        do {
+                                elements.add(expression());
+                                if (!tokens.verify(TokenType.COMMA)) {
+                                        break;
+                                }
+                                tokens.consume(TokenType.COMMA, "Esperado ',' entre elementos");
+                                if (tokens.verify(TokenType.CLOSE_BRACE)) {
+                                        break;
+                                }
+                        } while (true);
+                }
+                tokens.consume(
+                                TokenType.CLOSE_BRACE,
+                                "Esperado '}' após inicializador do array");
+                return new ArrayInitializerRecord(
+                                elements,
+                                openingBrace.getLine(),
+                                openingBrace.getColumn());
+        }
+
+        private boolean isVariableDeclarationStart() {
+                if (tokens.peekNext().getType() == TokenType.IDENTIFIER) {
+                        return true;
+                }
+                int offset = 1;
+                while (tokens.peek(offset).getType() == TokenType.OPEN_BRACKET
+                                && tokens.peek(offset + 1).getType() == TokenType.CLOSE_BRACKET) {
+                        offset += 2;
+                }
+                return offset > 1
+                                && tokens.peek(offset).getType() == TokenType.IDENTIFIER;
         }
 
         private ExpressionInterface registerExpression() {

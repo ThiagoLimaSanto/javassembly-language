@@ -32,7 +32,7 @@ public class Membros extends BaseMembros {
         return LIMITE;
     }
 
-    public static func void main() {
+    public static func void main(String[] args) {
         return;
     }
 }

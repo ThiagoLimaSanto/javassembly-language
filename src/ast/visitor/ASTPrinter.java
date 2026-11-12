@@ -3,6 +3,9 @@ package src.ast.visitor;
 import src.ast.ASTNode;
 import src.ast.ExpressionInterface;
 import src.ast.records.AssignmentRecord;
+import src.ast.records.ArrayAccessRecord;
+import src.ast.records.ArrayCreationRecord;
+import src.ast.records.ArrayInitializerRecord;
 import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
@@ -363,5 +366,31 @@ public class ASTPrinter implements ASTVisitor {
         record.target().accept(this);
         record.value().accept(this);
         indentation--;
+    }
+
+    @Override
+    public void visit(ArrayAccessRecord node) {
+        printLine("Acesso a array");
+        visitNamedChild("Array", node.array());
+        visitNamedChild("Índice", node.index());
+    }
+
+    @Override
+    public void visit(ArrayCreationRecord node) {
+        printLine("Criação de array: " + node.type().name());
+        for (ExpressionInterface dimension : node.dimensions()) {
+            visitNamedChild("Dimensão", dimension);
+        }
+        if (node.initializer() != null) {
+            visitNamedChild("Inicializador", node.initializer());
+        }
+    }
+
+    @Override
+    public void visit(ArrayInitializerRecord node) {
+        printLine("Inicializador de array");
+        for (ExpressionInterface element : node.elements()) {
+            visitChild(element);
+        }
     }
 }

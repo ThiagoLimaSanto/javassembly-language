@@ -14,6 +14,7 @@ public class Lexer {
     private int currentPosition;
     private int line = 1;
     private int column = 1;
+    private boolean previousCharacterWasCarriageReturn;
     private List<Token> tokens = new ArrayList<>();
     private static final Map<String, TokenType> KEYWORDS = Map.ofEntries(
             Map.entry("class", TokenType.CLASS),
@@ -24,7 +25,6 @@ public class Lexer {
             Map.entry("extends", TokenType.EXTENDS),
             Map.entry("implements", TokenType.IMPLEMENTS),
             Map.entry("func", TokenType.FUNC),
-            Map.entry("main", TokenType.MAIN),
             Map.entry("public", TokenType.PUBLIC),
             Map.entry("static", TokenType.STATIC),
             Map.entry("final", TokenType.FINAL),
@@ -97,14 +97,31 @@ public class Lexer {
         return source.charAt(currentPosition);
     }
 
+    public boolean nextIs(char character) {
+        return currentPosition + 1 < source.length()
+                && source.charAt(currentPosition + 1) == character;
+    }
+
+    public boolean isLineTerminator(char character) {
+        return character == '\n' || character == '\r';
+    }
+
     public char advance() {
         char character = source.charAt(currentPosition++);
 
-        if (character == '\n') {
+        if (character == '\r') {
             line++;
             column = 1;
+            previousCharacterWasCarriageReturn = true;
+        } else if (character == '\n') {
+            if (!previousCharacterWasCarriageReturn) {
+                line++;
+            }
+            column = 1;
+            previousCharacterWasCarriageReturn = false;
         } else {
             column++;
+            previousCharacterWasCarriageReturn = false;
         }
 
         return character;

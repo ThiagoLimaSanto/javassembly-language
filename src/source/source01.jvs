@@ -3,7 +3,7 @@ public class Main{
     private static int a = 10;
     private static int b = 10;
 
-    public static func void main(String args){
+    public static func void main(String[] args){
         int result = sum(5, 10);
         String text = text();
         int a = 2;

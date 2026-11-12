@@ -4,27 +4,41 @@ import src.lexer.TokenType;
 
 public record SemanticType(
     TokenType primitiveType,
-    String className
+    String className,
+    int arrayDimensions
 ) {
 
     public static SemanticType primitive(TokenType type) {
-        return new SemanticType(type, null);
+        return new SemanticType(type, null, 0);
     }
 
     public static SemanticType classType(String name) {
-        return new SemanticType(null, name);
+        return new SemanticType(null, name, 0);
+    }
+
+    public static SemanticType array(
+            TokenType primitiveType,
+            String className,
+            int dimensions) {
+        return new SemanticType(primitiveType, className, dimensions);
     }
 
     public static SemanticType nullType() {
-        return new SemanticType(TokenType.NULL, null);
+        return new SemanticType(TokenType.NULL, null, 0);
     }
 
     public boolean isPrimitive() {
-        return primitiveType != null && primitiveType != TokenType.NULL;
+        return arrayDimensions == 0
+                && primitiveType != null
+                && primitiveType != TokenType.NULL;
     }
 
     public boolean isClass() {
-        return className != null;
+        return arrayDimensions == 0 && className != null;
+    }
+
+    public boolean isArray() {
+        return arrayDimensions > 0;
     }
 
     public boolean isNull() {

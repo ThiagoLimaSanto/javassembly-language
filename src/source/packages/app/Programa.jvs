@@ -4,7 +4,6 @@ import modelos.Conta;
 
 public class Programa extends Conta {
     public func int lerSaldoHerdado() {
-        ContaPJ conta = new ContaPJ();
         return saldo;
     }
 
@@ -16,7 +15,7 @@ public class Programa extends Conta {
         return auxiliar;
     }
 
-    public static func void main() {
+    public static func void main(String[] args) {
         return;
     }
 }

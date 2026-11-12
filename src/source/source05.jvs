@@ -1,5 +1,5 @@
 public class Condicoes {
-    public static func void main() {
+    public static func void main(String[] args) {
         int a = 5;
         int b = 10;
 
@@ -16,7 +16,7 @@ public class Condicoes {
 
         while (and cmp.gt a, b, True) {
             print "Bloco externo";
-            while (False) {
+            while (igual) {
                 print "Bloco interno";
             }
         }

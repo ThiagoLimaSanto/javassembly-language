@@ -19,7 +19,7 @@ public class StringState implements LexerState {
 
     @Override
     public void process(Lexer lexer) {
-        if (lexer.finished() || lexer.current() == '\n') {
+        if (lexer.finished() || lexer.isLineTerminator(lexer.current())) {
             throw new LexicalException("Faltando delimitador de string.", line, column);
         }
 
@@ -35,7 +35,7 @@ public class StringState implements LexerState {
         }
 
         if (character == '\\') {
-            if (lexer.finished() || lexer.current() == '\n') {
+            if (lexer.finished() || lexer.isLineTerminator(lexer.current())) {
                 throw new LexicalException(
                         "Sequência de escape incompleta.",
                         escapeLine,

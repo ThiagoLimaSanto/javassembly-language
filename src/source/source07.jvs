@@ -1,5 +1,9 @@
+R0 = 0;
+R1 = 1;
+R2 = 2;
+
 public class Registradores {
-    public static func void main() {
+    public static func void main(String[] args) {
         mostrar();
 
         return;

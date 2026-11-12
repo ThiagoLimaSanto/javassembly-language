@@ -42,11 +42,15 @@ public class TokenStream {
     }
 
     public Token peekNext() {
-        if (position + 1 >= tokens.size()) {
+        return peek(1);
+    }
+
+    public Token peek(int offset) {
+        int target = position + offset;
+        if (target >= tokens.size()) {
             return tokens.get(tokens.size() - 1);
         }
-
-        return tokens.get(position + 1);
+        return tokens.get(target);
     }
 
 }

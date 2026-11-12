@@ -1,7 +1,7 @@
 public class Animal implements Cachorro{
 
-    private func void comer() {
-        int a = add "2", 5;
+    public func void comer() {
+        int a = add 2, 5;
         print "Animal comendo";
     }
 
