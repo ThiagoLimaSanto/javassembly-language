@@ -1,0 +1,16 @@
+package audit;
+
+class ObjectChild extends Object {
+}
+
+public class ObjectPackageProbe {
+    Object value;
+    Object[] values;
+
+    public static func void main(String[] args) {
+        Object value = new Object();
+        ObjectChild child = new ObjectChild();
+        Object parent = child;
+        return;
+    }
+}

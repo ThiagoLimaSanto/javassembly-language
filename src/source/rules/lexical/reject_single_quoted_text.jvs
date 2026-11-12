@@ -1,0 +1,6 @@
+public class LexRejectSingleQuotedText {
+    public static func void main(String[] args) {
+        String value = 'multiple chars';
+        return;
+    }
+}

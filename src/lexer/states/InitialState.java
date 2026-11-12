@@ -34,10 +34,9 @@ public class InitialState implements LexerState {
             return;
         }
 
-        if (currentCharacter == '"' || currentCharacter == '\'') {
-            char delimiter = lexer.advance();
-
-            lexer.changeState(new StringState(delimiter, this.line, this.column));
+        if (currentCharacter == '"') {
+            lexer.advance();
+            lexer.changeState(new StringState('"', this.line, this.column));
 
             return;
         }

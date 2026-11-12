@@ -160,6 +160,9 @@ public class Parser {
         }
 
         private String resolveTypeName(String name) {
+                if (name.equals("Object")) {
+                        return name;
+                }
                 String imported = importedTypes.get(name);
                 if (imported != null) {
                         return imported;
