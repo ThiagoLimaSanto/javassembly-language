@@ -102,6 +102,12 @@ public class Lexer {
                 && source.charAt(currentPosition + 1) == character;
     }
 
+    public boolean nextIsDigit() {
+        return currentPosition + 1 < source.length()
+                && source.charAt(currentPosition + 1) >= '0'
+                && source.charAt(currentPosition + 1) <= '9';
+    }
+
     public boolean isLineTerminator(char character) {
         return character == '\n' || character == '\r';
     }

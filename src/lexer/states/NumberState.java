@@ -18,23 +18,48 @@ public class NumberState implements LexerState {
     public void process(Lexer lexer) {
         StringBuilder text = new StringBuilder();
 
-        while (!lexer.finished() && isDigit(lexer.current())) {
-            text.append(lexer.advance());
-        }
-
         if (!lexer.finished() && lexer.current() == '.') {
             text.append(lexer.advance());
+            while (!lexer.finished() && isDigit(lexer.current())) {
+                text.append(lexer.advance());
+            }
+        } else {
+            while (!lexer.finished() && isDigit(lexer.current())) {
+                text.append(lexer.advance());
+            }
+
+            if (!lexer.finished() && lexer.current() == '.') {
+                text.append(lexer.advance());
+                while (!lexer.finished() && isDigit(lexer.current())) {
+                    text.append(lexer.advance());
+                }
+            }
+        }
+
+        if (!lexer.finished() && (lexer.current() == 'e' || lexer.current() == 'E')) {
+            text.append(lexer.advance());
+            if (!lexer.finished() && (lexer.current() == '+' || lexer.current() == '-')) {
+                text.append(lexer.advance());
+            }
 
             if (lexer.finished() || !isDigit(lexer.current())) {
-                throw new LexicalException("Esperado dígito após o ponto decimal",
+                throw new LexicalException(
+                        "Esperado dígito no expoente do número.",
                         line,
                         column);
             }
 
-            while (!lexer.finished()
-                    && isDigit(lexer.current())) {
+            while (!lexer.finished() && isDigit(lexer.current())) {
                 text.append(lexer.advance());
             }
+        }
+
+        if (!lexer.finished()
+                && (Character.isLetter(lexer.current()) || lexer.current() == '_')) {
+            throw new LexicalException(
+                    "Um literal numérico não pode ser seguido diretamente por um identificador.",
+                    lexer.getLine(),
+                    lexer.getColumn());
         }
 
         lexer.addToken(new Token(TokenType.NUMBER, text.toString(), line, column));

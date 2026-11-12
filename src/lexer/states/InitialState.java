@@ -29,6 +29,11 @@ public class InitialState implements LexerState {
             return;
         }
 
+        if (currentCharacter == '.' && lexer.nextIsDigit()) {
+            lexer.changeState(new NumberState(this.line, this.column));
+            return;
+        }
+
         if (currentCharacter == '"' || currentCharacter == '\'') {
             char delimiter = lexer.advance();
 

@@ -202,6 +202,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             compatibleTypes.addAll(currentClassNode.interfaces());
             currentName = currentClassNode.superClass();
         }
+        compatibleTypes.add("Object");
 
         Set<String> immutableTypes = Set.copyOf(compatibleTypes);
         assignableTypes.put(className, immutableTypes);
@@ -280,6 +281,16 @@ public class SemanticAnalyzer implements ASTVisitor {
                     "Só é possível instanciar uma classe concreta.",
                     creation.line(),
                     creation.column());
+        }
+
+        if (type.className().equals("Object")) {
+            if (!creation.arguments().isEmpty()) {
+                throw new SemanticException(
+                        "O construtor de 'Object' não recebe argumentos.",
+                        creation.line(),
+                        creation.column());
+            }
+            return null;
         }
 
         ClassRecord classNode = classes.get(type.className());
@@ -1014,6 +1025,13 @@ public class SemanticAnalyzer implements ASTVisitor {
             int column) {
         SemanticType semanticType = convertType(type);
 
+        if (semanticType.isArray() && semanticType.arrayDimensions() > 255) {
+            throw new SemanticException(
+                    "Um array não pode ter mais de 255 dimensões.",
+                    line,
+                    column);
+        }
+
         if (semanticType.isNull()) {
             throw new SemanticException(
                     "'null' é um valor, não um tipo declarado.",
@@ -1041,6 +1059,13 @@ public class SemanticAnalyzer implements ASTVisitor {
             if (semanticType.className() == null) {
                 return;
             }
+            if (semanticType.className().equals("Object")) {
+                return;
+            }
+        }
+
+        if (semanticType.isClass() && semanticType.className().equals("Object")) {
+            return;
         }
 
         ClassRecord classType = classes.get(semanticType.className());
@@ -1416,6 +1441,9 @@ public class SemanticAnalyzer implements ASTVisitor {
             ClassRecord parent = classes.get(current.superClass());
 
             if (parent == null) {
+                if (current.superClass().equals("Object")) {
+                    break;
+                }
                 if (interfaces.containsKey(current.superClass())) {
                     throw new SemanticException(
                             "Uma interface não pode ser usada como classe pai.",
@@ -1451,7 +1479,9 @@ public class SemanticAnalyzer implements ASTVisitor {
             current = parent;
         }
 
-        if (classNode.superClass() != null && classNode.constructors().isEmpty()) {
+        if (classNode.superClass() != null
+                && !classNode.superClass().equals("Object")
+                && classNode.constructors().isEmpty()) {
             validateImplicitSuperConstructor(
                     classNode,
                     classes.get(classNode.superClass()));
@@ -1466,6 +1496,16 @@ public class SemanticAnalyzer implements ASTVisitor {
         List<SemanticType> argumentTypes = new ArrayList<>();
         for (ExpressionInterface argument : arguments) {
             argumentTypes.add(getExpressionType(argument));
+        }
+
+        if (targetClass == null) {
+            if (argumentTypes.isEmpty()) {
+                return null;
+            }
+            throw new SemanticException(
+                    "O construtor de 'Object' não recebe argumentos.",
+                    line,
+                    column);
         }
 
         if (targetClass.constructors().isEmpty()) {
@@ -2255,19 +2295,24 @@ public class SemanticAnalyzer implements ASTVisitor {
             return true;
         }
 
-        if (expected.isArray() || received.isArray()) {
-            if (!expected.isArray() || !received.isArray()
-                    || expected.arrayDimensions() != received.arrayDimensions()) {
+        if (expected.isClass()
+                && expected.className().equals("Object")
+                && (received.isClass()
+                        || received.isArray()
+                        || (received.isPrimitive()
+                                && received.primitiveType() == TokenType.STRING))) {
+            return true;
+        }
+
+        if (received.isArray()) {
+            if (!expected.isArray()) {
                 return false;
             }
-            if (expected.primitiveType() != null || received.primitiveType() != null) {
-                return expected.primitiveType() == received.primitiveType()
-                        && expected.className() == null
-                        && received.className() == null;
-            }
-            return isAssignable(
-                    SemanticType.classType(expected.className()),
-                    SemanticType.classType(received.className()));
+            return isAssignable(componentType(expected), componentType(received));
+        }
+
+        if (expected.isArray()) {
+            return false;
         }
 
         if (expected.isPrimitive() && received.isPrimitive()) {
@@ -2299,6 +2344,13 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         for (InterfaceRecord interfaceNode : node.interfaces()) {
 
+            if (interfaceNode.name().equals("Object")) {
+                throw new SemanticException(
+                        "'Object' é um tipo predefinido e não pode ser redeclarado.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+
             if (interfaces.containsKey(interfaceNode.name())) {
                 throw new SemanticException(
                         "Interface '" + interfaceNode.name()
@@ -2311,6 +2363,13 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         for (ClassRecord classNode : node.classes()) {
+
+            if (classNode.name().equals("Object")) {
+                throw new SemanticException(
+                        "'Object' é um tipo predefinido e não pode ser redeclarado.",
+                        classNode.line(),
+                        classNode.column());
+            }
 
             if (classes.containsKey(classNode.name())) {
                 throw new SemanticException(

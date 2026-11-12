@@ -60,6 +60,17 @@ public class Parser {
                 this.tokens = new TokenStream(tokens);
         }
 
+        private TypeRecord addDeclaratorDimensions(TypeRecord type) {
+                String typeName = type.name();
+                while (tokens.verify(TokenType.OPEN_BRACKET)
+                                && tokens.peekNext().getType() == TokenType.CLOSE_BRACKET) {
+                        tokens.consume(TokenType.OPEN_BRACKET, "Esperado '['");
+                        tokens.consume(TokenType.CLOSE_BRACKET, "Esperado ']'");
+                        typeName += "[]";
+                }
+                return new TypeRecord(typeName);
+        }
+
         public ProgramRecord analyze() {
 
                 List<ClassRecord> classes = new ArrayList<>();
@@ -591,6 +602,7 @@ public class Parser {
                 Token name = tokens.consume(
                                 TokenType.IDENTIFIER,
                                 "Esperado nome do atributo");
+                type = addDeclaratorDimensions(type);
 
                 ExpressionInterface value = null;
 
@@ -738,6 +750,7 @@ public class Parser {
                         Token name = tokens.consume(
                                         TokenType.IDENTIFIER,
                                         "Esperado nome do parâmetro");
+                        type = addDeclaratorDimensions(type);
 
                         parameters.add(
                                         new ParameterRecord(
@@ -992,6 +1005,7 @@ public class Parser {
                 Token name = tokens.consume(
                                 TokenType.IDENTIFIER,
                                 "Esperado nome da variável");
+                type = addDeclaratorDimensions(type);
 
                 ExpressionInterface value = null;
 
@@ -1438,7 +1452,9 @@ public class Parser {
                                 TokenType.NUMBER,
                                 "Esperado um número");
 
-                if (token.getLexeme().contains(".")) {
+                if (token.getLexeme().contains(".")
+                                || token.getLexeme().contains("e")
+                                || token.getLexeme().contains("E")) {
 
                         double value = Double.parseDouble(token.getLexeme());
 

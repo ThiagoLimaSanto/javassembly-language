@@ -16,6 +16,11 @@ public class Cadastro {
         print valores.length;
         int[] iniciais = {1, 2, 3};
         print iniciais[1];
+        int[][] matriz = {{1, 2, 3}, {4, 5, 6}};
+        matriz[1][2] = 60;
+        print matriz[1][2];
+        print matriz.length;
+        print matriz[0].length;
         return;
     }
 
