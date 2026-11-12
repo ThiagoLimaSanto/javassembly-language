@@ -7,7 +7,9 @@ import src.ast.visitor.ASTVisitor;
 
 public record CallRecord(
         String name,
-        List<ExpressionInterface> arguments) implements ExpressionInterface {
+        List<ExpressionInterface> arguments,
+        int line,
+        int column) implements ExpressionInterface {
 
     @Override
     public void accept(ASTVisitor visitor) {

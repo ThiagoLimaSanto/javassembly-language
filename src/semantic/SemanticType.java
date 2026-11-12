@@ -12,7 +12,7 @@ public record SemanticType(
     }
 
     public static SemanticType classType(String name) {
-        return new SemanticType(null, name.toUpperCase());
+        return new SemanticType(null, name);
     }
 
     public boolean isPrimitive() {

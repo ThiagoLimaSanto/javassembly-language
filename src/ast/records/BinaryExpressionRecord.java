@@ -8,7 +8,9 @@ import src.ast.visitor.ASTVisitor;
 public record BinaryExpressionRecord(
         TokenType operator,
         ExpressionInterface left,
-        ExpressionInterface right) implements ExpressionInterface {
+        ExpressionInterface right,
+        int line,
+        int column) implements ExpressionInterface {
 
     @Override
     public void accept(ASTVisitor visitor) {

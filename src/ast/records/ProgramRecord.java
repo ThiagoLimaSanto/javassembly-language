@@ -7,7 +7,14 @@ import src.ast.visitor.ASTVisitor;
 
 public record ProgramRecord(
         List<ClassRecord> classes,
-        List<InterfaceRecord> interfaces) implements ASTNode {
+        List<InterfaceRecord> interfaces,
+        List<RegisterDeclarationRecord> registers) implements ASTNode {
+
+    public ProgramRecord(
+            List<ClassRecord> classes,
+            List<InterfaceRecord> interfaces) {
+        this(classes, interfaces, List.of());
+    }
 
     @Override
     public void accept(ASTVisitor visitor) {

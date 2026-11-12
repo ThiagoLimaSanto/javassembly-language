@@ -4,7 +4,11 @@ import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
 import src.ast.visitor.ASTVisitor;
 
-public record WhileRecord(ExpressionInterface expression, BlockRecord block) implements StatementInterface {
+public record WhileRecord(
+        ExpressionInterface expression,
+        BlockRecord block,
+        int line,
+        int column) implements StatementInterface {
 
     @Override
     public void accept(ASTVisitor visitor) {

@@ -1,5 +1,5 @@
 class Pessoa {
-    private string nome;
+    private String nome;
     private int idade;
 
     func void apresentar() {
@@ -7,7 +7,7 @@ class Pessoa {
         print idade;
     }
 
-    func string getNome() {
+    func String getNome() {
         return nome;
     }
 }
@@ -34,5 +34,5 @@ class Funcionario extends Pessoa {
 }
 
 interface Autenticavel {
-    func boolean autenticar(string senha);
+    func boolean autenticar(String senha);
 }

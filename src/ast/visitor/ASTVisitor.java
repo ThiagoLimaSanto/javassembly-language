@@ -20,10 +20,12 @@ import src.ast.records.PrintRecord;
 import src.ast.records.ProgramRecord;
 import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
+import src.ast.records.RegisterDeclarationRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.SuperAttributeRecord;
 import src.ast.records.SuperCallRecord;
 import src.ast.records.ThisAttributeRecord;
+import src.ast.records.ThisCallRecord;
 import src.ast.records.ThisRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
@@ -51,6 +53,8 @@ public interface ASTVisitor {
     void visit(VariableRecord node);
 
     void visit(RegisterRecord node);
+
+    void visit(RegisterDeclarationRecord node);
 
     void visit(ParameterRecord node);
 
@@ -81,6 +85,8 @@ public interface ASTVisitor {
     void visit(ThisRecord node);
 
     void visit(ThisAttributeRecord node);
+
+    void visit(ThisCallRecord node);
 
     void visit(AssignmentRecord node);
 }

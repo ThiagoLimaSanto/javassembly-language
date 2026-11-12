@@ -26,10 +26,12 @@ import src.ast.records.PrintRecord;
 import src.ast.records.ProgramRecord;
 import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
+import src.ast.records.RegisterDeclarationRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.SuperAttributeRecord;
 import src.ast.records.SuperCallRecord;
 import src.ast.records.ThisAttributeRecord;
+import src.ast.records.ThisCallRecord;
 import src.ast.records.ThisRecord;
 import src.ast.records.TypeRecord;
 import src.ast.records.VariableRecord;
@@ -56,10 +58,14 @@ public class Parser {
 
                 List<ClassRecord> classes = new ArrayList<>();
                 List<InterfaceRecord> interfaces = new ArrayList<>();
+                List<RegisterDeclarationRecord> registers = new ArrayList<>();
 
                 while (!tokens.verify(TokenType.EOF)) {
 
-                        if (tokens.verify(TokenType.CLASS)) {
+                        if (tokens.verify(TokenType.REGISTER)) {
+                                registers.add(registerDeclaration());
+
+                        } else if (tokens.verify(TokenType.CLASS)) {
                                 classes.add(classDeclaration());
 
                         } else if (tokens.verify(TokenType.INTERFACE)) {
@@ -88,7 +94,30 @@ public class Parser {
 
                 tokens.consume(TokenType.EOF, "Esperado fim do código");
 
-                return new ProgramRecord(classes, interfaces);
+                return new ProgramRecord(classes, interfaces, registers);
+        }
+
+        private RegisterDeclarationRecord registerDeclaration() {
+                Token register = tokens.consume(
+                                TokenType.REGISTER,
+                                "Esperado um registrador");
+
+                tokens.consume(
+                                TokenType.ASSIGN,
+                                "Esperado '=' após registrador global");
+
+                ExpressionInterface value = expression();
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após declaração do registrador");
+
+                return new RegisterDeclarationRecord(
+                                new RegisterRecord(
+                                                register.getLexeme(),
+                                                register.getLine(),
+                                                register.getColumn()),
+                                value);
         }
 
         // =========================================================
@@ -581,6 +610,9 @@ public class Parser {
                         case POP ->
                                 popStatement();
 
+                        case REGISTER ->
+                                registerAssignment();
+
                         case IDENTIFIER -> {
 
                                 if (tokens.peekNext().getType() == TokenType.IDENTIFIER) {
@@ -632,12 +664,34 @@ public class Parser {
                                 TokenType.DOT,
                                 "Esperado '.' após this");
 
-                Token attribute = tokens.consume(
+                Token member = tokens.consume(
                                 TokenType.IDENTIFIER,
-                                "Esperado nome do atributo após this.");
+                                "Esperado nome de atributo ou método após this.");
+
+                if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
+                        tokens.consume(
+                                        TokenType.OPEN_PARENTHESIS,
+                                        "Esperado '(' após nome do método");
+
+                        List<ExpressionInterface> arguments = arguments();
+
+                        tokens.consume(
+                                        TokenType.CLOSE_PARENTHESIS,
+                                        "Esperado ')' após argumentos");
+                        tokens.consume(
+                                        TokenType.SEMICOLON,
+                                        "Esperado ';' após chamada do método");
+
+                        return new ExpressionStatementRecord(
+                                        new ThisCallRecord(
+                                                        member.getLexeme(),
+                                                        arguments,
+                                                        thisToken.getLine(),
+                                                        thisToken.getColumn()));
+                }
 
                 ThisAttributeRecord target = new ThisAttributeRecord(
-                                attribute.getLexeme(),
+                                member.getLexeme(),
                                 thisToken.getLine(),
                                 thisToken.getColumn());
 
@@ -656,6 +710,33 @@ public class Parser {
                                 value,
                                 thisToken.getLine(),
                                 thisToken.getColumn());
+        }
+
+        private StatementInterface registerAssignment() {
+                Token register = tokens.consume(
+                                TokenType.REGISTER,
+                                "Esperado um registrador");
+
+                tokens.consume(
+                                TokenType.ASSIGN,
+                                "Esperado '=' após registrador");
+
+                ExpressionInterface value = expression();
+
+                tokens.consume(
+                                TokenType.SEMICOLON,
+                                "Esperado ';' após atribuição ao registrador");
+
+                RegisterRecord target = new RegisterRecord(
+                                register.getLexeme(),
+                                register.getLine(),
+                                register.getColumn());
+
+                return new AssignmentRecord(
+                                target,
+                                value,
+                                register.getLine(),
+                                register.getColumn());
         }
 
         private StatementInterface declaration() {
@@ -697,7 +778,7 @@ public class Parser {
 
         private ReturnRecord returnStatement() {
 
-                tokens.consume(
+                Token returnToken = tokens.consume(
                                 TokenType.RETURN,
                                 "Esperado 'return'");
 
@@ -711,14 +792,17 @@ public class Parser {
                                 TokenType.SEMICOLON,
                                 "Esperado ';' após return");
 
-                return new ReturnRecord(value);
+                return new ReturnRecord(
+                                value,
+                                returnToken.getLine(),
+                                returnToken.getColumn());
         }
 
         // =========================================================
         // CHAMADAS DE FUNÇÃO
         // =========================================================
 
-        private CallRecord functionCall(String name) {
+        private CallRecord functionCall(Token name) {
 
                 tokens.consume(
                                 TokenType.OPEN_PARENTHESIS,
@@ -730,7 +814,11 @@ public class Parser {
                                 TokenType.CLOSE_PARENTHESIS,
                                 "Esperado ')' para fechar a chamada da função");
 
-                return new CallRecord(name, arguments);
+                return new CallRecord(
+                                name.getLexeme(),
+                                arguments,
+                                name.getLine(),
+                                name.getColumn());
         }
 
         private List<ExpressionInterface> arguments() {
@@ -773,7 +861,28 @@ public class Parser {
                         return new LabelRecord(name.getLexeme());
                 }
 
-                CallRecord call = functionCall(name.getLexeme());
+                if (tokens.verify(TokenType.ASSIGN)) {
+                        tokens.consume(
+                                        TokenType.ASSIGN,
+                                        "Esperado '='");
+
+                        ExpressionInterface value = expression();
+
+                        tokens.consume(
+                                        TokenType.SEMICOLON,
+                                        "Esperado ';' após atribuição");
+
+                        return new AssignmentRecord(
+                                        new VariableRecord(
+                                                        name.getLexeme(),
+                                                        name.getLine(),
+                                                        name.getColumn()),
+                                        value,
+                                        name.getLine(),
+                                        name.getColumn());
+                }
+
+                CallRecord call = functionCall(name);
 
                 tokens.consume(
                                 TokenType.SEMICOLON,
@@ -788,7 +897,7 @@ public class Parser {
 
         private StatementInterface whileStatement() {
 
-                tokens.consume(
+                Token whileToken = tokens.consume(
                                 TokenType.WHILE,
                                 "Esperado 'while'");
 
@@ -804,7 +913,11 @@ public class Parser {
 
                 BlockRecord block = block();
 
-                return new WhileRecord(expression, block);
+                return new WhileRecord(
+                                expression,
+                                block,
+                                whileToken.getLine(),
+                                whileToken.getColumn());
         }
 
         // =========================================================
@@ -973,7 +1086,25 @@ public class Parser {
 
                         Token attribute = tokens.consume(
                                         TokenType.IDENTIFIER,
-                                        "Esperado nome do atributo");
+                                        "Esperado nome de atributo ou método");
+
+                        if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
+                                tokens.consume(
+                                                TokenType.OPEN_PARENTHESIS,
+                                                "Esperado '(' após nome do método");
+
+                                List<ExpressionInterface> arguments = arguments();
+
+                                tokens.consume(
+                                                TokenType.CLOSE_PARENTHESIS,
+                                                "Esperado ')' após argumentos");
+
+                                return new ThisCallRecord(
+                                                attribute.getLexeme(),
+                                                arguments,
+                                                token.getLine(),
+                                                token.getColumn());
+                        }
 
                         return new ThisAttributeRecord(
                                         attribute.getLexeme(),
@@ -988,7 +1119,7 @@ public class Parser {
 
         private ExpressionInterface superExpression() {
 
-                tokens.consume(
+                Token superToken = tokens.consume(
                                 TokenType.SUPER,
                                 "Esperado 'super'");
 
@@ -1014,10 +1145,15 @@ public class Parser {
 
                         return new SuperCallRecord(
                                         member.getLexeme(),
-                                        arguments);
+                                        arguments,
+                                        superToken.getLine(),
+                                        superToken.getColumn());
                 }
 
-                return new SuperAttributeRecord(member.getLexeme());
+                return new SuperAttributeRecord(
+                                member.getLexeme(),
+                                superToken.getLine(),
+                                superToken.getColumn());
         }
 
         // =========================================================
@@ -1118,7 +1254,9 @@ public class Parser {
                 return new BinaryExpressionRecord(
                                 operator.getType(),
                                 left,
-                                right);
+                                right,
+                                operator.getLine(),
+                                operator.getColumn());
         }
 
         // =========================================================
@@ -1132,7 +1270,7 @@ public class Parser {
                                 "Esperado um identificador");
 
                 if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
-                        return functionCall(name.getLexeme());
+                        return functionCall(name);
                 }
 
                 return new VariableRecord(
@@ -1208,7 +1346,9 @@ public class Parser {
                 return new BinaryExpressionRecord(
                                 operator.getType(),
                                 left,
-                                right);
+                                right,
+                                operator.getLine(),
+                                operator.getColumn());
         }
 
         // =========================================================

@@ -7,7 +7,9 @@ import src.ast.visitor.ASTVisitor;
 
 public record SuperCallRecord(
     String name,
-    List<ExpressionInterface> arguments
+    List<ExpressionInterface> arguments,
+    int line,
+    int column
 ) implements ExpressionInterface {
 
     @Override

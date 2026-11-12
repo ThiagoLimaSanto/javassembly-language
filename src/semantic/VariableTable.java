@@ -30,6 +30,10 @@ public class VariableTable extends SymbolTable<VariableSymbolRecord> {
         return "Variavel '" + variable.name() + "' ja declarada.";
     }
 
+    public VariableSymbolRecord resolveCurrent(String name) {
+        return symbols.get(name);
+    }
+
     @Override
     public VariableSymbolRecord resolve(String name) {
         VariableSymbolRecord variable = super.resolve(name);

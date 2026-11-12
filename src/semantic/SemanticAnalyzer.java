@@ -21,9 +21,12 @@ public class SemanticAnalyzer implements ASTVisitor {
     private final Map<String, FunctionTable> functionTables = new HashMap<>();
     private final Map<String, ClassRecord> classes = new HashMap<>();
     private final Map<String, InterfaceRecord> interfaces = new HashMap<>();
+    private final Map<String, SemanticType> registers = new HashMap<>();
 
     private String currentClass;
     private FunctionRecord currentFunction;
+    private AttributeRecord currentAttribute;
+    private VariableTable classScope;
 
     private final TypeChecker typeChecker = new TypeChecker();
 
@@ -48,28 +51,25 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private SemanticType convertType(String type) {
+        return switch (type) {
 
-        String normalizedType = type.toUpperCase();
-
-        return switch (normalizedType) {
-
-            case "INT" ->
+            case "int" ->
                 SemanticType.primitive(TokenType.INT);
 
-            case "DOUBLE" ->
+            case "double" ->
                 SemanticType.primitive(TokenType.DOUBLE);
 
-            case "STRING" ->
+            case "String" ->
                 SemanticType.primitive(TokenType.STRING);
 
-            case "BOOLEAN" ->
+            case "boolean" ->
                 SemanticType.primitive(TokenType.BOOLEAN);
 
-            case "VOID" ->
+            case "void" ->
                 SemanticType.primitive(TokenType.VOID);
 
             default ->
-                SemanticType.classType(normalizedType);
+                SemanticType.classType(type);
         };
     }
 
@@ -112,8 +112,154 @@ public class SemanticAnalyzer implements ASTVisitor {
         return null;
     }
 
-    private AttributeRecord findCurrentAttribute(String name) {
-        return findAttribute(getCurrentClass(), name);
+    private AttributeRecord findInheritedAttribute(
+            String className,
+            String name) {
+        Set<String> visited = new HashSet<>();
+
+        while (className != null && visited.add(className)) {
+            ClassRecord classNode = classes.get(className);
+
+            if (classNode == null) {
+                return null;
+            }
+
+            AttributeRecord attribute = findAttribute(classNode, name);
+
+            if (attribute != null) {
+                return attribute;
+            }
+
+            className = classNode.superClass();
+        }
+
+        return null;
+    }
+
+    private boolean isStaticContext() {
+        return (currentFunction != null && currentFunction.isStatic())
+                || (currentFunction == null
+                        && currentAttribute != null
+                        && currentAttribute.isStatic());
+    }
+
+    private void validateFieldAccess(
+            AttributeRecord attribute,
+            int line,
+            int column) {
+        if (isStaticContext() && !attribute.isStatic()) {
+            throw new SemanticException(
+                    "Um membro de instância não pode ser acessado de um contexto estático.",
+                    line,
+                    column);
+        }
+    }
+
+    private VariableSymbolRecord resolveVariable(
+            String name,
+            int line,
+            int column) {
+        VariableTable scope = currentScope;
+
+        while (scope != null && scope != classScope) {
+            VariableSymbolRecord local = scope.resolveCurrent(name);
+
+            if (local != null) {
+                return local;
+            }
+
+            scope = scope.getParent();
+        }
+
+        AttributeRecord attribute = findInheritedAttribute(currentClass, name);
+
+        if (attribute != null) {
+            ClassRecord declaringClass = findDeclaringClass(currentClass, name);
+
+            if (attribute.visibility() == TokenType.PRIVATE
+                    && (declaringClass == null
+                            || !declaringClass.name().equals(currentClass))) {
+                throw new SemanticException(
+                        "O atributo privado '" + name
+                                + "' não é acessível nesta classe.",
+                        line,
+                        column);
+            }
+
+            validateFieldAccess(attribute, line, column);
+
+            return new VariableSymbolRecord(
+                    attribute.name(),
+                    convertType(attribute.type()),
+                    attribute.line(),
+                    attribute.column());
+        }
+
+        throw new SemanticException(
+                "Variável ou atributo '" + name + "' não definido.",
+                line,
+                column);
+    }
+
+    private boolean resolvesToLocalVariable(String name) {
+        VariableTable scope = currentScope;
+
+        while (scope != null && scope != classScope) {
+            if (scope.resolveCurrent(name) != null) {
+                return true;
+            }
+
+            scope = scope.getParent();
+        }
+
+        return false;
+    }
+
+    private ClassRecord findDeclaringClass(String className, String name) {
+        Set<String> visited = new HashSet<>();
+
+        while (className != null && visited.add(className)) {
+            ClassRecord classNode = classes.get(className);
+
+            if (classNode == null) {
+                return null;
+            }
+
+            if (findAttribute(classNode, name) != null) {
+                return classNode;
+            }
+
+            className = classNode.superClass();
+        }
+
+        return null;
+    }
+
+    private void validateTypeExists(
+            TypeRecord type,
+            boolean allowVoid,
+            int line,
+            int column) {
+        SemanticType semanticType = convertType(type);
+
+        if (semanticType.isPrimitive()) {
+            if (!allowVoid
+                    && semanticType.primitiveType() == TokenType.VOID) {
+                throw new SemanticException(
+                        "O tipo void não pode ser usado aqui.",
+                        line,
+                        column);
+            }
+            return;
+        }
+
+        if (!classes.containsKey(semanticType.className())
+                && !interfaces.containsKey(semanticType.className())) {
+            throw new SemanticException(
+                    "Tipo '" + semanticType.className() + "' não declarado.",
+                    line,
+                    column);
+        }
     }
 
     // =========================================================
@@ -129,7 +275,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                     column);
         }
 
-        if (currentFunction != null && currentFunction.isStatic()) {
+        if (isStaticContext()) {
             throw new SemanticException(
                     "'this' não pode ser utilizado em métodos estáticos.",
                     line,
@@ -146,24 +292,21 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (currentClass == null) {
             throw new SemanticException(
                     "Chamada de função fora de uma classe.",
-                    0,
-                    0);
+                    call.line(),
+                    call.column());
         }
 
         List<SemanticType> argumentTypes = new ArrayList<>();
 
         // Descobre os tipos dos argumentos.
         for (ExpressionInterface argument : call.arguments()) {
-
-            argument.accept(this);
-
             SemanticType argumentType = getExpressionType(argument);
 
             if (argumentType == null) {
                 throw new SemanticException(
                         "Não foi possível determinar o tipo de um argumento.",
-                        0,
-                        0);
+                        call.line(),
+                        call.column());
             }
 
             argumentTypes.add(argumentType);
@@ -174,6 +317,7 @@ public class SemanticAnalyzer implements ASTVisitor {
         boolean currentClassSearch = true;
         boolean functionFound = false;
         boolean sameParameterCount = false;
+        boolean instanceMethodInStaticContext = false;
 
         Set<String> visited = new HashSet<>();
 
@@ -215,13 +359,18 @@ public class SemanticAnalyzer implements ASTVisitor {
 
                     SemanticType received = argumentTypes.get(i);
 
-                    if (!expected.equals(received)) {
+                    if (!isAssignable(expected, received)) {
                         compatible = false;
                         break;
                     }
                 }
 
                 if (compatible) {
+                    if (isStaticContext() && !function.isStatic()) {
+                        instanceMethodInStaticContext = true;
+                        continue;
+                    }
+
                     return function;
                 }
             }
@@ -233,23 +382,171 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (!functionFound) {
             throw new SemanticException(
                     "Função '" + call.name() + "' não declarada.",
-                    0,
-                    0);
+                    call.line(),
+                    call.column());
+        }
+
+        if (instanceMethodInStaticContext) {
+            throw new SemanticException(
+                    "Um método de instância não pode ser chamado de um contexto estático.",
+                    call.line(),
+                    call.column());
         }
 
         if (!sameParameterCount) {
             throw new SemanticException(
                     "Quantidade de parâmetros incompatível na chamada da função '"
                             + call.name() + "'.",
-                    0,
-                    0);
+                    call.line(),
+                    call.column());
         }
 
         throw new SemanticException(
                 "Tipos dos argumentos incompatíveis na chamada da função '"
                         + call.name() + "'.",
-                0,
-                0);
+                call.line(),
+                call.column());
+    }
+
+    private AttributeRecord resolveSuperAttribute(SuperAttributeRecord access) {
+        validateThisContext(access.line(), access.column());
+
+        ClassRecord classNode = getCurrentClass();
+        String superClass = classNode == null ? null : classNode.superClass();
+
+        if (superClass == null) {
+            throw new SemanticException(
+                    "'super' só pode ser utilizado em uma classe com classe pai.",
+                    access.line(),
+                    access.column());
+        }
+
+        Set<String> visited = new HashSet<>();
+
+        while (superClass != null && visited.add(superClass)) {
+            ClassRecord parent = classes.get(superClass);
+
+            if (parent == null) {
+                break;
+            }
+
+            AttributeRecord attribute = findAttribute(parent, access.name());
+
+            if (attribute != null) {
+                if (attribute.visibility() == TokenType.PRIVATE) {
+                    throw new SemanticException(
+                    "O atributo '" + access.name()
+                            + "' é privado na classe pai.",
+                    access.line(),
+                    access.column());
+                }
+
+                return attribute;
+            }
+
+            superClass = parent.superClass();
+        }
+
+        throw new SemanticException(
+                "Atributo '" + access.name()
+                + "' não declarado na hierarquia da classe pai.",
+                access.line(),
+                access.column());
+    }
+
+    private FunctionRecord resolveSuperCall(SuperCallRecord call) {
+        validateThisContext(call.line(), call.column());
+
+        ClassRecord classNode = getCurrentClass();
+        String superClass = classNode == null ? null : classNode.superClass();
+
+        if (superClass == null) {
+            throw new SemanticException(
+                    "'super' só pode ser utilizado em uma classe com classe pai.",
+                    call.line(),
+                    call.column());
+        }
+
+        List<SemanticType> argumentTypes = new ArrayList<>();
+
+        for (ExpressionInterface argument : call.arguments()) {
+            SemanticType argumentType = getExpressionType(argument);
+
+            if (argumentType == null) {
+                throw new SemanticException(
+                "Não foi possível determinar o tipo de um argumento.",
+                call.line(),
+                call.column());
+            }
+
+            argumentTypes.add(argumentType);
+        }
+
+        boolean methodFound = false;
+        boolean sameParameterCount = false;
+        Set<String> visited = new HashSet<>();
+
+        while (superClass != null && visited.add(superClass)) {
+            ClassRecord parent = classes.get(superClass);
+
+            if (parent == null) {
+                break;
+            }
+
+            for (FunctionRecord function : parent.functions()) {
+                if (!function.name().equals(call.name())
+                || function.visibility() == TokenType.PRIVATE) {
+                    continue;
+                }
+
+                methodFound = true;
+
+                if (function.parameters().size() != argumentTypes.size()) {
+                    continue;
+                }
+
+                sameParameterCount = true;
+                boolean compatible = true;
+
+                for (int i = 0; i < argumentTypes.size(); i++) {
+                    SemanticType expected = convertType(
+                    function.parameters().get(i).type());
+
+                    if (!isAssignable(expected, argumentTypes.get(i))) {
+                compatible = false;
+                break;
+                    }
+                }
+
+                if (compatible) {
+                    return function;
+                }
+            }
+
+            superClass = parent.superClass();
+        }
+
+        if (!methodFound) {
+            throw new SemanticException(
+                    "Método '" + call.name()
+                    + "' não declarado ou inacessível na classe pai.",
+                    call.line(),
+                    call.column());
+        }
+
+        if (!sameParameterCount) {
+            throw new SemanticException(
+                    "Quantidade de parâmetros incompatível na chamada de '"
+                    + call.name() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        throw new SemanticException(
+                "Tipos dos argumentos incompatíveis na chamada de '"
+                + call.name() + "'.",
+                call.line(),
+                call.column());
     }
 
     // =========================================================
@@ -310,6 +607,13 @@ public class SemanticAnalyzer implements ASTVisitor {
             ClassRecord parent = classes.get(current.superClass());
 
             if (parent == null) {
+                if (interfaces.containsKey(current.superClass())) {
+                    throw new SemanticException(
+                            "Uma interface não pode ser usada como classe pai.",
+                            current.line(),
+                            current.column());
+                }
+
                 throw new SemanticException(
                         "Classe pai '" + current.superClass()
                                 + "' não declarada.",
@@ -324,24 +628,99 @@ public class SemanticAnalyzer implements ASTVisitor {
     private void validateImplementedInterfaces(ClassRecord classNode) {
 
         Set<String> implemented = new HashSet<>();
+        ClassRecord current = classNode;
 
-        for (String interfaceName : classNode.interfaces()) {
+        while (current != null) {
+            Set<String> declaredOnClass = new HashSet<>();
 
-            if (!interfaces.containsKey(interfaceName)) {
-                throw new SemanticException(
-                        "'" + interfaceName + "' não é uma interface declarada.",
-                        classNode.line(),
-                        classNode.column());
+            for (String interfaceName : current.interfaces()) {
+                if (!declaredOnClass.add(interfaceName)) {
+                    throw new SemanticException(
+                            "Interface '" + interfaceName
+                                    + "' implementada mais de uma vez.",
+                            current.line(),
+                            current.column());
+                }
+
+                if (!implemented.add(interfaceName)) {
+                    continue;
+                }
+
+                InterfaceRecord interfaceNode = interfaces.get(interfaceName);
+
+                if (interfaceNode == null) {
+                    throw new SemanticException(
+                            "'" + interfaceName + "' não é uma interface declarada.",
+                            current.line(),
+                            current.column());
+                }
+
+                for (FunctionRecord requirement : interfaceNode.functions()) {
+                    FunctionRecord implementation = findClassMethod(
+                            classNode.name(),
+                            requirement);
+
+                    if (implementation == null) {
+                        throw new SemanticException(
+                                "A classe '" + classNode.name()
+                                        + "' não implementa o método '"
+                                        + requirement.name() + "'.",
+                                classNode.line(),
+                                classNode.column());
+                    }
+
+                    if (implementation.visibility() != TokenType.PUBLIC
+                            || implementation.isStatic()) {
+                        throw new SemanticException(
+                                "O método '" + requirement.name()
+                                        + "' deve ser público e de instância para implementar a interface.",
+                                implementation.line(),
+                                implementation.column());
+                    }
+
+                    SemanticType expectedReturn = convertType(
+                            requirement.returnType());
+                    SemanticType actualReturn = convertType(
+                            implementation.returnType());
+
+                    if (!isAssignable(expectedReturn, actualReturn)) {
+                        throw new SemanticException(
+                                "Tipo de retorno incompatível na implementação do método '"
+                                        + requirement.name() + "'.",
+                                implementation.line(),
+                                implementation.column());
+                    }
+                }
             }
 
-            if (!implemented.add(interfaceName)) {
-                throw new SemanticException(
-                        "Interface '" + interfaceName
-                                + "' implementada mais de uma vez.",
-                        classNode.line(),
-                        classNode.column());
-            }
+            current = current.superClass() == null
+                    ? null
+                    : classes.get(current.superClass());
         }
+    }
+
+    private FunctionRecord findClassMethod(
+            String className,
+            FunctionRecord signature) {
+        Set<String> visited = new HashSet<>();
+
+        while (className != null && visited.add(className)) {
+            ClassRecord classNode = classes.get(className);
+
+            if (classNode == null) {
+                return null;
+            }
+
+            for (FunctionRecord function : classNode.functions()) {
+                if (sameSignature(function, signature)) {
+                    return function;
+                }
+            }
+
+            className = classNode.superClass();
+        }
+
+        return null;
     }
 
     // =========================================================
@@ -368,7 +747,9 @@ public class SemanticAnalyzer implements ASTVisitor {
                     function.column());
         }
 
-        if (!inherited.returnType().equals(function.returnType())) {
+        if (!isAssignable(
+                convertType(inherited.returnType()),
+                convertType(function.returnType()))) {
             throw new SemanticException(
                     "Tipo de retorno incompatível na sobrescrita do método '"
                             + function.name() + "'.",
@@ -412,7 +793,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             TypeRecord firstType = first.parameters().get(i).type();
             TypeRecord secondType = second.parameters().get(i).type();
 
-            if (!firstType.equals(secondType)) {
+            if (!firstType.name().equals(secondType.name())) {
                 return false;
             }
         }
@@ -426,56 +807,35 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     private SemanticType getExpressionType(ExpressionInterface expression) {
 
-        // Literais
         if (expression instanceof LiteralRecord literal) {
-
-            TokenType type = literal.getType();
-
-            if (type != null) {
-                return convertType(type);
-            }
+            return convertType(literal.getType());
         }
 
-        // Chamadas de funções
         if (expression instanceof CallRecord call) {
-
             FunctionRecord function = resolveFunctionCall(call);
-
             return convertType(function.returnType());
         }
 
-        // Variáveis
         if (expression instanceof VariableRecord variable) {
-
-            VariableSymbolRecord symbol = currentScope.resolve(
-                    variable.name());
-
-            if (symbol == null) {
-                throw new SemanticException(
-                        "Variável '" + variable.name() + "' não definida.",
-                        variable.line(),
-                        variable.column());
-            }
-
+            VariableSymbolRecord symbol = resolveVariable(
+                    variable.name(),
+                    variable.line(),
+                    variable.column());
             return symbol.type();
         }
 
-        // This
         if (expression instanceof ThisRecord record) {
-
             validateThisContext(record.line(), record.column());
-
             return SemanticType.classType(currentClass);
         }
 
-        // Atributo acessado por this
         if (expression instanceof ThisAttributeRecord attributeExpression) {
-
             validateThisContext(
                     attributeExpression.line(),
                     attributeExpression.column());
 
-            AttributeRecord attribute = findCurrentAttribute(
+            AttributeRecord attribute = findInheritedAttribute(
+                    currentClass,
                     attributeExpression.name());
 
             if (attribute == null) {
@@ -487,15 +847,67 @@ public class SemanticAnalyzer implements ASTVisitor {
                         attributeExpression.column());
             }
 
+            ClassRecord declaringClass = findDeclaringClass(
+                    currentClass,
+                    attributeExpression.name());
+
+            if (attribute.visibility() == TokenType.PRIVATE
+                    && (declaringClass == null
+                            || !declaringClass.name().equals(currentClass))) {
+                throw new SemanticException(
+                        "O atributo privado '" + attribute.name()
+                                + "' não é acessível nesta classe.",
+                        attributeExpression.line(),
+                        attributeExpression.column());
+            }
+
             return convertType(attribute.type());
         }
 
-        // Operações binárias
+        if (expression instanceof ThisCallRecord call) {
+            validateThisContext(call.line(), call.column());
+            return convertType(resolveFunctionCall(
+                    new CallRecord(
+                            call.name(),
+                            call.arguments(),
+                            call.line(),
+                            call.column()))
+                    .returnType());
+        }
+
+        if (expression instanceof SuperAttributeRecord attributeExpression) {
+            return convertType(
+                    resolveSuperAttribute(attributeExpression).type());
+        }
+
+        if (expression instanceof SuperCallRecord call) {
+            return convertType(resolveSuperCall(call).returnType());
+        }
+
         if (expression instanceof BinaryExpressionRecord operation) {
             return validateOperation(operation);
         }
 
-        return null;
+        if (expression instanceof RegisterRecord) {
+            RegisterRecord register = (RegisterRecord) expression;
+            validateRegisterName(register);
+
+            SemanticType type = registers.get(register.name());
+
+            if (type == null) {
+                throw new SemanticException(
+                        "Registrador '" + register.name()
+                                + "' não foi declarado globalmente.",
+                        register.line(),
+                        register.column());
+            }
+
+            return type;
+        }
+
+        throw new IllegalStateException(
+                "Tipo de expressão não implementado: "
+                        + expression.getClass().getSimpleName());
     }
 
     // =========================================================
@@ -510,8 +922,8 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (left == null || right == null) {
             throw new SemanticException(
                     "Não foi possível determinar o tipo dos operandos.",
-                    0,
-                    0);
+                    operation.line(),
+                    operation.column());
         }
 
         TokenType operator = operation.operator();
@@ -527,8 +939,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                 if (!isNumeric(left) || !isNumeric(right)) {
                     throw new SemanticException(
                             "Operação aritmética exige operandos numéricos.",
-                            0,
-                            0);
+                            operation.line(),
+                            operation.column());
                 }
 
                 if (left.primitiveType() == TokenType.DOUBLE
@@ -539,6 +951,18 @@ public class SemanticAnalyzer implements ASTVisitor {
 
                 return SemanticType.primitive(TokenType.INT);
 
+            case AND:
+            case OR:
+                if (left.primitiveType() != TokenType.BOOLEAN
+                        || right.primitiveType() != TokenType.BOOLEAN) {
+                    throw new SemanticException(
+                            "Operação lógica exige operandos booleanos.",
+                            operation.line(),
+                            operation.column());
+                }
+
+                return SemanticType.primitive(TokenType.BOOLEAN);
+
             // Igualdade e diferença
             case EQ:
             case NE:
@@ -546,8 +970,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                 if (!areCompatible(left, right)) {
                     throw new SemanticException(
                             "Comparação exige operandos de tipos compatíveis.",
-                            0,
-                            0);
+                            operation.line(),
+                            operation.column());
                 }
 
                 return SemanticType.primitive(TokenType.BOOLEAN);
@@ -561,8 +985,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                 if (!isNumeric(left) || !isNumeric(right)) {
                     throw new SemanticException(
                             "Comparação exige operandos numéricos.",
-                            0,
-                            0);
+                            operation.line(),
+                            operation.column());
                 }
 
                 return SemanticType.primitive(TokenType.BOOLEAN);
@@ -572,8 +996,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                 throw new SemanticException(
                         "Operador não suportado na análise semântica: "
                                 + operator,
-                        0,
-                        0);
+                        operation.line(),
+                        operation.column());
         }
     }
 
@@ -587,6 +1011,14 @@ public class SemanticAnalyzer implements ASTVisitor {
                 || type.primitiveType() == TokenType.DOUBLE;
     }
 
+    private void validateRegisterAssignment(
+            SemanticType expected,
+            SemanticType received,
+            int line,
+            int column) {
+        validateAssignableType(expected, received, line, column);
+    }
+
     private boolean areCompatible(
             SemanticType first,
             SemanticType second) {
@@ -598,12 +1030,66 @@ public class SemanticAnalyzer implements ASTVisitor {
         return isNumeric(first) && isNumeric(second);
     }
 
+    private boolean isAssignable(
+            SemanticType expected,
+            SemanticType received) {
+        if (expected.equals(received)) {
+            return true;
+        }
+
+        if (expected.isPrimitive() && received.isPrimitive()) {
+            return expected.primitiveType() == TokenType.DOUBLE
+                    && received.primitiveType() == TokenType.INT;
+        }
+
+        if (!expected.isClass() || !received.isClass()) {
+            return false;
+        }
+
+        String className = received.className();
+        Set<String> visitedClasses = new HashSet<>();
+
+        while (className != null && visitedClasses.add(className)) {
+            if (className.equals(expected.className())) {
+                return true;
+            }
+
+            ClassRecord classNode = classes.get(className);
+
+            if (classNode == null) {
+                return false;
+            }
+
+            if (classNode.interfaces().contains(expected.className())) {
+                return true;
+            }
+
+            className = classNode.superClass();
+        }
+
+        return false;
+    }
+
+    private void validateAssignableType(
+            SemanticType expected,
+            SemanticType received,
+            int line,
+            int column) {
+        if (!isAssignable(expected, received)) {
+            typeChecker.validateType(expected, received, line, column);
+        }
+    }
+
     // =========================================================
     // PROGRAMA
     // =========================================================
 
     @Override
     public void visit(ProgramRecord node) {
+
+        for (RegisterDeclarationRecord register : node.registers()) {
+            register.accept(this);
+        }
 
         // Registra interfaces
         for (InterfaceRecord interfaceNode : node.interfaces()) {
@@ -673,7 +1159,9 @@ public class SemanticAnalyzer implements ASTVisitor {
         enterScope();
 
         String previousClass = currentClass;
+        VariableTable previousClassScope = classScope;
         currentClass = node.name();
+        classScope = currentScope;
 
         FunctionTable functionTable = new FunctionTable();
 
@@ -681,17 +1169,16 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         try {
 
-            // Analisa atributos
-            for (AttributeRecord attribute : node.attributes()) {
-                attribute.accept(this);
-            }
-
             // Registra métodos e valida sobrescritas
             for (FunctionRecord function : node.functions()) {
 
                 validateOverride(node, function);
 
                 functionTable.define(function);
+            }
+
+            for (AttributeRecord attribute : node.attributes()) {
+                attribute.accept(this);
             }
 
             // Analisa métodos
@@ -703,6 +1190,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
             exitScope();
             currentClass = previousClass;
+            classScope = previousClassScope;
         }
     }
 
@@ -712,6 +1200,12 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(FunctionRecord node) {
+
+        validateTypeExists(
+                node.returnType(),
+                true,
+                node.line(),
+                node.column());
 
         FunctionRecord previousFunction = currentFunction;
 
@@ -763,6 +1257,12 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(AttributeRecord node) {
 
+        validateTypeExists(
+                node.type(),
+                false,
+                node.line(),
+                node.column());
+
         SemanticType declaredType = convertType(node.type());
 
         VariableSymbolRecord symbol = new VariableSymbolRecord(
@@ -773,20 +1273,20 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         currentScope.define(symbol);
 
-        if (node.value() != null) {
+        AttributeRecord previousAttribute = currentAttribute;
+        currentAttribute = node;
 
-            node.value().accept(this);
-
-            SemanticType valueType = getExpressionType(node.value());
-
-            if (valueType != null) {
-
-                typeChecker.validateType(
+        try {
+            if (node.value() != null) {
+                SemanticType valueType = getExpressionType(node.value());
+                validateAssignableType(
                         declaredType,
                         valueType,
                         node.line(),
                         node.column());
             }
+        } finally {
+            currentAttribute = previousAttribute;
         }
     }
 
@@ -796,7 +1296,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(PrintRecord node) {
-        node.expression().accept(this);
+        getExpressionType(node.expression());
     }
 
     // =========================================================
@@ -805,9 +1305,6 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(WhileRecord node) {
-
-        node.expression().accept(this);
-
         SemanticType conditionType = getExpressionType(node.expression());
 
         if (conditionType == null
@@ -815,8 +1312,8 @@ public class SemanticAnalyzer implements ASTVisitor {
 
             throw new SemanticException(
                     "A condição do while deve ser do tipo boolean.",
-                    0,
-                    0);
+                    node.line(),
+                    node.column());
         }
 
         node.block().accept(this);
@@ -828,9 +1325,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(BinaryExpressionRecord node) {
-
-        node.left().accept(this);
-        node.right().accept(this);
+        getExpressionType(node);
     }
 
     // =========================================================
@@ -839,16 +1334,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(VariableRecord node) {
-
-        VariableSymbolRecord symbol = currentScope.resolve(
-                node.name());
-
-        if (symbol == null) {
-            throw new SemanticException(
-                    "Variável '" + node.name() + "' não definida.",
-                    node.line(),
-                    node.column());
-        }
+        getExpressionType(node);
     }
 
     // =========================================================
@@ -857,6 +1343,20 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(DeclarationRecord node) {
+
+        validateTypeExists(
+                node.type(),
+                false,
+                node.line(),
+                node.column());
+
+        if (resolvesToLocalVariable(node.name())) {
+            throw new SemanticException(
+                    "Variável '" + node.name()
+                            + "' já declarada neste método.",
+                    node.line(),
+                    node.column());
+        }
 
         SemanticType declaredType = convertType(node.type());
 
@@ -869,14 +1369,11 @@ public class SemanticAnalyzer implements ASTVisitor {
         currentScope.define(symbol);
 
         if (node.value() != null) {
-
-            node.value().accept(this);
-
             SemanticType valueType = getExpressionType(node.value());
 
             if (valueType != null) {
 
-                typeChecker.validateType(
+                validateAssignableType(
                         declaredType,
                         valueType,
                         node.line(),
@@ -900,15 +1397,35 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(RegisterRecord node) {
+        getExpressionType(node);
+    }
 
-        String name = node.name();
-
-        if (!name.matches("R[0-9]")) {
+    private void validateRegisterName(RegisterRecord register) {
+        if (!register.name().matches("R[0-9]")) {
             throw new SemanticException(
-                    "Registrador '" + name
+                    "Registrador '" + register.name()
                             + "' inválido. Utilize R0 até R9.",
-                    node.line(),
-                    node.column());
+                    register.line(),
+                    register.column());
+        }
+    }
+
+    @Override
+    public void visit(RegisterDeclarationRecord node) {
+        RegisterRecord register = node.register();
+        validateRegisterName(register);
+
+        SemanticType inferredType = getExpressionType(node.value());
+        SemanticType declaredType = registers.putIfAbsent(
+                register.name(),
+                inferredType);
+
+        if (declaredType != null) {
+            validateRegisterAssignment(
+                    declaredType,
+                    inferredType,
+                    register.line(),
+                    register.column());
         }
     }
 
@@ -918,6 +1435,12 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(ParameterRecord node) {
+
+        validateTypeExists(
+                node.type(),
+                false,
+                node.line(),
+                node.column());
 
         SemanticType parameterType = convertType(node.type());
 
@@ -940,8 +1463,8 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (currentFunction == null) {
             throw new SemanticException(
                     "Comando return fora de uma função.",
-                    0,
-                    0);
+                    node.line(),
+                    node.column());
         }
 
         SemanticType expectedType = convertType(
@@ -953,8 +1476,8 @@ public class SemanticAnalyzer implements ASTVisitor {
             if (node.value() != null) {
                 throw new SemanticException(
                         "Função void não pode retornar um valor.",
-                        currentFunction.line(),
-                        currentFunction.column());
+                        node.line(),
+                        node.column());
             }
 
             return;
@@ -965,26 +1488,24 @@ public class SemanticAnalyzer implements ASTVisitor {
             throw new SemanticException(
                     "Função deve retornar um valor do tipo "
                             + currentFunction.returnType().name() + ".",
-                    currentFunction.line(),
-                    currentFunction.column());
+                    node.line(),
+                    node.column());
         }
-
-        node.value().accept(this);
 
         SemanticType receivedType = getExpressionType(node.value());
 
         if (receivedType == null) {
             throw new SemanticException(
                     "Não foi possível determinar o tipo do retorno.",
-                    currentFunction.line(),
-                    currentFunction.column());
+                    node.line(),
+                    node.column());
         }
 
-        typeChecker.validateType(
+        validateAssignableType(
                 expectedType,
                 receivedType,
-                currentFunction.line(),
-                currentFunction.column());
+                node.line(),
+                node.column());
     }
 
     // =========================================================
@@ -1054,9 +1575,29 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(InterfaceRecord node) {
 
+        Set<String> signatures = new HashSet<>();
+
         for (FunctionRecord function : node.functions()) {
+            if (!signatures.add(methodSignature(function))) {
+                throw new SemanticException(
+                        "Assinatura duplicada na interface: '"
+                                + function.name() + "'.",
+                        function.line(),
+                        function.column());
+            }
+
             function.accept(this);
         }
+    }
+
+    private String methodSignature(FunctionRecord function) {
+        StringBuilder signature = new StringBuilder(function.name()).append('(');
+
+        for (ParameterRecord parameter : function.parameters()) {
+            signature.append(parameter.type().name()).append(';');
+        }
+
+        return signature.append(')').toString();
     }
 
     // =========================================================
@@ -1065,7 +1606,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(SuperAttributeRecord node) {
-        // Implementação da validação de super será feita separadamente.
+        getExpressionType(node);
     }
 
     // =========================================================
@@ -1074,7 +1615,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(SuperCallRecord node) {
-        // Implementação da validação de super será feita separadamente.
+        resolveSuperCall(node);
     }
 
     // =========================================================
@@ -1100,7 +1641,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                 node.line(),
                 node.column());
 
-        AttributeRecord attribute = findCurrentAttribute(
+        AttributeRecord attribute = findInheritedAttribute(
+                currentClass,
                 node.name());
 
         if (attribute == null) {
@@ -1111,6 +1653,23 @@ public class SemanticAnalyzer implements ASTVisitor {
                     node.line(),
                     node.column());
         }
+
+        ClassRecord declaringClass = findDeclaringClass(currentClass, node.name());
+
+        if (attribute.visibility() == TokenType.PRIVATE
+                && (declaringClass == null
+                        || !declaringClass.name().equals(currentClass))) {
+            throw new SemanticException(
+                    "O atributo privado '" + attribute.name()
+                            + "' não é acessível nesta classe.",
+                    node.line(),
+                    node.column());
+        }
+    }
+
+    @Override
+    public void visit(ThisCallRecord node) {
+        getExpressionType(node);
     }
 
     // =========================================================
@@ -1120,14 +1679,19 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(AssignmentRecord node) {
 
-        // Primeiro valida o destino.
-        node.target().accept(this);
-
         // Verifica se o destino é um atributo final.
+        String assignedFieldName = null;
         if (node.target() instanceof ThisAttributeRecord attributeExpression) {
+            assignedFieldName = attributeExpression.name();
+        } else if (node.target() instanceof VariableRecord variable
+                && !resolvesToLocalVariable(variable.name())) {
+            assignedFieldName = variable.name();
+        }
 
-            AttributeRecord attribute = findCurrentAttribute(
-                    attributeExpression.name());
+        if (assignedFieldName != null) {
+            AttributeRecord attribute = findInheritedAttribute(
+                    currentClass,
+                    assignedFieldName);
 
             if (attribute != null && attribute.isFinal()) {
                 throw new SemanticException(
@@ -1138,8 +1702,14 @@ public class SemanticAnalyzer implements ASTVisitor {
             }
         }
 
-        // Valida a expressão do lado direito.
-        node.value().accept(this);
+        if (!(node.target() instanceof ThisAttributeRecord)
+                && !(node.target() instanceof VariableRecord)
+                && !(node.target() instanceof RegisterRecord)) {
+            throw new SemanticException(
+                    "Destino de atribuição inválido.",
+                    node.line(),
+                    node.column());
+        }
 
         SemanticType targetType = getExpressionType(node.target());
         SemanticType valueType = getExpressionType(node.value());
@@ -1151,11 +1721,18 @@ public class SemanticAnalyzer implements ASTVisitor {
                     node.column());
         }
 
-        // Verifica compatibilidade.
-        typeChecker.validateType(
-                targetType,
-                valueType,
-                node.line(),
-                node.column());
+        if (node.target() instanceof RegisterRecord) {
+            validateRegisterAssignment(
+                    targetType,
+                    valueType,
+                    node.line(),
+                    node.column());
+        } else {
+            validateAssignableType(
+                    targetType,
+                    valueType,
+                    node.line(),
+                    node.column());
+        }
     }
 }

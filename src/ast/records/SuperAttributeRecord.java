@@ -4,7 +4,9 @@ import src.ast.ExpressionInterface;
 import src.ast.visitor.ASTVisitor;
 
 public record SuperAttributeRecord(
-    String name
+    String name,
+    int line,
+    int column
 ) implements ExpressionInterface {
 
     @Override

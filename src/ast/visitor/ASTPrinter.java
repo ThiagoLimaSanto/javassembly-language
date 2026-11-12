@@ -22,10 +22,12 @@ import src.ast.records.PrintRecord;
 import src.ast.records.ProgramRecord;
 import src.ast.records.PushRecord;
 import src.ast.records.RegisterRecord;
+import src.ast.records.RegisterDeclarationRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.SuperAttributeRecord;
 import src.ast.records.SuperCallRecord;
 import src.ast.records.ThisAttributeRecord;
+import src.ast.records.ThisCallRecord;
 import src.ast.records.ThisRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
@@ -63,6 +65,10 @@ public class ASTPrinter implements ASTVisitor {
 
         for (InterfaceRecord interfaceNode : node.interfaces()) {
             visitChild(interfaceNode);
+        }
+
+        for (RegisterDeclarationRecord register : node.registers()) {
+            visitChild(register);
         }
 
         for (ClassRecord classNode : node.classes()) {
@@ -179,6 +185,12 @@ public class ASTPrinter implements ASTVisitor {
     }
 
     @Override
+    public void visit(RegisterDeclarationRecord node) {
+        printLine("Inicialização/atribuição global: " + node.register().name());
+        visitChild(node.value());
+    }
+
+    @Override
     public void visit(ParameterRecord node) {
         printLine("Parâmetro: " + node.type() + " " + node.name());
     }
@@ -284,6 +296,14 @@ public class ASTPrinter implements ASTVisitor {
     @Override
     public void visit(ThisAttributeRecord record) {
         printLine("ThisAttribute: " + record.name());
+    }
+
+    @Override
+    public void visit(ThisCallRecord record) {
+        printLine("ThisCall: this." + record.name());
+        for (ExpressionInterface argument : record.arguments()) {
+            visitChild(argument);
+        }
     }
 
     @Override

@@ -5,7 +5,9 @@ import src.ast.StatementInterface;
 import src.ast.visitor.ASTVisitor;
 
 public record ReturnRecord(
-        ExpressionInterface value) implements StatementInterface {
+        ExpressionInterface value,
+        int line,
+        int column) implements StatementInterface {
     @Override
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);
