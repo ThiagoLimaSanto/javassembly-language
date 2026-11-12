@@ -1,0 +1,6 @@
+public class LexRejectNumberSuffix {
+    public static func void main(String[] args) {
+        int invalid = 123abc;
+        return;
+    }
+}

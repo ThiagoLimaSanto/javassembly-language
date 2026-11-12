@@ -1,0 +1,21 @@
+class SemanticNullA {
+}
+
+class SemanticNullB {
+}
+
+public class SemanticRejectAmbiguous {
+    public func int choose(SemanticNullA value) {
+        return 1;
+    }
+
+    public func int choose(SemanticNullB value) {
+        return 2;
+    }
+
+    public static func void main(String[] args) {
+        SemanticRejectAmbiguous instance = new SemanticRejectAmbiguous();
+        print instance.choose(null);
+        return;
+    }
+}

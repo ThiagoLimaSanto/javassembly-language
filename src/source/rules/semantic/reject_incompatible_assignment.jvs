@@ -1,0 +1,6 @@
+public class SemanticRejectAssignment {
+    public static func void main(String[] args) {
+        int value = "text";
+        return;
+    }
+}

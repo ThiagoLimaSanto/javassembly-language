@@ -1,0 +1,10 @@
+public class SemanticRejectVoidOperand {
+    public static func void nothing() {
+        return;
+    }
+
+    public static func void main(String[] args) {
+        int value = add nothing(), 1;
+        return;
+    }
+}

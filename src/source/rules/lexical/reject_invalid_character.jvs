@@ -1,0 +1,6 @@
+public class LexRejectCharacter {
+    public static func void main(String[] args) {
+        print @;
+        return;
+    }
+}

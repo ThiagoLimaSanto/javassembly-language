@@ -1,0 +1,16 @@
+public class SyntaxArrays {
+    int field[];
+
+    public func int first(int values[]) {
+        return values[0];
+    }
+
+    public static func void main(String[] args) {
+        int[] row = new int[3];
+        int matrix[][] = {{1, 2}, {3, 4}};
+        row[1] = 8;
+        print row.length;
+        print matrix[1][0];
+        return;
+    }
+}

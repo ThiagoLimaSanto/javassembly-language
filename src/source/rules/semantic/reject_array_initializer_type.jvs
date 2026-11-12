@@ -1,0 +1,6 @@
+public class SemanticRejectArrayInitializer {
+    public static func void main(String[] args) {
+        int[] values = {1, True};
+        return;
+    }
+}

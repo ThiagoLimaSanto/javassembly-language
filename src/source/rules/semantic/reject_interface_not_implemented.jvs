@@ -1,0 +1,9 @@
+interface SemanticRequired {
+    func void run();
+}
+
+public class SemanticRejectInterface implements SemanticRequired {
+    public static func void main(String[] args) {
+        return;
+    }
+}

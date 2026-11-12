@@ -1,0 +1,17 @@
+interface SyntaxAction {
+    func int run(int value);
+}
+
+class SyntaxBase {
+    public func int run(int value) {
+        return value;
+    }
+}
+
+public class SyntaxInheritance extends SyntaxBase implements SyntaxAction {
+    public static func void main(String[] args) {
+        SyntaxInheritance value = new SyntaxInheritance();
+        print value.run(1);
+        return;
+    }
+}

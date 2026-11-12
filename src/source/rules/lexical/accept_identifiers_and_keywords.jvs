@@ -1,0 +1,9 @@
+public class LexIdentifiers {
+    public static func void main(String[] args) {
+        int _count1 = 1;
+        boolean TrueValue = True;
+        print _count1;
+        print TrueValue;
+        return;
+    }
+}

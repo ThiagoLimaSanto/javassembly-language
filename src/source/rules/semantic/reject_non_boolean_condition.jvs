@@ -1,0 +1,8 @@
+public class SemanticRejectCondition {
+    public static func void main(String[] args) {
+        if (1) {
+            return;
+        }
+        return;
+    }
+}

@@ -1,0 +1,16 @@
+class SemanticBase {
+}
+
+class SemanticChild extends SemanticBase {
+}
+
+public class SemanticArrayObject {
+    public static func void main(String[] args) {
+        Object value = new SemanticChild();
+        Object[] rows = new int[2][3];
+        SemanticBase[] children = new SemanticChild[2];
+        print rows.length;
+        print children.length;
+        return;
+    }
+}

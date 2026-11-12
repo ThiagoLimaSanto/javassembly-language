@@ -1,0 +1,9 @@
+// Line comment ends at the newline.
+public class LexComments {
+    /* Block
+       comment */
+    public static func void main(String[] args) {
+        print 1;
+        return;
+    }
+}

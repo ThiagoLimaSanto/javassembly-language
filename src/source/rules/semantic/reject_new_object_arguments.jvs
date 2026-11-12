@@ -1,0 +1,6 @@
+public class SemanticRejectObjectArguments {
+    public static func void main(String[] args) {
+        Object value = new Object(1);
+        return;
+    }
+}

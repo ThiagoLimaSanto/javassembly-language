@@ -1,0 +1,6 @@
+public class LexStringEscapes {
+    public static func void main(String[] args) {
+        print "quote: \" slash: \\ newline: \n tab: \t";
+        return;
+    }
+}

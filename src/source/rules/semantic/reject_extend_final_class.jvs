@@ -1,0 +1,8 @@
+final class SemanticFinalBase {
+}
+
+public class SemanticRejectFinalClass extends SemanticFinalBase {
+    public static func void main(String[] args) {
+        return;
+    }
+}

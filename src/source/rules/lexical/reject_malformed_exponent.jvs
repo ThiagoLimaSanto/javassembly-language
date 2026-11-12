@@ -1,0 +1,6 @@
+public class LexRejectExponent {
+    public static func void main(String[] args) {
+        double invalid = 1e+;
+        return;
+    }
+}

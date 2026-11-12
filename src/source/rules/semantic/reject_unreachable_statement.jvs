@@ -1,0 +1,6 @@
+public class SemanticRejectUnreachable {
+    public static func void main(String[] args) {
+        return;
+        print 1;
+    }
+}

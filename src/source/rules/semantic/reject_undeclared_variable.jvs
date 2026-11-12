@@ -1,0 +1,6 @@
+public class SemanticRejectUndeclared {
+    public static func void main(String[] args) {
+        print missing;
+        return;
+    }
+}

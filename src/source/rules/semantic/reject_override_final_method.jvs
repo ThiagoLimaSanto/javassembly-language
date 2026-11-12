@@ -1,0 +1,15 @@
+class SemanticFinalMethodBase {
+    public final func int value() {
+        return 1;
+    }
+}
+
+public class SemanticRejectFinalMethod extends SemanticFinalMethodBase {
+    public func int value() {
+        return 2;
+    }
+
+    public static func void main(String[] args) {
+        return;
+    }
+}

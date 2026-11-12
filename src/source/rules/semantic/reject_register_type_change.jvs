@@ -1,0 +1,8 @@
+R0 = 1;
+
+public class SemanticRejectRegisterType {
+    public static func void main(String[] args) {
+        R0 = "text";
+        return;
+    }
+}

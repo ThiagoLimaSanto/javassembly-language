@@ -1,0 +1,10 @@
+abstract class SemanticAbstractBase {
+    public abstract func int value();
+}
+
+public class SemanticRejectAbstract {
+    public static func void main(String[] args) {
+        SemanticAbstractBase value = new SemanticAbstractBase();
+        return;
+    }
+}

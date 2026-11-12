@@ -1,0 +1,9 @@
+public class SemanticRejectFinalReassignment {
+    private final int value = 1;
+
+    public static func void main(String[] args) {
+        SemanticRejectFinalReassignment instance = new SemanticRejectFinalReassignment();
+        instance.value = 2;
+        return;
+    }
+}

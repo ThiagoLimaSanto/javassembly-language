@@ -1,0 +1,8 @@
+R0 = 1;
+R0 = 2;
+
+public class SemanticRejectRegisterDuplicate {
+    public static func void main(String[] args) {
+        return;
+    }
+}

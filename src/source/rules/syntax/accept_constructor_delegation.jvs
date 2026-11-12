@@ -1,0 +1,17 @@
+public class SyntaxConstructors {
+    private int value;
+
+    public SyntaxConstructors() {
+        this(1);
+    }
+
+    public SyntaxConstructors(int value) {
+        this.value = value;
+    }
+
+    public static func void main(String[] args) {
+        SyntaxConstructors instance = new SyntaxConstructors();
+        print instance.value;
+        return;
+    }
+}

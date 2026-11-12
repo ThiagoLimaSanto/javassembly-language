@@ -1,0 +1,11 @@
+class SemanticPrivateOwner {
+    private int value = 1;
+}
+
+public class SemanticRejectPrivateMember {
+    public static func void main(String[] args) {
+        SemanticPrivateOwner owner = new SemanticPrivateOwner();
+        print owner.value;
+        return;
+    }
+}

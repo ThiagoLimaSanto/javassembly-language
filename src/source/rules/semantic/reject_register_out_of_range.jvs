@@ -1,0 +1,7 @@
+R10 = 1;
+
+public class SemanticRejectRegisterRange {
+    public static func void main(String[] args) {
+        return;
+    }
+}

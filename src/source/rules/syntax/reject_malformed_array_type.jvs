@@ -1,0 +1,6 @@
+public class SyntaxRejectArrayType {
+    public static func void main(String[] args) {
+        int[ value;
+        return;
+    }
+}

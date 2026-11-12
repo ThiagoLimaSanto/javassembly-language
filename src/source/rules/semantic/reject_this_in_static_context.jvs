@@ -1,0 +1,6 @@
+public class SemanticRejectStaticThis {
+    public static func void main(String[] args) {
+        print this;
+        return;
+    }
+}

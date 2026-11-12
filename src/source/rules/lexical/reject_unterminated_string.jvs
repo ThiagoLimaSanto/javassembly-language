@@ -1,0 +1,6 @@
+public class LexRejectString {
+    public static func void main(String[] args) {
+        print "unterminated
+        return;
+    }
+}

@@ -1,0 +1,11 @@
+public class SemanticRejectReturnPath {
+    public func int value(boolean condition) {
+        if (condition) {
+            return 1;
+        }
+    }
+
+    public static func void main(String[] args) {
+        return;
+    }
+}

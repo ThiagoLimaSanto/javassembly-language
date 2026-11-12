@@ -1,0 +1,7 @@
+public class SemanticRejectArrayIndex {
+    public static func void main(String[] args) {
+        int[] values = new int[2];
+        print values[True];
+        return;
+    }
+}

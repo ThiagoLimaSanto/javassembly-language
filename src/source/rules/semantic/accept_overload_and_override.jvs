@@ -1,0 +1,25 @@
+class SemanticOverloadBase {
+    public func Object create() {
+        return new Object();
+    }
+}
+
+public class SemanticOverload extends SemanticOverloadBase {
+    public func SemanticOverload create() {
+        return new SemanticOverload();
+    }
+
+    public func int choose(Object value) {
+        return 1;
+    }
+
+    public func int choose(String value) {
+        return 2;
+    }
+
+    public static func void main(String[] args) {
+        SemanticOverload instance = new SemanticOverload();
+        print instance.choose("text");
+        return;
+    }
+}

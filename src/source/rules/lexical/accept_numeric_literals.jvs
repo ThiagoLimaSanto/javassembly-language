@@ -1,0 +1,15 @@
+public class LexNumbers {
+    public static func void main(String[] args) {
+        int integer = 123;
+        double trailingDot = 3.;
+        double leadingDot = .5;
+        double exponent = 1.25e3;
+        double signedExponent = 2E-2;
+        print integer;
+        print trailingDot;
+        print leadingDot;
+        print exponent;
+        print signedExponent;
+        return;
+    }
+}

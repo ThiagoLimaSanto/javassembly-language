@@ -1,0 +1,7 @@
+public class SemanticRejectUninitialized {
+    public static func void main(String[] args) {
+        int value;
+        print value;
+        return;
+    }
+}

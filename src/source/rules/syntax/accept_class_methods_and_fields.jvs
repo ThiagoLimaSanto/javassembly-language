@@ -1,0 +1,13 @@
+public class SyntaxClassMembers {
+    private int count = 0;
+
+    public func int getCount() {
+        return count;
+    }
+
+    public static func void main(String[] args) {
+        SyntaxClassMembers value = new SyntaxClassMembers();
+        print value.getCount();
+        return;
+    }
+}

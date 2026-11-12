@@ -1,0 +1,7 @@
+public class SemanticRejectArrayLength {
+    public static func void main(String[] args) {
+        int[] values = new int[2];
+        values.length = 5;
+        return;
+    }
+}

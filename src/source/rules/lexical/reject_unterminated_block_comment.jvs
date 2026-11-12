@@ -1,0 +1,3 @@
+public class LexRejectComment {
+    /* unterminated block comment
+}

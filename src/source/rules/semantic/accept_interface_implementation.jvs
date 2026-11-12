@@ -1,0 +1,15 @@
+interface SemanticRunnable {
+    func int run(int value);
+}
+
+public class SemanticRunner implements SemanticRunnable {
+    public func int run(int value) {
+        return value;
+    }
+
+    public static func void main(String[] args) {
+        SemanticRunner runner = new SemanticRunner();
+        print runner.run(3);
+        return;
+    }
+}

@@ -1,0 +1,6 @@
+public class SemanticRejectArraySize {
+    public static func void main(String[] args) {
+        int[] values = new int[True];
+        return;
+    }
+}

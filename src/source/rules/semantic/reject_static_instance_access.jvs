@@ -1,0 +1,11 @@
+public class SemanticRejectStaticAccess {
+    private int value = 1;
+
+    public static func int get() {
+        return value;
+    }
+
+    public static func void main(String[] args) {
+        return;
+    }
+}

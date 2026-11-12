@@ -1,0 +1,6 @@
+public class LexRejectEscape {
+    public static func void main(String[] args) {
+        print "invalid: \q";
+        return;
+    }
+}

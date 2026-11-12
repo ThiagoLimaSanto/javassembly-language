@@ -1,0 +1,8 @@
+public class SemanticRejectFalseLoop {
+    public static func void main(String[] args) {
+        while (False) {
+            print 1;
+        }
+        return;
+    }
+}

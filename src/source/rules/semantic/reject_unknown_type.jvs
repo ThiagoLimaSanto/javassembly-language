@@ -1,0 +1,6 @@
+public class SemanticRejectUnknownType {
+    public static func void main(String[] args) {
+        Missing value;
+        return;
+    }
+}

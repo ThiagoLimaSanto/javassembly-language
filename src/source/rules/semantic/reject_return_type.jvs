@@ -1,0 +1,9 @@
+public class SemanticRejectReturnType {
+    public func int value() {
+        return "text";
+    }
+
+    public static func void main(String[] args) {
+        return;
+    }
+}

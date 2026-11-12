@@ -1,0 +1,18 @@
+public class SyntaxControlFlow {
+    public static func void main(String[] args) {
+        int value = add 2, 3;
+        boolean repeat = False;
+        if (cmp.gt value, 2) {
+            print value;
+        } else {
+            print 0;
+        }
+        for (int index = 0; cmp.lt index, 2; index = add index, 1) {
+            print index;
+        }
+        while (repeat) {
+            print 0;
+        }
+        return;
+    }
+}

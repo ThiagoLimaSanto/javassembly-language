@@ -1,0 +1,11 @@
+public class SemanticRejectFinalField {
+    private final int value;
+
+    public SemanticRejectFinalField() {
+        return;
+    }
+
+    public static func void main(String[] args) {
+        return;
+    }
+}

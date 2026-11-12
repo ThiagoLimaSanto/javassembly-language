@@ -1,0 +1,7 @@
+public class SemanticRejectDuplicateLocal {
+    public static func void main(String[] args) {
+        int value = 1;
+        int value = 2;
+        return;
+    }
+}

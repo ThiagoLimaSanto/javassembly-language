@@ -1,0 +1,9 @@
+R0 = 10;
+
+public class SemanticRegister {
+    public static func void main(String[] args) {
+        R0 = add R0, 5;
+        print R0;
+        return;
+    }
+}

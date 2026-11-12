@@ -1,0 +1,3 @@
+public class SyntaxRejectMethod {
+    public func void run() return;
+}
