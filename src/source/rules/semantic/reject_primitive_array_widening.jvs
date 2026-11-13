@@ -1,0 +1,6 @@
+public class SemanticRejectPrimitiveArrayWidening {
+    public static func void main(String[] args) {
+        long[] values = new int[2];
+        return;
+    }
+}

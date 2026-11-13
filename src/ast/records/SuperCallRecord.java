@@ -12,6 +12,10 @@ public record SuperCallRecord(
     int column
 ) implements ExpressionInterface {
 
+    public SuperCallRecord {
+        arguments = List.copyOf(arguments);
+    }
+
     @Override
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);

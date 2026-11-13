@@ -9,4 +9,8 @@ public record ConstructorInvocationRecord(
         List<ExpressionInterface> arguments,
         int line,
         int column) {
+
+    public ConstructorInvocationRecord {
+        arguments = List.copyOf(arguments);
+    }
 }

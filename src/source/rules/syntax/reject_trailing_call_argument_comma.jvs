@@ -1,0 +1,10 @@
+public class SyntaxRejectTrailingArgumentComma {
+    public static func int identity(int value) {
+        return value;
+    }
+
+    public static func void main(String[] args) {
+        int value = identity(1,);
+        return;
+    }
+}

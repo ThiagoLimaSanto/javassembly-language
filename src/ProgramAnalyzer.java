@@ -3,21 +3,17 @@ package src;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.List;
 
 import src.ast.records.ProgramRecord;
 import src.backend.asm.NasmGenerator;
 import src.backend.ir.IRGenerator;
 import src.backend.optimization.IROptimizer;
 import src.exceptions.SemanticException;
-import src.lexer.Lexer;
-import src.lexer.Token;
-import src.parser.Parser;
 import src.semantic.SemanticAnalyzer;
 
 public class ProgramAnalyzer {
     public void analyze(Path sourceFile) throws IOException {
-        ProgramRecord program = new SourceProjectLoader().load(sourceFile);
+        ProgramRecord program = Frontend.loadProject(sourceFile);
         String asm = analyzeProgram(program);
 
         String fileName = sourceFile.getFileName().toString();
@@ -31,11 +27,7 @@ public class ProgramAnalyzer {
     }
 
     public void analyze(String source) {
-        Lexer lexer = new Lexer(source);
-        List<Token> tokens = lexer.analyze();
-
-        Parser parser = new Parser(tokens);
-        ProgramRecord program = parser.analyze();
+        ProgramRecord program = Frontend.parse(source);
         if (!program.imports().isEmpty()) {
             throw new SemanticException(
                     "A análise de arquivos com import precisa receber o caminho do arquivo-fonte.",

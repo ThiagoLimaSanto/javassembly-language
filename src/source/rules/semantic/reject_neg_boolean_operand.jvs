@@ -1,0 +1,6 @@
+public class SemanticRejectNegBoolean {
+    public static func void main(String[] args) {
+        int value = neg True;
+        return;
+    }
+}

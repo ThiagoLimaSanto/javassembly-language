@@ -1,6 +1,7 @@
 package src.parser;
 
 import java.util.List;
+import java.util.Objects;
 
 import src.exceptions.SyntacticException;
 import src.lexer.Token;
@@ -12,8 +13,14 @@ public class TokenStream {
     private int position = 0;
 
     public TokenStream(List<Token> tokens) {
+        Objects.requireNonNull(tokens, "tokens");
         if (tokens.isEmpty() || tokens.get(tokens.size() - 1).getType() != TokenType.EOF) {
-            throw new IllegalArgumentException("Tokens list cannot be empty");
+            throw new IllegalArgumentException("Tokens list must end with EOF");
+        }
+        for (int index = 0; index < tokens.size() - 1; index++) {
+            if (tokens.get(index).getType() == TokenType.EOF) {
+                throw new IllegalArgumentException("EOF can only appear at the end of the token list");
+            }
         }
 
         this.tokens = List.copyOf(tokens);
@@ -46,11 +53,13 @@ public class TokenStream {
     }
 
     public Token peek(int offset) {
-        int target = position + offset;
-        if (target >= tokens.size()) {
+        if (offset < 0) {
+            throw new IllegalArgumentException("Token offset cannot be negative");
+        }
+        if (offset >= tokens.size() - position) {
             return tokens.get(tokens.size() - 1);
         }
-        return tokens.get(target);
+        return tokens.get(position + offset);
     }
 
 }

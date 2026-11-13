@@ -1,0 +1,6 @@
+public class SemanticRejectLongNarrowing {
+    public static func void main(String[] args) {
+        int value = 1L;
+        return;
+    }
+}

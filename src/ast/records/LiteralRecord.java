@@ -7,8 +7,12 @@ import src.lexer.TokenType;
 public record LiteralRecord(Object value) implements ExpressionInterface {
 
     public TokenType getType() {
-        if (value instanceof Integer || value instanceof Long) {
+        if (value instanceof Integer) {
             return TokenType.INT;
+        }
+
+        if (value instanceof Long) {
+            return TokenType.LONG;
         }
 
         if (value instanceof Double || value instanceof Float) {

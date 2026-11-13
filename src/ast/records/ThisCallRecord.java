@@ -11,6 +11,10 @@ public record ThisCallRecord(
         int line,
         int column) implements ExpressionInterface {
 
+    public ThisCallRecord {
+        arguments = List.copyOf(arguments);
+    }
+
     @Override
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);

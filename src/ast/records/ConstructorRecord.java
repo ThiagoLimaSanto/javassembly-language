@@ -14,6 +14,10 @@ public record ConstructorRecord(
         int line,
         int column) implements ASTNode {
 
+    public ConstructorRecord {
+        parameters = List.copyOf(parameters);
+    }
+
     @Override
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);

@@ -1,0 +1,10 @@
+public class SemanticModAndNeg {
+    public static func void main(String[] args) {
+        int remainder = mod 17, 5;
+        int negative = neg 4;
+        int minimum = neg 2147483648;
+        print remainder;
+        print negative;
+        return;
+    }
+}

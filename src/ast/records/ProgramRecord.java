@@ -12,6 +12,13 @@ public record ProgramRecord(
         String packageName,
         List<String> imports) implements ASTNode {
 
+    public ProgramRecord {
+        classes = List.copyOf(classes);
+        interfaces = List.copyOf(interfaces);
+        registers = List.copyOf(registers);
+        imports = List.copyOf(imports);
+    }
+
     public ProgramRecord(
             List<ClassRecord> classes,
             List<InterfaceRecord> interfaces,

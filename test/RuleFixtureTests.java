@@ -9,17 +9,25 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-import src.ProgramAnalyzer;
+import src.Frontend;
+import src.ast.records.ProgramRecord;
 import src.exceptions.LanguageException;
 import src.exceptions.LexicalException;
+import src.exceptions.LongOutOfRangeException;
 import src.exceptions.SemanticException;
 import src.exceptions.SyntacticException;
+import src.lexer.Lexer;
+import src.lexer.Token;
+import src.lexer.TokenType;
+import src.parser.TokenStream;
+import src.semantic.SemanticAnalyzer;
 
 public final class RuleFixtureTests {
     private RuleFixtureTests() {
     }
 
     public static void main(String[] args) throws IOException {
+        runFrontendCoreChecks();
         Path fixtureRoot = args.length == 0
                 ? Path.of("src/source/rules")
                 : Path.of(args[0]);
@@ -88,6 +96,95 @@ public final class RuleFixtureTests {
         }
     }
 
+    private static void runFrontendCoreChecks() {
+        Lexer lexer = new Lexer("int value = 1;\r\n");
+        List<Token> firstResult = lexer.analyze();
+        List<Token> secondResult = lexer.analyze();
+        if (firstResult != secondResult) {
+            throw new AssertionError("Lexer should return its cached token list");
+        }
+        Token eof = firstResult.get(firstResult.size() - 1);
+        if (eof.getType() != TokenType.EOF || eof.getLine() != 2 || eof.getColumn() != 1) {
+            throw new AssertionError("Lexer returned an incorrect EOF position");
+        }
+        try {
+            firstResult.add(new Token(TokenType.EOF, "EOF", 2, 1));
+            throw new AssertionError("Lexer token list should be immutable");
+        } catch (UnsupportedOperationException expected) {
+            // Expected: token snapshots cannot be changed by downstream stages.
+        }
+
+        TokenStream stream = new TokenStream(firstResult);
+        if (stream.peek(100).getType() != TokenType.EOF) {
+            throw new AssertionError("Peeking beyond the token stream should return EOF");
+        }
+        stream.consume(TokenType.INT, "Expected test token");
+        if (stream.peek(Integer.MAX_VALUE).getType() != TokenType.EOF) {
+            throw new AssertionError("Large peek offsets should return EOF");
+        }
+        expectIllegalArgument(() -> stream.peek(-1), "negative token offset");
+        expectIllegalArgument(
+                () -> new TokenStream(List.of(
+                        new Token(TokenType.EOF, "EOF", 1, 1),
+                        new Token(TokenType.IDENTIFIER, "afterEof", 1, 1),
+                        new Token(TokenType.EOF, "EOF", 1, 1))),
+                "EOF before the end of the token stream");
+
+        String unreachableSource = "public class UnreachablePosition {\n"
+                + "    public static func void main() {\n"
+                + "        return;\n"
+                + "        print 1;\n"
+                + "    }\n"
+                + "}";
+        try {
+            ProgramRecord program = Frontend.parse(unreachableSource);
+            new SemanticAnalyzer().visit(program);
+            throw new AssertionError("Unreachable statement should be rejected");
+        } catch (SemanticException exception) {
+            if (exception.getLine() != 4 || exception.getColumn() != 9) {
+                throw new AssertionError(
+                        "Unreachable statement should report line 4, column 9; got line "
+                                + exception.getLine() + ", column " + exception.getColumn());
+            }
+        }
+
+        String positiveOverflow = "public class PositiveOverflow {\n"
+                + "    public static func void main() {\n"
+                + "        int value = 2147483648;\n"
+                + "        return;\n"
+                + "    }\n"
+                + "}";
+        try {
+            ProgramRecord program = Frontend.parse(positiveOverflow);
+            new SemanticAnalyzer().visit(program);
+            throw new AssertionError("A long literal should not be assignable to int");
+        } catch (SemanticException expected) {
+            // 2147483648 is now a valid long literal, but cannot narrow to int.
+        }
+
+        String longOverflow = "public class LongOverflow {\n"
+                + "    public static func void main() {\n"
+                + "        long value = 9223372036854775808L;\n"
+                + "        return;\n"
+                + "    }\n"
+                + "}";
+        try {
+            Frontend.parse(longOverflow);
+            throw new AssertionError("Positive value beyond Long.MAX_VALUE should fail");
+        } catch (LongOutOfRangeException expected) {
+            // The direct positive literal is outside the signed 64-bit range.
+        }
+    }
+
+    private static void expectIllegalArgument(Runnable action, String description) {
+        try {
+            action.run();
+        } catch (IllegalArgumentException expected) {
+            return;
+        }
+        throw new AssertionError("Expected IllegalArgumentException for " + description);
+    }
+
     private static String runFixture(
             Path fixture,
             boolean shouldAccept,
@@ -96,7 +193,8 @@ public final class RuleFixtureTests {
             PrintStream suppressedOutput) {
         try {
             System.setOut(suppressedOutput);
-            new ProgramAnalyzer().analyze(fixture);
+            ProgramRecord program = Frontend.loadProject(fixture);
+            new SemanticAnalyzer().visit(program);
             return shouldAccept
                     ? null
                     : "expected " + expectedException.getSimpleName() + " but was accepted";

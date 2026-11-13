@@ -10,6 +10,10 @@ public record ArrayInitializerRecord(
         int line,
         int column) implements ExpressionInterface {
 
+    public ArrayInitializerRecord {
+        elements = List.copyOf(elements);
+    }
+
     @Override
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);

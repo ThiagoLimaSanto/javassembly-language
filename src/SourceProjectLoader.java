@@ -17,10 +17,7 @@ import src.ast.records.InterfaceRecord;
 import src.ast.records.ProgramRecord;
 import src.ast.records.RegisterDeclarationRecord;
 import src.exceptions.SemanticException;
-import src.lexer.Lexer;
-import src.lexer.Token;
 import src.lexer.TokenType;
-import src.parser.Parser;
 
 final class SourceProjectLoader {
     private final Set<Path> loadedFiles = new HashSet<>();
@@ -77,10 +74,22 @@ final class SourceProjectLoader {
                         1);
             }
 
-            boolean typeExists = importedUnit.classes().stream()
-                    .anyMatch(classNode -> simpleName(classNode.name()).equals(expectedType))
-                    || importedUnit.interfaces().stream()
-                            .anyMatch(interfaceNode -> simpleName(interfaceNode.name()).equals(expectedType));
+            boolean typeExists = false;
+            boolean typeIsPublic = false;
+            for (ClassRecord classNode : importedUnit.classes()) {
+                if (!simpleName(classNode.name()).equals(expectedType)) {
+                    continue;
+                }
+                typeExists = true;
+                typeIsPublic |= classNode.visibility() == TokenType.PUBLIC;
+            }
+            for (InterfaceRecord interfaceNode : importedUnit.interfaces()) {
+                if (!simpleName(interfaceNode.name()).equals(expectedType)) {
+                    continue;
+                }
+                typeExists = true;
+                typeIsPublic |= interfaceNode.visibility() == TokenType.PUBLIC;
+            }
             if (!typeExists) {
                 throw new SemanticException(
                         "O arquivo importado não declara o tipo '" + importedType + "'.",
@@ -88,12 +97,6 @@ final class SourceProjectLoader {
                         1);
             }
 
-            boolean typeIsPublic = importedUnit.classes().stream()
-                    .anyMatch(classNode -> simpleName(classNode.name()).equals(expectedType)
-                            && classNode.visibility() == TokenType.PUBLIC)
-                    || importedUnit.interfaces().stream()
-                            .anyMatch(interfaceNode -> simpleName(interfaceNode.name()).equals(expectedType)
-                                    && interfaceNode.visibility() == TokenType.PUBLIC);
             if (!expectedPackage.equals(unit.packageName()) && !typeIsPublic) {
                 throw new SemanticException(
                         "O tipo '" + importedType
@@ -132,8 +135,7 @@ final class SourceProjectLoader {
     }
 
     private ProgramRecord parse(String source) {
-        List<Token> tokens = new Lexer(source).analyze();
-        return new Parser(tokens).analyze();
+        return Frontend.parse(source);
     }
 
     private Path findSourceRoot(Path file, String packageName) throws IOException {

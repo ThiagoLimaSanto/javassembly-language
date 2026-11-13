@@ -17,8 +17,12 @@ public class NumberState implements LexerState {
     @Override
     public void process(Lexer lexer) {
         StringBuilder text = new StringBuilder();
+        boolean hasFraction = false;
+        boolean hasExponent = false;
+        boolean hasLongSuffix = false;
 
         if (!lexer.finished() && lexer.current() == '.') {
+            hasFraction = true;
             text.append(lexer.advance());
             while (!lexer.finished() && isDigit(lexer.current())) {
                 text.append(lexer.advance());
@@ -29,6 +33,7 @@ public class NumberState implements LexerState {
             }
 
             if (!lexer.finished() && lexer.current() == '.') {
+                hasFraction = true;
                 text.append(lexer.advance());
                 while (!lexer.finished() && isDigit(lexer.current())) {
                     text.append(lexer.advance());
@@ -37,6 +42,7 @@ public class NumberState implements LexerState {
         }
 
         if (!lexer.finished() && (lexer.current() == 'e' || lexer.current() == 'E')) {
+            hasExponent = true;
             text.append(lexer.advance());
             if (!lexer.finished() && (lexer.current() == '+' || lexer.current() == '-')) {
                 text.append(lexer.advance());
@@ -54,8 +60,21 @@ public class NumberState implements LexerState {
             }
         }
 
+        if (!lexer.finished() && (lexer.current() == 'L' || lexer.current() == 'l')) {
+            if (hasFraction || hasExponent) {
+                throw new LexicalException(
+                        "O sufixo 'L' só pode ser usado em um literal inteiro.",
+                        lexer.getLine(),
+                        lexer.getColumn());
+            }
+            text.append(lexer.advance());
+            hasLongSuffix = true;
+        }
+
         if (!lexer.finished()
-                && (Character.isLetter(lexer.current()) || lexer.current() == '_')) {
+                && (Character.isLetter(lexer.current())
+                        || lexer.current() == '_'
+                        || (hasLongSuffix && isDigit(lexer.current())))) {
             throw new LexicalException(
                     "Um literal numérico não pode ser seguido diretamente por um identificador.",
                     lexer.getLine(),

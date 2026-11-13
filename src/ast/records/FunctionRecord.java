@@ -18,6 +18,10 @@ public record FunctionRecord(
         int line,
         int column) implements ASTNode {
 
+    public FunctionRecord {
+        parameters = List.copyOf(parameters);
+    }
+
     public FunctionRecord(
             TokenType visibility,
             boolean isStatic,

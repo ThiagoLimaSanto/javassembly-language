@@ -1,0 +1,20 @@
+public class SemanticLongInteger {
+    public static func long widen(int value) {
+        return value;
+    }
+
+    public static func void main(String[] args) {
+        long maximum = 9223372036854775807L;
+        long minimum = neg 9223372036854775808L;
+        long inferred = 2147483648;
+        long remainder = mod maximum, 3L;
+        long negative = neg inferred;
+        double widened = add maximum, 1.0;
+        long[] values = new long[2];
+        print minimum;
+        print remainder;
+        print negative;
+        print widened;
+        return;
+    }
+}

@@ -27,6 +27,7 @@ public enum TokenType {
     PRIVATE,
     PROTECTED,
     DOUBLE,
+    LONG,
     BOOLEAN,
     NUMBER,
     STRING,

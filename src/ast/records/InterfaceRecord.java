@@ -11,6 +11,10 @@ public record InterfaceRecord(
     List<FunctionRecord> functions, int line, int column
 ) implements ASTNode {
 
+    public InterfaceRecord {
+        functions = List.copyOf(functions);
+    }
+
     @Override
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);

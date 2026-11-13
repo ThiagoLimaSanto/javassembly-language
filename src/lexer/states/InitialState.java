@@ -6,13 +6,10 @@ import src.lexer.Token;
 
 public class InitialState implements LexerState {
 
-    private int line;
-    private int column;
-
     @Override
     public void process(Lexer lexer) {
-        setLine(lexer.getLine());
-        setColumn(lexer.getColumn());
+        int line = lexer.getLine();
+        int column = lexer.getColumn();
         char currentCharacter = lexer.current();
         if (Character.isWhitespace(currentCharacter)) {
             lexer.advance();
@@ -20,23 +17,23 @@ public class InitialState implements LexerState {
         }
 
         if (Character.isLetter(currentCharacter) || currentCharacter == '_') {
-            lexer.changeState(new IdentifierState(this.line, this.column));
+            lexer.changeState(new IdentifierState(line, column));
             return;
         }
 
         if (currentCharacter >= '0' && currentCharacter <= '9') {
-            lexer.changeState(new NumberState(this.line, this.column));
+            lexer.changeState(new NumberState(line, column));
             return;
         }
 
         if (currentCharacter == '.' && lexer.nextIsDigit()) {
-            lexer.changeState(new NumberState(this.line, this.column));
+            lexer.changeState(new NumberState(line, column));
             return;
         }
 
         if (currentCharacter == '"') {
             lexer.advance();
-            lexer.changeState(new StringState('"', this.line, this.column));
+            lexer.changeState(new StringState('"', line, column));
 
             return;
         }
@@ -64,14 +61,14 @@ public class InitialState implements LexerState {
             }
             throw new LexicalException(
                     "Faltando delimitador de comentário.",
-                    this.line,
-                    this.column);
+                    line,
+                    column);
         }
 
         if (lexer.isSymbol(currentCharacter)) {
             String lexeme = String.valueOf(lexer.advance());
 
-            lexer.addToken(new Token(lexer.getType(lexeme), lexeme, this.line, this.column));
+            lexer.addToken(new Token(lexer.getType(lexeme), lexeme, line, column));
 
             return;
         }
@@ -82,11 +79,4 @@ public class InitialState implements LexerState {
                 lexer.getColumn());
     }
 
-    private void setLine(int line) {
-        this.line = line;
-    }
-
-    private void setColumn(int column) {
-        this.column = column;
-    }
 }

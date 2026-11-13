@@ -12,6 +12,10 @@ public record ArrayCreationRecord(
         int line,
         int column) implements ExpressionInterface {
 
+    public ArrayCreationRecord {
+        dimensions = List.copyOf(dimensions);
+    }
+
     @Override
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);

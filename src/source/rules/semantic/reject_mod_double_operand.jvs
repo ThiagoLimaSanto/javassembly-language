@@ -1,0 +1,6 @@
+public class SemanticRejectModDouble {
+    public static func void main(String[] args) {
+        double value = mod 17.0, 5;
+        return;
+    }
+}

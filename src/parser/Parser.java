@@ -7,17 +7,17 @@ import java.util.Map;
 
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
-import src.ast.records.AssignmentRecord;
 import src.ast.records.ArrayAccessRecord;
 import src.ast.records.ArrayCreationRecord;
 import src.ast.records.ArrayInitializerRecord;
+import src.ast.records.AssignmentRecord;
 import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
 import src.ast.records.ClassRecord;
-import src.ast.records.ConstructorRecord;
 import src.ast.records.ConstructorInvocationRecord;
+import src.ast.records.ConstructorRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
@@ -27,13 +27,13 @@ import src.ast.records.InterfaceRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
 import src.ast.records.MemberCallRecord;
-import src.ast.records.NewObjectRecord;
 import src.ast.records.ModifiersRecord;
+import src.ast.records.NewObjectRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PrintRecord;
 import src.ast.records.ProgramRecord;
-import src.ast.records.RegisterRecord;
 import src.ast.records.RegisterDeclarationRecord;
+import src.ast.records.RegisterRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.SuperAttributeRecord;
 import src.ast.records.SuperCallRecord;
@@ -45,7 +45,7 @@ import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
 import src.exceptions.DoubleOutOfRangeException;
-import src.exceptions.IntegerOutOfRangeException;
+import src.exceptions.LongOutOfRangeException;
 import src.exceptions.SyntacticException;
 import src.lexer.Token;
 import src.lexer.TokenType;
@@ -551,6 +551,7 @@ public class Parser {
                 switch (token.getType()) {
 
                         case INT:
+                        case LONG:
                         case DOUBLE:
                         case BOOLEAN:
                         case STRING:
@@ -801,7 +802,7 @@ public class Parser {
 
                 return switch (tokens.current().getType()) {
 
-                        case INT, DOUBLE, BOOLEAN, STRING ->
+                        case INT, LONG, DOUBLE, BOOLEAN, STRING ->
                                 declaration();
 
                         case PRINT ->
@@ -863,7 +864,10 @@ public class Parser {
                                                 TokenType.SEMICOLON,
                                                 "Esperado ';' após acesso com super");
 
-                                yield new ExpressionStatementRecord(expression);
+                                yield new ExpressionStatementRecord(
+                                                expression,
+                                                superToken.getLine(),
+                                                superToken.getColumn());
                         }
 
                         case THIS ->
@@ -966,7 +970,10 @@ public class Parser {
                 tokens.consume(
                                 TokenType.SEMICOLON,
                                 "Esperado ';' após chamada do método");
-                return new ExpressionStatementRecord(expression);
+                return new ExpressionStatementRecord(
+                                expression,
+                                thisToken.getLine(),
+                                thisToken.getColumn());
         }
 
         private StatementInterface registerAssignment() {
@@ -1158,7 +1165,10 @@ public class Parser {
                                                 TokenType.SEMICOLON,
                                                 "Esperado ';' após chamada");
                         }
-                return new ExpressionStatementRecord(targetOrCall);
+                return new ExpressionStatementRecord(
+                                targetOrCall,
+                                name.getLine(),
+                                name.getColumn());
         }
 
         private StatementInterface whileStatement() {
@@ -1235,6 +1245,7 @@ public class Parser {
                 TokenType current = tokens.current().getType();
                 if (allowDeclaration
                                 && (current == TokenType.INT
+                                                || current == TokenType.LONG
                                                 || current == TokenType.DOUBLE
                                                 || current == TokenType.BOOLEAN
                                                 || current == TokenType.STRING
@@ -1255,7 +1266,7 @@ public class Parser {
 
         private StatementInterface printStatement() {
 
-                tokens.consume(
+                Token printToken = tokens.consume(
                                 TokenType.PRINT,
                                 "Esperado 'print'");
 
@@ -1265,7 +1276,10 @@ public class Parser {
                                 TokenType.SEMICOLON,
                                 "Esperado ';' após print");
 
-                return new PrintRecord(expression);
+                return new PrintRecord(
+                                expression,
+                                printToken.getLine(),
+                                printToken.getColumn());
         }
 
         private ExpressionInterface expression() {
@@ -1475,16 +1489,20 @@ public class Parser {
                         return new LiteralRecord(value);
                 }
 
+                String lexeme = token.getLexeme();
+                boolean explicitLong = lexeme.endsWith("L") || lexeme.endsWith("l");
+                String digits = explicitLong
+                                ? lexeme.substring(0, lexeme.length() - 1)
+                                : lexeme;
                 try {
-
-                        int value = Integer.parseInt(token.getLexeme());
-
-                        return new LiteralRecord(value);
-
-                } catch (NumberFormatException e) {
-
-                        throw new IntegerOutOfRangeException(
-                                        token.getLexeme(),
+                        long value = Long.parseLong(digits);
+                        if (explicitLong || value > Integer.MAX_VALUE) {
+                                return new LiteralRecord(value);
+                        }
+                        return new LiteralRecord((int) value);
+                } catch (NumberFormatException exception) {
+                        throw new LongOutOfRangeException(
+                                        lexeme,
                                         token.getLine(),
                                         token.getColumn());
                 }
@@ -1526,13 +1544,43 @@ public class Parser {
                                 TokenType.NEG,
                                 "Esperado 'neg'");
 
-                ExpressionInterface operand = expression();
+                ExpressionInterface operand;
+                Object minimumValue = tokens.verify(TokenType.NUMBER)
+                                ? minimumIntegerValue(tokens.current().getLexeme())
+                                : null;
+                if (minimumValue != null) {
+                        tokens.consume(TokenType.NUMBER, "Esperado operando de 'neg'");
+                        operand = new LiteralRecord(minimumValue);
+                } else {
+                        operand = expression();
+                }
 
                 return new UnaryExpressionRecord(
                                 operator.getType(),
                                 operand,
                                 operator.getLine(),
                                 operator.getColumn());
+        }
+
+        private Object minimumIntegerValue(String lexeme) {
+                boolean explicitLong = lexeme.endsWith("L") || lexeme.endsWith("l");
+                String digits = explicitLong
+                                ? lexeme.substring(0, lexeme.length() - 1)
+                                : lexeme;
+                int firstNonZero = 0;
+                while (firstNonZero < digits.length()
+                                && digits.charAt(firstNonZero) == '0') {
+                        firstNonZero++;
+                }
+
+                String magnitude = digits.substring(firstNonZero);
+                if (!explicitLong && magnitude.equals("2147483648")) {
+                        return Integer.MIN_VALUE;
+                }
+                if (magnitude.equals("9223372036854775808")) {
+                        return Long.MIN_VALUE;
+                }
+                return null;
         }
 
         private ExpressionInterface identifierExpression() {
@@ -1698,13 +1746,17 @@ public class Parser {
 
         private StatementInterface comparisonStatement() {
 
+                Token comparisonToken = tokens.current();
                 ExpressionInterface comparison = comparison();
 
                 tokens.consume(
                                 TokenType.SEMICOLON,
                                 "Esperado ';' após comparação");
 
-                return new ExpressionStatementRecord(comparison);
+                return new ExpressionStatementRecord(
+                                comparison,
+                                comparisonToken.getLine(),
+                                comparisonToken.getColumn());
         }
 
         private ExpressionInterface comparison() {

@@ -23,6 +23,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     private final Map<String, InterfaceRecord> interfaces = new HashMap<>();
     private final Map<String, SemanticType> registers = new HashMap<>();
     private final Map<String, Set<String>> assignableTypes = new HashMap<>();
+    private final Map<String, SemanticType> convertedTypes = new HashMap<>();
 
     private String currentClass;
     private FunctionRecord currentFunction;
@@ -53,6 +54,10 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private SemanticType convertType(String type) {
+        return convertedTypes.computeIfAbsent(type, this::convertTypeUncached);
+    }
+
+    private SemanticType convertTypeUncached(String type) {
         int dimensions = 0;
         String elementType = type;
         while (elementType.endsWith("[]")) {
@@ -64,6 +69,9 @@ public class SemanticAnalyzer implements ASTVisitor {
 
             case "int" ->
                 SemanticType.primitive(TokenType.INT);
+
+            case "long" ->
+                SemanticType.primitive(TokenType.LONG);
 
             case "double" ->
                 SemanticType.primitive(TokenType.DOUBLE);
@@ -316,7 +324,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                     creation.column());
         }
 
-        List<SemanticType> argumentTypes = new ArrayList<>();
+        List<SemanticType> argumentTypes = new ArrayList<>(creation.arguments().size());
         for (ExpressionInterface argument : creation.arguments()) {
             argumentTypes.add(getExpressionType(argument));
         }
@@ -333,18 +341,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         List<ConstructorRecord> candidates = new ArrayList<>();
         for (ConstructorRecord constructor : classNode.constructors()) {
-            if (constructor.parameters().size() != argumentTypes.size()) {
-                continue;
-            }
-            boolean matchingTypes = true;
-            for (int index = 0; index < argumentTypes.size(); index++) {
-                SemanticType expected = convertType(constructor.parameters().get(index).type());
-                if (!isAssignable(expected, argumentTypes.get(index))) {
-                    matchingTypes = false;
-                    break;
-                }
-            }
-            if (matchingTypes) {
+            if (parametersAccept(constructor.parameters(), argumentTypes)) {
                 candidates.add(constructor);
             }
         }
@@ -413,6 +410,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                         ? type.className()
                         : switch (type.primitiveType()) {
                             case INT -> "int";
+                            case LONG -> "long";
                             case DOUBLE -> "double";
                             case STRING -> "String";
                             case BOOLEAN -> "boolean";
@@ -424,6 +422,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             } else {
                 names.add(switch (type.primitiveType()) {
                     case INT -> "int";
+                    case LONG -> "long";
                     case DOUBLE -> "double";
                     case STRING -> "String";
                     case BOOLEAN -> "boolean";
@@ -760,20 +759,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                     call.column());
         }
 
-        List<SemanticType> argumentTypes = new ArrayList<>();
-
-        for (ExpressionInterface argument : call.arguments()) {
-            SemanticType argumentType = getExpressionType(argument);
-
-            if (argumentType == null) {
-                throw new SemanticException(
-                        "Não foi possível determinar o tipo de um argumento.",
-                        call.line(),
-                        call.column());
-            }
-
-            argumentTypes.add(argumentType);
-        }
+        List<SemanticType> argumentTypes = getArgumentTypes(
+                call.arguments(), call.line(), call.column());
 
         InterfaceRecord interfaceNode = interfaces.get(receiverType.className());
 
@@ -906,20 +893,43 @@ public class SemanticAnalyzer implements ASTVisitor {
             FunctionRecord function,
             String name,
             List<SemanticType> argumentTypes) {
-        if (!function.name().equals(name)
-                || function.parameters().size() != argumentTypes.size()) {
+        return function.name().equals(name)
+                && parametersAccept(function.parameters(), argumentTypes);
+    }
+
+    private boolean parametersAccept(
+            List<ParameterRecord> parameters,
+            List<SemanticType> argumentTypes) {
+        if (parameters.size() != argumentTypes.size()) {
             return false;
         }
 
         for (int i = 0; i < argumentTypes.size(); i++) {
-            SemanticType expected = convertType(
-                    function.parameters().get(i).type());
+            SemanticType expected = convertType(parameters.get(i).type());
             if (!isAssignable(expected, argumentTypes.get(i))) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private List<SemanticType> getArgumentTypes(
+            List<ExpressionInterface> arguments,
+            int line,
+            int column) {
+        List<SemanticType> argumentTypes = new ArrayList<>(arguments.size());
+        for (ExpressionInterface argument : arguments) {
+            SemanticType argumentType = getExpressionType(argument);
+            if (argumentType == null) {
+                throw new SemanticException(
+                        "Não foi possível determinar o tipo de um argumento.",
+                        line,
+                        column);
+            }
+            argumentTypes.add(argumentType);
+        }
+        return argumentTypes;
     }
 
     private FunctionRecord mostSpecificMethod(List<FunctionRecord> candidates) {
@@ -1128,20 +1138,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                     call.column());
         }
 
-        List<SemanticType> argumentTypes = new ArrayList<>();
-
-        for (ExpressionInterface argument : call.arguments()) {
-            SemanticType argumentType = getExpressionType(argument);
-
-            if (argumentType == null) {
-                throw new SemanticException(
-                        "Não foi possível determinar o tipo de um argumento.",
-                        call.line(),
-                        call.column());
-            }
-
-            argumentTypes.add(argumentType);
-        }
+        List<SemanticType> argumentTypes = getArgumentTypes(
+                call.arguments(), call.line(), call.column());
 
         String className = currentClass;
         boolean functionFound = false;
@@ -1289,20 +1287,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                     call.column());
         }
 
-        List<SemanticType> argumentTypes = new ArrayList<>();
-
-        for (ExpressionInterface argument : call.arguments()) {
-            SemanticType argumentType = getExpressionType(argument);
-
-            if (argumentType == null) {
-                throw new SemanticException(
-                "Não foi possível determinar o tipo de um argumento.",
-                call.line(),
-                call.column());
-            }
-
-            argumentTypes.add(argumentType);
-        }
+        List<SemanticType> argumentTypes = getArgumentTypes(
+                call.arguments(), call.line(), call.column());
 
         boolean methodFound = false;
         boolean sameParameterCount = false;
@@ -1493,7 +1479,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             List<ExpressionInterface> arguments,
             int line,
             int column) {
-        List<SemanticType> argumentTypes = new ArrayList<>();
+        List<SemanticType> argumentTypes = new ArrayList<>(arguments.size());
         for (ExpressionInterface argument : arguments) {
             argumentTypes.add(getExpressionType(argument));
         }
@@ -1522,22 +1508,7 @@ public class SemanticAnalyzer implements ASTVisitor {
         List<ConstructorRecord> candidates = new ArrayList<>();
 
         for (ConstructorRecord constructor : targetClass.constructors()) {
-            if (constructor.parameters().size() != argumentTypes.size()) {
-                continue;
-            }
-
-            boolean compatible = true;
-            for (int index = 0; index < argumentTypes.size(); index++) {
-                SemanticType expected = convertType(
-                        constructor.parameters().get(index).type());
-                SemanticType received = argumentTypes.get(index);
-                if (!isAssignable(expected, received)) {
-                    compatible = false;
-                    break;
-                }
-            }
-
-            if (compatible) {
+            if (parametersAccept(constructor.parameters(), argumentTypes)) {
                 candidates.add(constructor);
             }
         }
@@ -2122,26 +2093,20 @@ public class SemanticAnalyzer implements ASTVisitor {
                             operation.column());
                 }
 
-                if (left.primitiveType() == TokenType.DOUBLE
-                        || right.primitiveType() == TokenType.DOUBLE) {
-
-                    return SemanticType.primitive(TokenType.DOUBLE);
-                }
-
-                return SemanticType.primitive(TokenType.INT);
+                return promotedNumericType(left, right);
 
             case MOD:
                 if (!left.isPrimitive()
                         || !right.isPrimitive()
-                        || left.primitiveType() != TokenType.INT
-                        || right.primitiveType() != TokenType.INT) {
+                        || !isInteger(left)
+                        || !isInteger(right)) {
                     throw new SemanticException(
-                            "O operador 'mod' exige dois operandos int.",
+                            "O operador 'mod' exige operandos int ou long.",
                             operation.line(),
                             operation.column());
                 }
 
-                return SemanticType.primitive(TokenType.INT);
+                return promotedNumericType(left, right);
 
             case AND:
             case OR:
@@ -2196,14 +2161,31 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         if (operation.operator() != TokenType.NEG
                 || !operandType.isPrimitive()
-                || operandType.primitiveType() != TokenType.INT) {
+                || !isInteger(operandType)) {
             throw new SemanticException(
-                    "O operador 'neg' exige um operando int.",
+                    "O operador 'neg' exige um operando int ou long.",
                     operation.line(),
                     operation.column());
         }
 
+        return operandType;
+    }
+
+    private SemanticType promotedNumericType(SemanticType first, SemanticType second) {
+        if (first.primitiveType() == TokenType.DOUBLE
+                || second.primitiveType() == TokenType.DOUBLE) {
+            return SemanticType.primitive(TokenType.DOUBLE);
+        }
+        if (first.primitiveType() == TokenType.LONG
+                || second.primitiveType() == TokenType.LONG) {
+            return SemanticType.primitive(TokenType.LONG);
+        }
         return SemanticType.primitive(TokenType.INT);
+    }
+
+    private boolean isInteger(SemanticType type) {
+        return type.primitiveType() == TokenType.INT
+                || type.primitiveType() == TokenType.LONG;
     }
 
     private boolean isNumeric(SemanticType type) {
@@ -2213,6 +2195,7 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         return type.primitiveType() == TokenType.INT
+                || type.primitiveType() == TokenType.LONG
                 || type.primitiveType() == TokenType.DOUBLE;
     }
 
@@ -2340,7 +2323,15 @@ public class SemanticAnalyzer implements ASTVisitor {
             if (!expected.isArray()) {
                 return false;
             }
-            return isAssignable(componentType(expected), componentType(received));
+            SemanticType expectedComponent = componentType(expected);
+            SemanticType receivedComponent = componentType(received);
+            if (!expectedComponent.isArray()
+                    && !receivedComponent.isArray()
+                    && isNonReferencePrimitive(expectedComponent)
+                    && isNonReferencePrimitive(receivedComponent)) {
+                return expectedComponent.equals(receivedComponent);
+            }
+            return isAssignable(expectedComponent, receivedComponent);
         }
 
         if (expected.isArray()) {
@@ -2348,8 +2339,12 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         if (expected.isPrimitive() && received.isPrimitive()) {
-            return expected.primitiveType() == TokenType.DOUBLE
-                    && received.primitiveType() == TokenType.INT;
+            return switch (expected.primitiveType()) {
+                case LONG -> received.primitiveType() == TokenType.INT;
+                case DOUBLE -> received.primitiveType() == TokenType.INT
+                        || received.primitiveType() == TokenType.LONG;
+                default -> false;
+            };
         }
 
         if (!expected.isClass() || !received.isClass()) {
@@ -2358,6 +2353,11 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         return getAssignableTypes(received.className())
                 .contains(expected.className());
+    }
+
+    private boolean isNonReferencePrimitive(SemanticType type) {
+        return type.isPrimitive()
+                && type.primitiveType() != TokenType.STRING;
     }
 
     private void validateAssignableType(
@@ -2646,8 +2646,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                 if (!reachable) {
                     throw new SemanticException(
                             "Código inalcançável.",
-                            currentFunction == null ? 1 : currentFunction.line(),
-                            currentFunction == null ? 1 : currentFunction.column());
+                            statement.line(),
+                            statement.column());
                 }
                 statement.accept(this);
                 reachable = canCompleteNormally(statement);

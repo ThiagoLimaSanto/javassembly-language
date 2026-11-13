@@ -1,0 +1,6 @@
+public class LexLongSuffixOnDouble {
+    public static func void main() {
+        double value = 1.5L;
+        return;
+    }
+}

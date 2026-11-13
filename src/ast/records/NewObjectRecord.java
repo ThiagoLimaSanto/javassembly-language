@@ -11,6 +11,10 @@ public record NewObjectRecord(
         int line,
         int column) implements ExpressionInterface {
 
+    public NewObjectRecord {
+        arguments = List.copyOf(arguments);
+    }
+
     @Override
     public void accept(ASTVisitor visitor) {
         visitor.visit(this);

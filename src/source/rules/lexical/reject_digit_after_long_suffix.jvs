@@ -1,0 +1,6 @@
+public class LexDigitAfterLongSuffix {
+    public static func void main() {
+        long value = 12L3;
+        return;
+    }
+}

@@ -10,12 +10,13 @@ import src.lexer.states.StringState;
 
 public class Lexer {
 
-    private String source;
+    private final String source;
     private int currentPosition;
     private int line = 1;
     private int column = 1;
     private boolean previousCharacterWasCarriageReturn;
-    private List<Token> tokens = new ArrayList<>();
+    private final List<Token> tokens = new ArrayList<>();
+    private List<Token> result;
     private static final Map<String, TokenType> KEYWORDS = Map.ofEntries(
             Map.entry("class", TokenType.CLASS),
             Map.entry("interface", TokenType.INTERFACE),
@@ -31,6 +32,7 @@ public class Lexer {
             Map.entry("private", TokenType.PRIVATE),
             Map.entry("protected", TokenType.PROTECTED),
             Map.entry("int", TokenType.INT),
+            Map.entry("long", TokenType.LONG),
             Map.entry("double", TokenType.DOUBLE),
             Map.entry("boolean", TokenType.BOOLEAN),
             Map.entry("String", TokenType.STRING),
@@ -82,7 +84,7 @@ public class Lexer {
     private LexerState state = new InitialState();
 
     public Lexer(String source) {
-        this.source = source;
+        this.source = java.util.Objects.requireNonNull(source, "source");
         this.currentPosition = 0;
     }
 
@@ -135,6 +137,10 @@ public class Lexer {
     }
 
     public List<Token> analyze() {
+        if (result != null) {
+            return result;
+        }
+
         while (!finished()) {
             state.process(this);
 
@@ -145,8 +151,8 @@ public class Lexer {
         }
 
         tokens.add(new Token(TokenType.EOF, "EOF", line, column));
-
-        return tokens;
+        result = List.copyOf(tokens);
+        return result;
     }
 
     public int getLine() {

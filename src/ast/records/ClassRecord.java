@@ -19,6 +19,13 @@ public record ClassRecord(
         int line,
         int column) implements ASTNode {
 
+    public ClassRecord {
+        interfaces = List.copyOf(interfaces);
+        attributes = List.copyOf(attributes);
+        functions = List.copyOf(functions);
+        constructors = List.copyOf(constructors);
+    }
+
     public ClassRecord(
             TokenType visibility,
             String name,
