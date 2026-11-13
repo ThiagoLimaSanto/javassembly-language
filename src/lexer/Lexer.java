@@ -21,6 +21,7 @@ public class Lexer {
             Map.entry("class", TokenType.CLASS),
             Map.entry("interface", TokenType.INTERFACE),
             Map.entry("abstract", TokenType.ABSTRACT),
+            Map.entry("default", TokenType.DEFAULT),
             Map.entry("package", TokenType.PACKAGE),
             Map.entry("import", TokenType.IMPORT),
             Map.entry("extends", TokenType.EXTENDS),
@@ -79,7 +80,8 @@ public class Lexer {
             Map.entry(",", TokenType.COMMA),
             Map.entry(".", TokenType.DOT),
             Map.entry("=", TokenType.ASSIGN),
-            Map.entry("\"", TokenType.QUOTE));
+            Map.entry("\"", TokenType.QUOTE),
+            Map.entry("*", TokenType.MUL));
 
     private LexerState state = new InitialState();
 
@@ -189,7 +191,7 @@ public class Lexer {
 
     public boolean isSymbol(char character) {
         return switch (character) {
-            case '{', '}', '[', ']', '(', ')', ';', ',', '.', '=', '"' -> true;
+            case '{', '}', '[', ']', '(', ')', ';', ',', '.', '=', '"', '*' -> true;
             default -> false;
         };
     }

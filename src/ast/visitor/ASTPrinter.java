@@ -137,7 +137,8 @@ public class ASTPrinter implements ASTVisitor {
         printLine("Função " + node.name() + " → " + node.returnType() + visibility
                 + (node.isStatic() ? " [STATIC]" : "")
                 + (node.isFinal() ? " [FINAL]" : "")
-                + (node.isAbstract() ? " [ABSTRACT]" : ""));
+                + (node.isAbstract() ? " [ABSTRACT]" : "")
+                + (node.isDefault() ? " [DEFAULT]" : ""));
 
         for (ParameterRecord parameter : node.parameters()) {
             visitChild(parameter);
@@ -318,7 +319,10 @@ public class ASTPrinter implements ASTVisitor {
 
     @Override
     public void visit(InterfaceRecord node) {
-        printLine("Interface: " + node.name());
+        printLine("Interface: " + node.name()
+                + (node.superInterfaces().isEmpty()
+                        ? ""
+                        : " extends " + String.join(", ", node.superInterfaces())));
 
         indentation++;
 

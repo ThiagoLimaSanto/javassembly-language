@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
@@ -46,6 +47,7 @@ import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
 import src.exceptions.DoubleOutOfRangeException;
 import src.exceptions.LongOutOfRangeException;
+import src.exceptions.SemanticException;
 import src.exceptions.SyntacticException;
 import src.lexer.Token;
 import src.lexer.TokenType;
@@ -53,12 +55,18 @@ import src.lexer.TokenType;
 public class Parser {
 
         private final TokenStream tokens;
+        private final Set<String> knownTypes;
         private String packageName = "";
         private final Map<String, String> importedTypes = new HashMap<>();
         private final List<String> imports = new ArrayList<>();
 
         public Parser(List<Token> tokens) {
+                this(tokens, Set.of());
+        }
+
+        public Parser(List<Token> tokens, Set<String> knownTypes) {
                 this.tokens = new TokenStream(tokens);
+                this.knownTypes = Set.copyOf(knownTypes);
         }
 
         private TypeRecord addDeclaratorDimensions(TypeRecord type) {
@@ -86,8 +94,22 @@ public class Parser {
 
                 while (tokens.verify(TokenType.IMPORT)) {
                         tokens.consume(TokenType.IMPORT, "Esperado 'import'");
-                        String importedName = qualifiedName("import");
+                        boolean isStaticImport = tokens.verify(TokenType.STATIC);
+                        if (isStaticImport) {
+                                tokens.consume(TokenType.STATIC, "Esperado 'static'");
+                        }
+                        String importedName = importName();
                         tokens.consume(TokenType.SEMICOLON, "Esperado ';' após import");
+
+                        if (isStaticImport) {
+                                imports.add("static:" + importedName);
+                                continue;
+                        }
+
+                        if (importedName.endsWith(".*")) {
+                                imports.add(importedName);
+                                continue;
+                        }
 
                         int separator = importedName.lastIndexOf('.');
                         String simpleName = separator < 0
@@ -112,8 +134,13 @@ public class Parser {
                         } else if (tokens.verify(TokenType.INTERFACE)) {
                                 interfaces.add(interfaceDeclaration());
 
-                        } else if (tokens.verify(TokenType.ABSTRACT)
-                                        || tokens.verify(TokenType.FINAL)) {
+                        } else if (tokens.verify(TokenType.ABSTRACT)) {
+                                if (tokens.peekNext().getType() == TokenType.INTERFACE) {
+                                        interfaces.add(interfaceDeclaration());
+                                } else {
+                                        classes.add(classDeclaration());
+                                }
+                        } else if (tokens.verify(TokenType.FINAL)) {
                                 classes.add(classDeclaration());
 
                         } else if (tokens.verify(TokenType.PUBLIC)
@@ -122,7 +149,10 @@ public class Parser {
 
                                 TokenType next = tokens.peekNext().getType();
 
-                                if (next == TokenType.CLASS
+                                if (next == TokenType.ABSTRACT
+                                                && tokens.peek(2).getType() == TokenType.INTERFACE) {
+                                        interfaces.add(interfaceDeclaration());
+                                } else if (next == TokenType.CLASS
                                                 || next == TokenType.ABSTRACT
                                                 || next == TokenType.FINAL) {
                                         classes.add(classDeclaration());
@@ -160,6 +190,23 @@ public class Parser {
                 return name.toString();
         }
 
+        private String importName() {
+                StringBuilder name = new StringBuilder(tokens.consume(
+                                TokenType.IDENTIFIER,
+                                "Esperado nome após 'import'").getLexeme());
+                while (tokens.verify(TokenType.DOT)) {
+                        tokens.consume(TokenType.DOT, "Esperado '.' em nome de importação");
+                        if (tokens.verify(TokenType.MUL)) {
+                                tokens.consume(TokenType.MUL, "Esperado '*'");
+                                return name.append(".*").toString();
+                        }
+                        name.append('.').append(tokens.consume(
+                                        TokenType.IDENTIFIER,
+                                        "Esperado identificador após '.'").getLexeme());
+                }
+                return name.toString();
+        }
+
         private String resolveTypeName(String name) {
                 if (name.equals("Object")) {
                         return name;
@@ -168,7 +215,34 @@ public class Parser {
                 if (imported != null) {
                         return imported;
                 }
-                return packageName.isEmpty() ? name : packageName + "." + name;
+                if (name.contains(".")) {
+                        return name;
+                }
+
+                String localType = packageName.isEmpty() ? name : packageName + "." + name;
+                if (knownTypes.contains(localType)) {
+                        return localType;
+                }
+
+                List<String> wildcardMatches = imports.stream()
+                                .filter(importName -> !importName.startsWith("static:")
+                                        && importName.endsWith(".*"))
+                                .map(importName -> importName.substring(0, importName.length() - 2)
+                                        + "." + name)
+                                .filter(knownTypes::contains)
+                                .distinct()
+                                .toList();
+                if (wildcardMatches.size() == 1) {
+                        return wildcardMatches.get(0);
+                }
+                if (wildcardMatches.size() > 1) {
+                        Token token = tokens.current();
+                        throw new SemanticException(
+                                        "O tipo '" + name + "' é ambíguo entre imports wildcard.",
+                                        token.getLine(),
+                                        token.getColumn());
+                }
+                return localType;
         }
 
         private String declaredTypeName(String name) {
@@ -357,17 +431,29 @@ public class Parser {
         private InterfaceRecord interfaceDeclaration() {
 
                 TokenType visibility = null;
+                boolean isAbstract = false;
 
-                if (isVisibility()) {
-                        visibility = consumeVisibility();
+                while (isVisibility() || tokens.verify(TokenType.ABSTRACT)) {
+                        if (isVisibility()) {
+                                if (visibility != null) {
+                                        throw syntacticError("Visibilidade repetida ou conflitante na interface.");
+                                }
+                                visibility = consumeVisibility();
+                        } else {
+                                if (isAbstract) {
+                                        throw syntacticError("Modificador 'abstract' repetido na interface.");
+                                }
+                                tokens.consume(TokenType.ABSTRACT, "Esperado 'abstract'");
+                                isAbstract = true;
+                        }
+                }
 
-                        if (visibility != TokenType.PUBLIC) {
+                if (visibility != null && visibility != TokenType.PUBLIC) {
                                 Token token = tokens.current();
                                 throw new SyntacticException(
                                                 "Uma interface de nível superior só pode ser public ou sem modificador.",
                                                 token.getLine(),
                                                 token.getColumn());
-                        }
                 }
 
                 tokens.consume(
@@ -378,6 +464,21 @@ public class Parser {
                                 TokenType.IDENTIFIER,
                                 "Esperado o nome da interface");
 
+                List<String> superInterfaces = new ArrayList<>();
+                if (tokens.verify(TokenType.EXTENDS)) {
+                        tokens.consume(TokenType.EXTENDS, "Esperado 'extends'");
+                        do {
+                                Token parent = tokens.consume(
+                                                TokenType.IDENTIFIER,
+                                                "Esperado nome da interface pai");
+                                superInterfaces.add(resolveTypeName(parent.getLexeme()));
+                                if (!tokens.verify(TokenType.COMMA)) {
+                                        break;
+                                }
+                                tokens.consume(TokenType.COMMA, "Esperado ',' entre interfaces pai");
+                        } while (true);
+                }
+
                 tokens.consume(
                                 TokenType.OPEN_BRACE,
                                 "Esperado '{' após nome da interface");
@@ -387,7 +488,12 @@ public class Parser {
                 while (!tokens.verify(TokenType.CLOSE_BRACE)
                                 && !tokens.verify(TokenType.EOF)) {
 
-                        if (tokens.verify(TokenType.FUNC)) {
+                        if (tokens.verify(TokenType.PUBLIC)
+                                        || tokens.verify(TokenType.PRIVATE)
+                                        || tokens.verify(TokenType.ABSTRACT)
+                                        || tokens.verify(TokenType.DEFAULT)
+                                        || tokens.verify(TokenType.STATIC)
+                                        || tokens.verify(TokenType.FUNC)) {
                                 functions.add(interfaceFunctionDeclaration());
 
                         } else {
@@ -403,12 +509,73 @@ public class Parser {
                 return new InterfaceRecord(
                                 visibility,
                                 declaredTypeName(name.getLexeme()),
+                        superInterfaces,
                                 functions,
                                 name.getLine(),
                                 name.getColumn());
         }
 
         private FunctionRecord interfaceFunctionDeclaration() {
+
+                TokenType visibility = null;
+                boolean isAbstract = false;
+                boolean isDefault = false;
+                boolean isStatic = false;
+                while (tokens.verify(TokenType.PUBLIC)
+                                || tokens.verify(TokenType.PRIVATE)
+                                || tokens.verify(TokenType.ABSTRACT)
+                                || tokens.verify(TokenType.DEFAULT)
+                                || tokens.verify(TokenType.STATIC)) {
+                        Token modifier = tokens.current();
+                        switch (modifier.getType()) {
+                                case PUBLIC, PRIVATE -> {
+                                        if (visibility != null) {
+                                                throw new SyntacticException(
+                                                                "Visibilidade repetida ou conflitante no método da interface.",
+                                                                modifier.getLine(), modifier.getColumn());
+                                        }
+                                        visibility = consumeVisibility();
+                                }
+                                case ABSTRACT -> {
+                                        if (isAbstract) {
+                                                throw new SyntacticException(
+                                                                "Modificador 'abstract' repetido.",
+                                                                modifier.getLine(), modifier.getColumn());
+                                        }
+                                        tokens.consume(TokenType.ABSTRACT, "Esperado 'abstract'");
+                                        isAbstract = true;
+                                }
+                                case DEFAULT -> {
+                                        if (isDefault) {
+                                                throw new SyntacticException(
+                                                                "Modificador 'default' repetido.",
+                                                                modifier.getLine(), modifier.getColumn());
+                                        }
+                                        tokens.consume(TokenType.DEFAULT, "Esperado 'default'");
+                                        isDefault = true;
+                                }
+                                case STATIC -> {
+                                        if (isStatic) {
+                                                throw new SyntacticException(
+                                                                "Modificador 'static' repetido.",
+                                                                modifier.getLine(), modifier.getColumn());
+                                        }
+                                        tokens.consume(TokenType.STATIC, "Esperado 'static'");
+                                        isStatic = true;
+                                }
+                                default -> throw new IllegalStateException("Modificador inesperado");
+                        }
+                }
+
+                if (isAbstract && (isDefault || isStatic || visibility == TokenType.PRIVATE)) {
+                        throw syntacticError("Método abstract de interface não pode ser private, static ou default.");
+                }
+                if (isDefault && isStatic) {
+                        throw syntacticError("Método de interface não pode ser default e static ao mesmo tempo.");
+                }
+                if (isDefault && visibility == TokenType.PRIVATE) {
+                        throw syntacticError("Método default de interface precisa ser public.");
+                }
 
                 tokens.consume(
                                 TokenType.FUNC,
@@ -430,19 +597,33 @@ public class Parser {
                                 TokenType.CLOSE_PARENTHESIS,
                                 "Esperado ')' para fechar os parâmetros");
 
-                tokens.consume(
-                                TokenType.SEMICOLON,
-                                "Esperado ';' para finalizar assinatura da função");
+                BlockRecord body = null;
+                if (isDefault || isStatic || visibility == TokenType.PRIVATE) {
+                        body = block();
+                } else {
+                        if (tokens.verify(TokenType.OPEN_BRACE)) {
+                                throw syntacticError("Método abstrato de interface deve terminar com ';'.");
+                        }
+                        tokens.consume(
+                                        TokenType.SEMICOLON,
+                                        "Esperado ';' para finalizar assinatura da função");
+                        isAbstract = true;
+                }
+
+                if (visibility == TokenType.PRIVATE && isAbstract) {
+                        throw syntacticError("Método private de interface precisa ter corpo.");
+                }
 
                 return new FunctionRecord(
-                                TokenType.PUBLIC,
-                                false,
+                                visibility == null ? TokenType.PUBLIC : visibility,
+                                isStatic,
                                 false,
                                 returnType,
                                 name.getLexeme(),
                                 parameters,
-                                null,
-                                true,
+                                body,
+                                isAbstract,
+                                isDefault,
                                 name.getLine(),
                                 name.getColumn());
         }
@@ -561,9 +742,19 @@ public class Parser {
                                                 token.getType(),
                                                 "Esperado um tipo válido");
 
+                                String rawTypeName = token.getLexeme();
+                                if (token.getType() == TokenType.IDENTIFIER) {
+                                        while (tokens.verify(TokenType.DOT)
+                                                        && tokens.peekNext().getType() == TokenType.IDENTIFIER) {
+                                                tokens.consume(TokenType.DOT, "Esperado '.' em nome qualificado");
+                                                rawTypeName += "." + tokens.consume(
+                                                                TokenType.IDENTIFIER,
+                                                                "Esperado identificador após '.'").getLexeme();
+                                        }
+                                }
                                 String typeName = token.getType() == TokenType.IDENTIFIER
-                                                ? resolveTypeName(token.getLexeme())
-                                                : token.getLexeme();
+                                                ? resolveTypeName(rawTypeName)
+                                                : rawTypeName;
                                 while (allowArray && tokens.verify(TokenType.OPEN_BRACKET)) {
                                         tokens.consume(
                                                         TokenType.OPEN_BRACKET,
@@ -1080,8 +1271,15 @@ public class Parser {
                 return new CallRecord(
                                 name.getLexeme(),
                                 arguments,
+                                staticImports(),
                                 name.getLine(),
                                 name.getColumn());
+        }
+
+        private List<String> staticImports() {
+                return imports.stream()
+                                .filter(importName -> importName.startsWith("static:"))
+                                .toList();
         }
 
         private List<ExpressionInterface> arguments() {
@@ -1125,6 +1323,7 @@ public class Parser {
                 } else {
                         targetOrCall = new VariableRecord(
                                         name.getLexeme(),
+                                        staticImports(),
                                         name.getLine(),
                                         name.getColumn());
                 }
@@ -1595,6 +1794,7 @@ public class Parser {
 
                 return new VariableRecord(
                                 name.getLexeme(),
+                                staticImports(),
                                 name.getLine(),
                                 name.getColumn());
         }
@@ -1724,6 +1924,10 @@ public class Parser {
                         return true;
                 }
                 int offset = 1;
+                while (tokens.peek(offset).getType() == TokenType.DOT
+                                && tokens.peek(offset + 1).getType() == TokenType.IDENTIFIER) {
+                        offset += 2;
+                }
                 while (tokens.peek(offset).getType() == TokenType.OPEN_BRACKET
                                 && tokens.peek(offset + 1).getType() == TokenType.CLOSE_BRACKET) {
                         offset += 2;

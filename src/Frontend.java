@@ -3,6 +3,7 @@ package src;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 
 import src.ast.records.ProgramRecord;
 import src.ast.records.ClassRecord;
@@ -18,8 +19,12 @@ public final class Frontend {
     }
 
     public static ProgramRecord parse(String source) {
+        return parse(source, Set.of());
+    }
+
+    static ProgramRecord parse(String source, Set<String> knownTypes) {
         List<Token> tokens = new Lexer(source).analyze();
-        ProgramRecord program = new Parser(tokens).analyze();
+        ProgramRecord program = new Parser(tokens, knownTypes).analyze();
         validateImportedTypeNames(program);
         return program;
     }
@@ -55,6 +60,9 @@ public final class Frontend {
             int column,
             List<String> imports) {
         for (String importedName : imports) {
+            if (importedName.startsWith("static:") || importedName.endsWith(".*")) {
+                continue;
+            }
             if (declaredName.equals(simpleName(importedName))) {
                 throw new SemanticException(
                         "O tipo declarado '" + declaredName

@@ -1,0 +1,52 @@
+interface ValueSource {
+    func int value();
+}
+
+interface NamedSource {
+    default func String name() {
+        return "source";
+    }
+}
+
+interface CombinedSource extends ValueSource, NamedSource {
+}
+
+interface GeneralResult {
+    func Object result();
+}
+
+interface SpecificResult {
+    func String result();
+}
+
+interface CovariantResult extends GeneralResult, SpecificResult {
+}
+
+class ConcreteSource implements CombinedSource {
+    public func int value() {
+        return 42;
+    }
+
+    public static func void main(String[] args) {
+        CombinedSource source = new ConcreteSource();
+        print source.value();
+        print source.name();
+        print source.toString();
+        print source.equals(null);
+        int hash = source.hashCode();
+        Class type = source.getClass();
+        return;
+    }
+}
+
+class CovariantSource implements CovariantResult {
+    public func String result() {
+        return "covariant";
+    }
+
+    public static func void check() {
+        CovariantResult value = new CovariantSource();
+        String text = value.result();
+        return;
+    }
+}

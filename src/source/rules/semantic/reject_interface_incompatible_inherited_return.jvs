@@ -1,0 +1,7 @@
+interface StringResult {
+    func String result();
+}
+
+interface InvalidResult extends StringResult {
+    func int result();
+}

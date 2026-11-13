@@ -1,0 +1,7 @@
+interface CycleLeft extends CycleRight {
+    func int value();
+}
+
+interface CycleRight extends CycleLeft {
+    func int value();
+}

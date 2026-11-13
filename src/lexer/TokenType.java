@@ -11,6 +11,7 @@ public enum TokenType {
     CLASS,
     INTERFACE,
     ABSTRACT,
+    DEFAULT,
     PACKAGE,
     IMPORT,
     EXTENDS,

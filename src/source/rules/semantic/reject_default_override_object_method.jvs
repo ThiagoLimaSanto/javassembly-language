@@ -1,0 +1,5 @@
+interface InvalidObjectDefault {
+    default func String toString() {
+        return "invalid";
+    }
+}

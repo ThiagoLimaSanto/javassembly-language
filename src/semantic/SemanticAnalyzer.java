@@ -16,6 +16,11 @@ import src.lexer.TokenType;
 
 public class SemanticAnalyzer implements ASTVisitor {
 
+    private record DeclaredInterfaceMethod(
+            InterfaceRecord owner,
+            FunctionRecord function) {
+    }
+
     private VariableTable currentScope = new VariableTable(null);
 
     private final Map<String, FunctionTable> functionTables = new HashMap<>();
@@ -205,9 +210,17 @@ public class SemanticAnalyzer implements ASTVisitor {
             compatibleTypes.add(currentName);
             ClassRecord currentClassNode = classes.get(currentName);
             if (currentClassNode == null) {
+                InterfaceRecord interfaceNode = interfaces.get(currentName);
+                if (interfaceNode != null) {
+                    for (String parentInterface : interfaceNode.superInterfaces()) {
+                        compatibleTypes.addAll(getAssignableTypes(parentInterface));
+                    }
+                }
                 break;
             }
-            compatibleTypes.addAll(currentClassNode.interfaces());
+            for (String interfaceName : currentClassNode.interfaces()) {
+                compatibleTypes.addAll(getAssignableTypes(interfaceName));
+            }
             currentName = currentClassNode.superClass();
         }
         compatibleTypes.add("Object");
@@ -223,6 +236,269 @@ public class SemanticAnalyzer implements ASTVisitor {
             String accessingType) {
         return visibility == TokenType.PUBLIC
                 || samePackage(declaringType, accessingType);
+    }
+
+    private List<InterfaceRecord> interfaceHierarchy(String interfaceName) {
+        List<InterfaceRecord> result = new ArrayList<>();
+        Set<String> visited = new HashSet<>();
+        collectInterfaceHierarchy(interfaceName, visited, result);
+        return result;
+    }
+
+    private void collectInterfaceHierarchy(
+            String interfaceName,
+            Set<String> visited,
+            List<InterfaceRecord> result) {
+        if (!visited.add(interfaceName)) {
+            return;
+        }
+        InterfaceRecord node = interfaces.get(interfaceName);
+        if (node == null) {
+            return;
+        }
+        result.add(node);
+        for (String parent : node.superInterfaces()) {
+            collectInterfaceHierarchy(parent, visited, result);
+        }
+    }
+
+    private List<FunctionRecord> inheritedInterfaceMethods(String interfaceName) {
+        List<DeclaredInterfaceMethod> declarations = new ArrayList<>();
+        for (InterfaceRecord node : interfaceHierarchy(interfaceName)) {
+            for (FunctionRecord function : node.functions()) {
+                if (function.visibility() != TokenType.PRIVATE && !function.isStatic()) {
+                    declarations.add(new DeclaredInterfaceMethod(node, function));
+                }
+            }
+        }
+        return mostSpecificInterfaceDeclarations(declarations);
+    }
+
+    private List<FunctionRecord> implementedInterfaceMethods(String className) {
+        List<DeclaredInterfaceMethod> declarations = new ArrayList<>();
+        Set<String> visitedClasses = new HashSet<>();
+        String currentName = className;
+        while (currentName != null && visitedClasses.add(currentName)) {
+            ClassRecord classNode = classes.get(currentName);
+            if (classNode == null) {
+                break;
+            }
+            for (String interfaceName : classNode.interfaces()) {
+                for (InterfaceRecord owner : interfaceHierarchy(interfaceName)) {
+                    for (FunctionRecord function : owner.functions()) {
+                        if (function.visibility() != TokenType.PRIVATE && !function.isStatic()) {
+                            declarations.add(new DeclaredInterfaceMethod(owner, function));
+                        }
+                    }
+                }
+            }
+            currentName = classNode.superClass();
+        }
+        return mostSpecificInterfaceDeclarations(declarations);
+    }
+
+    private List<FunctionRecord> objectMethods(int line, int column) {
+        return List.of(
+                builtinMethod(TokenType.PUBLIC, false, "boolean", "equals", List.of("Object"), line, column),
+                builtinMethod(TokenType.PUBLIC, false, "int", "hashCode", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, false, "String", "toString", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "Class", "getClass", List.of(), line, column),
+                builtinMethod(TokenType.PROTECTED, false, "Object", "clone", List.of(), line, column),
+                builtinMethod(TokenType.PROTECTED, false, "void", "finalize", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "void", "notify", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "void", "notifyAll", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "void", "wait", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "void", "wait", List.of("long"), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "void", "wait", List.of("long", "int"), line, column));
+    }
+
+    private FunctionRecord builtinMethod(
+            TokenType visibility,
+            boolean isFinal,
+            String returnType,
+            String name,
+            List<String> parameterTypes,
+            int line,
+            int column) {
+        List<ParameterRecord> parameters = new ArrayList<>();
+        for (int index = 0; index < parameterTypes.size(); index++) {
+            parameters.add(new ParameterRecord(
+                    new TypeRecord(parameterTypes.get(index)),
+                    "arg" + index,
+                    line,
+                    column));
+        }
+        return new FunctionRecord(
+                visibility,
+                false,
+                isFinal,
+                new TypeRecord(returnType),
+                name,
+                parameters,
+                null,
+                false,
+                false,
+                line,
+                column);
+    }
+
+    private List<FunctionRecord> mostSpecificInterfaceDeclarations(
+            List<DeclaredInterfaceMethod> declarations) {
+        List<DeclaredInterfaceMethod> effective = new ArrayList<>();
+        for (DeclaredInterfaceMethod candidate : declarations) {
+            boolean overriddenByChild = false;
+            for (DeclaredInterfaceMethod other : declarations) {
+                if (candidate == other
+                        || !methodSignature(candidate.function()).equals(methodSignature(other.function()))) {
+                    continue;
+                }
+                if (!candidate.owner().name().equals(other.owner().name())
+                        && interfaceExtends(other.owner().name(), candidate.owner().name())) {
+                    overriddenByChild = true;
+                    break;
+                }
+            }
+            if (!overriddenByChild && effective.stream().noneMatch(existing ->
+                    existing.owner().name().equals(candidate.owner().name())
+                            && methodSignature(existing.function()).equals(
+                                    methodSignature(candidate.function())))) {
+                effective.add(candidate);
+            }
+        }
+        return effective.stream().map(DeclaredInterfaceMethod::function).toList();
+    }
+
+    private List<FunctionRecord> coalesceEquivalentMethods(List<FunctionRecord> methods) {
+        Map<String, FunctionRecord> selected = new HashMap<>();
+        for (FunctionRecord method : methods) {
+            String signature = methodSignature(method);
+            FunctionRecord previous = selected.get(signature);
+            if (previous == null
+                    || isValidReturnSubstitution(
+                            convertType(previous.returnType()),
+                            convertType(method.returnType()))) {
+                selected.put(signature, method);
+            }
+        }
+        return new ArrayList<>(selected.values());
+    }
+
+    private boolean interfaceExtends(String child, String parent) {
+        return !child.equals(parent)
+                && interfaceHierarchy(child).stream()
+                        .anyMatch(node -> node.name().equals(parent));
+    }
+
+    private void validateInterfaceInheritance(InterfaceRecord interfaceNode) {
+        Set<String> directParents = new HashSet<>();
+        for (String parentName : interfaceNode.superInterfaces()) {
+            if (!directParents.add(parentName)) {
+                throw new SemanticException(
+                        "A interface '" + parentName + "' foi estendida mais de uma vez.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+            if (interfaceNode.name().equals(parentName)) {
+                throw new SemanticException(
+                        "Uma interface não pode estender a si mesma.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+            if (!interfaces.containsKey(parentName)) {
+                throw new SemanticException(
+                        "Interface pai '" + parentName + "' não declarada.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+            if (!isTypeAccessible(
+                    interfaces.get(parentName).visibility(),
+                    parentName,
+                    interfaceNode.name())) {
+                throw new SemanticException(
+                        "A interface pai '" + parentName + "' não é acessível neste pacote.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+            if (interfaceExtends(parentName, interfaceNode.name())) {
+                throw new SemanticException(
+                        "Herança circular detectada envolvendo a interface '"
+                                + interfaceNode.name() + "'.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+        }
+
+        for (FunctionRecord method : interfaceNode.functions()) {
+            if (method.visibility() == TokenType.PRIVATE || method.isStatic()) {
+                continue;
+            }
+            for (String parentName : interfaceNode.superInterfaces()) {
+                for (InterfaceRecord parent : interfaceHierarchy(parentName)) {
+                    for (FunctionRecord inherited : parent.functions()) {
+                        if (inherited.visibility() == TokenType.PRIVATE
+                                || inherited.isStatic()
+                                || !sameSignature(method, inherited)) {
+                            continue;
+                        }
+                        if (!isValidReturnSubstitution(
+                                convertType(inherited.returnType()),
+                                convertType(method.returnType()))) {
+                            throw new SemanticException(
+                                    "Tipo de retorno incompatível ao redefinir '"
+                                            + method.name() + "' herdado de '"
+                                            + parent.name() + "'.",
+                                    method.line(),
+                                    method.column());
+                        }
+                    }
+                }
+            }
+            if (!method.isDefault()) {
+                continue;
+            }
+            for (FunctionRecord objectMethod : objectMethods(method.line(), method.column())) {
+                if (objectMethod.visibility() == TokenType.PUBLIC
+                        && sameSignature(method, objectMethod)) {
+                    throw new SemanticException(
+                            "Um método default não pode substituir o método público '"
+                                    + objectMethod.name() + "' de Object.",
+                            method.line(),
+                            method.column());
+                }
+            }
+        }
+
+        List<FunctionRecord> inherited = inheritedInterfaceMethods(interfaceNode.name());
+        Map<String, List<FunctionRecord>> signatures = new HashMap<>();
+        for (FunctionRecord method : inherited) {
+            signatures.computeIfAbsent(methodSignature(method), ignored -> new ArrayList<>())
+                    .add(method);
+        }
+        for (List<FunctionRecord> sameSignature : signatures.values()) {
+            long defaultCount = sameSignature.stream().filter(FunctionRecord::isDefault).count();
+            if (defaultCount > 1) {
+                throw new SemanticException(
+                        "A interface '" + interfaceNode.name()
+                                + "' herda métodos default conflitantes; redeclare a assinatura.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+            FunctionRecord compatibleReturn = sameSignature.stream()
+                    .filter(candidate -> sameSignature.stream().allMatch(other ->
+                            isValidReturnSubstitution(
+                                    convertType(other.returnType()),
+                                    convertType(candidate.returnType()))))
+                    .findFirst()
+                    .orElse(null);
+            if (compatibleReturn == null) {
+                throw new SemanticException(
+                        "A interface '" + interfaceNode.name()
+                                + "' herda métodos com retornos incompatíveis para '"
+                                + sameSignature.get(0).name() + "'.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+        }
     }
 
     private boolean isMemberAccessibleFromCurrentClass(
@@ -601,6 +877,14 @@ public class SemanticAnalyzer implements ASTVisitor {
             String name,
             int line,
             int column) {
+        return resolveVariable(name, line, column, List.of());
+    }
+
+    private VariableSymbolRecord resolveVariable(
+            String name,
+            int line,
+            int column,
+            List<String> staticImports) {
         VariableSymbolRecord local = findLocalVariable(name);
         if (local != null) {
             if (!definitelyAssignedVariables.contains(local)) {
@@ -636,10 +920,40 @@ public class SemanticAnalyzer implements ASTVisitor {
                     attribute.column());
         }
 
+        AttributeRecord importedAttribute = resolveStaticImportedAttribute(staticImports, name, line, column);
+        if (importedAttribute != null) {
+            return new VariableSymbolRecord(importedAttribute.name(),
+                    convertType(importedAttribute.type()), importedAttribute.line(), importedAttribute.column());
+        }
+
         throw new SemanticException(
                 "Variável ou atributo '" + name + "' não definido.",
                 line,
                 column);
+    }
+
+    private AttributeRecord resolveStaticImportedAttribute(
+            List<String> imports, String name, int line, int column) {
+        List<AttributeRecord> matches = new ArrayList<>();
+        for (String imported : imports) {
+            if (!imported.startsWith("static:")) continue;
+            String target = imported.substring("static:".length());
+            boolean onDemand = target.endsWith(".*");
+            String owner = onDemand ? target.substring(0, target.length() - 2)
+                    : target.substring(0, target.lastIndexOf('.'));
+            String member = onDemand ? name : target.substring(target.lastIndexOf('.') + 1);
+            if (!member.equals(name)) continue;
+            ClassRecord ownerClass = classes.get(owner);
+            if (ownerClass != null) {
+                for (AttributeRecord attribute : ownerClass.attributes()) {
+                    if (attribute.name().equals(name) && attribute.isStatic()) matches.add(attribute);
+                }
+            }
+        }
+        if (matches.size() > 1) {
+            throw new SemanticException("A referência ao membro static '" + name + "' é ambígua.", line, column);
+        }
+        return matches.isEmpty() ? null : matches.get(0);
     }
 
     private VariableSymbolRecord findLocalVariable(String name) {
@@ -766,11 +1080,23 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         if (interfaceNode != null) {
             List<FunctionRecord> candidates = new ArrayList<>();
-            for (FunctionRecord function : interfaceNode.functions()) {
+            for (FunctionRecord function : inheritedInterfaceMethods(interfaceNode.name())) {
                 if (matchesCall(function, call.name(), argumentTypes)) {
                     candidates.add(function);
                 }
             }
+            Set<String> interfaceSignatures = new HashSet<>();
+            for (FunctionRecord candidate : candidates) {
+                interfaceSignatures.add(methodSignature(candidate));
+            }
+            for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+                if (function.visibility() == TokenType.PUBLIC
+                        && !interfaceSignatures.contains(methodSignature(function))
+                        && matchesCall(function, call.name(), argumentTypes)) {
+                    candidates.add(function);
+                }
+            }
+            candidates = coalesceEquivalentMethods(candidates);
             FunctionRecord bestMatch = mostSpecificMethod(candidates);
             if (bestMatch != null) {
                 return bestMatch;
@@ -826,6 +1152,28 @@ public class SemanticAnalyzer implements ASTVisitor {
             className = classNode.superClass();
         }
 
+        for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+            if (shadowedSignatures.add(methodSignature(function))
+                    && matchesCall(function, call.name(), argumentTypes)) {
+                methodNameFound = true;
+                matchingArityFound = true;
+                candidates.add(function);
+            }
+        }
+
+        Set<String> classSignatures = new HashSet<>();
+        for (FunctionRecord candidate : candidates) {
+            classSignatures.add(methodSignature(candidate));
+        }
+        for (FunctionRecord function : implementedInterfaceMethods(receiverType.className())) {
+            if (function.name().equals(call.name())
+                    && !classSignatures.contains(methodSignature(function))
+                    && matchesCall(function, call.name(), argumentTypes)) {
+                candidates.add(function);
+            }
+        }
+
+        candidates = coalesceEquivalentMethods(candidates);
         FunctionRecord bestMatch = mostSpecificMethod(candidates);
         if (bestMatch != null) {
             ClassRecord declaringClass = findDeclaringClassForMethod(
@@ -833,7 +1181,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                     bestMatch);
             validateMemberVisibility(
                     bestMatch.visibility(),
-                    declaringClass == null ? null : declaringClass.name(),
+                    declaringClass == null ? "Object" : declaringClass.name(),
                     call.name(),
                     receiverType.className(),
                     call.line(),
@@ -949,6 +1297,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                 best = candidate;
             }
         }
+
         return best;
     }
 
@@ -1077,6 +1426,9 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (semanticType.isClass() && semanticType.className().equals("Object")) {
             return;
         }
+        if (semanticType.isClass() && semanticType.className().equals("Class")) {
+            return;
+        }
 
         ClassRecord classType = classes.get(semanticType.className());
         InterfaceRecord interfaceType = interfaces.get(semanticType.className());
@@ -1183,6 +1535,70 @@ public class SemanticAnalyzer implements ASTVisitor {
             className = classNode.superClass();
         }
 
+        Set<String> declaredSignatures = new HashSet<>();
+        for (FunctionRecord candidate : candidates) {
+            declaredSignatures.add(methodSignature(candidate));
+        }
+        for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+            if (interfaces.containsKey(currentClass)
+                    && function.visibility() != TokenType.PUBLIC) {
+                continue;
+            }
+            if (function.name().equals(call.name())
+                    && !declaredSignatures.contains(methodSignature(function))
+                    && matchesCall(function, call.name(), argumentTypes)) {
+                candidates.add(function);
+                functionFound = true;
+                sameParameterCount = true;
+            }
+        }
+
+        InterfaceRecord currentInterface = interfaces.get(currentClass);
+        if (currentInterface != null) {
+            for (InterfaceRecord owner : interfaceHierarchy(currentInterface.name())) {
+                for (FunctionRecord function : owner.functions()) {
+                    if (!function.name().equals(call.name())
+                            || ((function.visibility() == TokenType.PRIVATE || function.isStatic())
+                                    && !owner.name().equals(currentInterface.name()))) {
+                        continue;
+                    }
+                    functionFound = true;
+                    if (function.parameters().size() != argumentTypes.size()) {
+                        continue;
+                    }
+                    sameParameterCount = true;
+                    if (matchesCall(function, call.name(), argumentTypes)) {
+                        candidates.add(function);
+                    }
+                }
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            for (String imported : call.staticImports()) {
+                if (!imported.startsWith("static:")) continue;
+                String target = imported.substring("static:".length());
+                boolean onDemand = target.endsWith(".*");
+                String owner = onDemand ? target.substring(0, target.length() - 2)
+                        : target.substring(0, target.lastIndexOf('.'));
+                String member = onDemand ? call.name() : target.substring(target.lastIndexOf('.') + 1);
+                if (!member.equals(call.name())) continue;
+                ClassRecord ownerClass = classes.get(owner);
+                List<FunctionRecord> ownerMethods = ownerClass != null ? ownerClass.functions()
+                        : interfaces.containsKey(owner) ? interfaces.get(owner).functions() : List.of();
+                for (FunctionRecord function : ownerMethods) {
+                    if (function.name().equals(call.name()) && function.isStatic()) {
+                        functionFound = true;
+                        if (function.parameters().size() == argumentTypes.size()) {
+                            sameParameterCount = true;
+                            if (matchesCall(function, call.name(), argumentTypes)) candidates.add(function);
+                        }
+                    }
+                }
+            }
+        }
+
+        candidates = coalesceEquivalentMethods(candidates);
         FunctionRecord bestMatch = mostSpecificMethod(candidates);
         if (bestMatch != null) {
             if ((isStaticContext() || currentConstructorInvocationArguments)
@@ -1327,6 +1743,16 @@ public class SemanticAnalyzer implements ASTVisitor {
             superClass = parent.superClass();
         }
 
+        for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+            if (function.name().equals(call.name())
+                    && isMemberAccessibleFromCurrentClass(function.visibility(), "Object")
+                    && matchesCall(function, call.name(), argumentTypes)) {
+                candidates.add(function);
+                methodFound = true;
+                sameParameterCount = true;
+            }
+        }
+
         FunctionRecord bestMatch = mostSpecificMethod(candidates);
         if (bestMatch != null) {
             ClassRecord declaringClass = findDeclaringClassForMethod(
@@ -1334,7 +1760,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                     bestMatch);
             validateMemberVisibility(
                     bestMatch.visibility(),
-                    declaringClass == null ? null : declaringClass.name(),
+                    declaringClass == null ? "Object" : declaringClass.name(),
                     call.name(),
                     call.line(),
                     call.column());
@@ -1399,6 +1825,12 @@ public class SemanticAnalyzer implements ASTVisitor {
             }
 
             superClass = parent.superClass();
+        }
+
+        for (FunctionRecord objectMethod : objectMethods(function.line(), function.column())) {
+            if (sameSignature(objectMethod, function)) {
+                return objectMethod;
+            }
         }
 
         return null;
@@ -1737,17 +2169,45 @@ public class SemanticAnalyzer implements ASTVisitor {
                             current.column());
                 }
 
-                for (FunctionRecord requirement : interfaceNode.functions()) {
+                for (InterfaceRecord inheritedInterface : interfaceHierarchy(interfaceName)) {
+                    if (!isTypeAccessible(
+                            inheritedInterface.visibility(),
+                            inheritedInterface.name(),
+                            classNode.name())) {
+                        throw new SemanticException(
+                                "A interface pai '" + inheritedInterface.name()
+                                        + "' não é acessível neste pacote.",
+                                current.line(),
+                                current.column());
+                    }
+                }
+
+                for (FunctionRecord requirement : inheritedInterfaceMethods(interfaceName)) {
                     FunctionRecord implementation = findClassMethod(
                             classNode.name(),
                             requirement);
 
-                    if ((implementation == null || implementation.isAbstract())
-                            && classNode.isAbstract()) {
-                        continue;
-                    }
-
-                    if (implementation == null || implementation.isAbstract()) {
+                    if (implementation == null) {
+                        List<FunctionRecord> defaults = implementedInterfaceMethods(classNode.name())
+                                .stream()
+                                .filter(method -> methodSignature(method)
+                                        .equals(methodSignature(requirement)))
+                                .filter(FunctionRecord::isDefault)
+                                .toList();
+                        if (defaults.size() == 1) {
+                            continue;
+                        }
+                        if (defaults.size() > 1) {
+                            throw new SemanticException(
+                                    "A classe '" + classNode.name()
+                                            + "' herda implementações default conflitantes para '"
+                                            + requirement.name() + "'; declare uma implementação explícita.",
+                                    classNode.line(),
+                                    classNode.column());
+                        }
+                        if (classNode.isAbstract()) {
+                            continue;
+                        }
                         throw new SemanticException(
                                 "A classe '" + classNode.name()
                                         + "' não implementa o método '"
@@ -1773,6 +2233,15 @@ public class SemanticAnalyzer implements ASTVisitor {
                     if (!isValidReturnSubstitution(expectedReturn, actualReturn)) {
                         throw new SemanticException(
                                 "Tipo de retorno incompatível na implementação do método '"
+                                        + requirement.name() + "'.",
+                                implementation.line(),
+                                implementation.column());
+                    }
+
+                    if (implementation.isAbstract() && !classNode.isAbstract()) {
+                        throw new SemanticException(
+                                "A classe concreta '" + classNode.name()
+                                        + "' não implementa o método '"
                                         + requirement.name() + "'.",
                                 implementation.line(),
                                 implementation.column());
@@ -1901,7 +2370,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             VariableSymbolRecord symbol = resolveVariable(
                     variable.name(),
                     variable.line(),
-                    variable.column());
+                    variable.column(), variable.staticImports());
             return symbol.type();
         }
 
@@ -2247,8 +2716,8 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (expected.equals(actual)) {
             return true;
         }
-        return ((expected.isClass() && actual.isClass())
-                || (expected.isArray() && actual.isArray()))
+        return isReferenceType(expected)
+                && isReferenceType(actual)
                 && isAssignable(expected, actual);
     }
 
@@ -2416,6 +2885,10 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         for (RegisterDeclarationRecord register : node.registers()) {
             register.accept(this);
+        }
+
+        for (InterfaceRecord interfaceNode : node.interfaces()) {
+            validateInterfaceInheritance(interfaceNode);
         }
 
         for (ClassRecord classNode : node.classes()) {
@@ -3233,6 +3706,15 @@ public class SemanticAnalyzer implements ASTVisitor {
         } else if (node.target() instanceof VariableRecord variable
                 && !resolvesToLocalVariable(variable.name())) {
             assignedFieldName = variable.name();
+            AttributeRecord importedAttribute = resolveStaticImportedAttribute(
+                    variable.staticImports(), variable.name(), variable.line(), variable.column());
+            if (importedAttribute != null && importedAttribute.isFinal()) {
+                throw new SemanticException(
+                        "Não é permitido modificar o atributo final '"
+                                + importedAttribute.name() + "'.",
+                        node.line(),
+                        node.column());
+            }
         }
 
         if (assignedFieldName != null) {

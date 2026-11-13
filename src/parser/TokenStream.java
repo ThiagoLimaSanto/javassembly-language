@@ -1,8 +1,8 @@
 package src.parser;
 
 import java.util.List;
-import java.util.Objects;
 
+import src.exceptions.InvalidTokenStreamException;
 import src.exceptions.SyntacticException;
 import src.lexer.Token;
 import src.lexer.TokenType;
@@ -13,13 +13,28 @@ public class TokenStream {
     private int position = 0;
 
     public TokenStream(List<Token> tokens) {
-        Objects.requireNonNull(tokens, "tokens");
-        if (tokens.isEmpty() || tokens.get(tokens.size() - 1).getType() != TokenType.EOF) {
-            throw new IllegalArgumentException("Tokens list must end with EOF");
+        if (tokens == null) {
+            throw new InvalidTokenStreamException("A lista de tokens não pode ser nula.");
+        }
+        if (tokens.isEmpty()) {
+            throw new InvalidTokenStreamException(
+                    "A sequência de tokens está vazia; era esperado ao menos o token EOF.");
+        }
+        for (int index = 0; index < tokens.size(); index++) {
+            if (tokens.get(index) == null) {
+                throw new InvalidTokenStreamException(
+                        "A sequência de tokens contém um valor nulo na posição " + index + ".");
+            }
+        }
+        if (tokens.get(tokens.size() - 1).getType() != TokenType.EOF) {
+            throw new InvalidTokenStreamException(
+                    "A sequência de tokens está incompleta: o último token precisa ser EOF.");
         }
         for (int index = 0; index < tokens.size() - 1; index++) {
             if (tokens.get(index).getType() == TokenType.EOF) {
-                throw new IllegalArgumentException("EOF can only appear at the end of the token list");
+                throw new InvalidTokenStreamException(
+                        "A sequência de tokens está inconsistente: EOF só pode aparecer no final (posição "
+                                + index + ").");
             }
         }
 
@@ -36,7 +51,15 @@ public class TokenStream {
 
     public Token consume(TokenType type, String message) {
         if (!verify(type)) {
-            throw new SyntacticException(message, current().getLine(), current().getColumn());
+            Token found = current();
+            String lexeme = found.getLexeme();
+            String detail = "Encontrado " + found.getType()
+                    + (lexeme == null || lexeme.isEmpty() ? "" : " ('" + printable(lexeme) + "')")
+                    + ".";
+            throw new SyntacticException(
+                    message + (message.endsWith(".") ? " " : ". ") + detail,
+                    found.getLine(),
+                    found.getColumn());
         }
 
         Token token = current();
@@ -54,12 +77,17 @@ public class TokenStream {
 
     public Token peek(int offset) {
         if (offset < 0) {
-            throw new IllegalArgumentException("Token offset cannot be negative");
+            throw new InvalidTokenStreamException(
+                    "O deslocamento para consultar tokens não pode ser negativo: " + offset + ".");
         }
         if (offset >= tokens.size() - position) {
             return tokens.get(tokens.size() - 1);
         }
         return tokens.get(position + offset);
+    }
+
+    private String printable(String value) {
+        return value.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
     }
 
 }

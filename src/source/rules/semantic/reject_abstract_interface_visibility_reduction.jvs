@@ -1,0 +1,7 @@
+interface RunnableTask {
+    func void run();
+}
+
+abstract class RestrictedTask implements RunnableTask {
+    protected abstract func void run();
+}

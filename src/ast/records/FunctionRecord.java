@@ -15,6 +15,7 @@ public record FunctionRecord(
         List<ParameterRecord> parameters,
         BlockRecord block,
         boolean isAbstract,
+        boolean isDefault,
         int line,
         int column) implements ASTNode {
 
@@ -32,7 +33,23 @@ public record FunctionRecord(
             BlockRecord block,
             int line,
             int column) {
-        this(visibility, isStatic, isFinal, returnType, name, parameters, block, false, line, column);
+        this(visibility, isStatic, isFinal, returnType, name, parameters, block,
+                false, false, line, column);
+    }
+
+    public FunctionRecord(
+            TokenType visibility,
+            boolean isStatic,
+            boolean isFinal,
+            TypeRecord returnType,
+            String name,
+            List<ParameterRecord> parameters,
+            BlockRecord block,
+            boolean isAbstract,
+            int line,
+            int column) {
+        this(visibility, isStatic, isFinal, returnType, name, parameters, block,
+                isAbstract, false, line, column);
     }
 
     @Override

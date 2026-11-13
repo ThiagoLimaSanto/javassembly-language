@@ -1,0 +1,14 @@
+interface FirstDefault {
+    default func int calculate() {
+        return 1;
+    }
+}
+
+interface SecondDefault {
+    default func int calculate() {
+        return 2;
+    }
+}
+
+class ConflictingDefaults implements FirstDefault, SecondDefault {
+}
