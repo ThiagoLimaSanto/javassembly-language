@@ -159,7 +159,7 @@ public class IROptimizer {
 
     private boolean isPure(IROpCode opCode) {
         return switch (opCode) {
-            case ASSIGN, ADD, SUB, MUL, LT, GT, LE, GE, EQ, NE -> true;
+            case ASSIGN, ADD, SUB, MUL, NEG, LT, GT, LE, GE, EQ, NE -> true;
             default -> false;
         };
     }
@@ -271,6 +271,18 @@ public class IROptimizer {
     }
 
     private IRInstruction foldConstants(IRInstruction instruction) {
+        if (instruction.opCode() == IROpCode.NEG
+                && instruction.destination() != null
+                && instruction.destination().type() == Operand.Type.I32
+                && isI32Constant(instruction.left())) {
+            int value = (Integer) instruction.left().value();
+            return new IRInstruction(
+                    IROpCode.ASSIGN,
+                    instruction.destination(),
+                    Operand.constant(-value, Operand.Type.I32),
+                    null);
+        }
+
         if (instruction.destination() == null
                 || !isI32Constant(instruction.left())
                 || !isI32Constant(instruction.right())) {

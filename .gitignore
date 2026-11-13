@@ -5,5 +5,9 @@ src/source/backend/multiplication_test.jvs
 src/source/backend/multiplication_test.asm
 src/source/backend/division_test.jvs
 src/source/backend/division_test.asm
+src/source/backend/mod_test.jvs
+src/source/backend/mod_test.asm
+src/source/backend/neg_test.jvs
+src/source/backend/neg_test.asm
 src/source/backend/testing.asm
 src/source/backend/testing.jvs

@@ -21,8 +21,10 @@ import src.ast.records.PrintRecord;
 import src.ast.records.ProgramRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.TypeRecord;
+import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
+import src.lexer.TokenType;
 
 public final class IRGenerator {
 
@@ -244,6 +246,25 @@ public final class IRGenerator {
                     variableTypes.getOrDefault(variable.name(), Operand.Type.I32));
         }
 
+        if (expression instanceof UnaryExpressionRecord unary) {
+            if (unary.operator() != TokenType.NEG) {
+                throw new UnsupportedOperationException(
+                        "Operador unário ainda não suportado: " + unary.operator());
+            }
+
+            Operand operand = expression(ir, unary.operand());
+            Operand result = Operand.temporary(
+                    "t" + nextTemp++,
+                    Operand.Type.I32);
+
+            ir.add(new IRInstruction(
+                    IROpCode.NEG,
+                    result,
+                    operand,
+                    null));
+            return result;
+        }
+
         if (expression instanceof BinaryExpressionRecord binary) {
             Operand left = expression(ir, binary.left());
             Operand right = expression(ir, binary.right());
@@ -253,6 +274,7 @@ public final class IRGenerator {
                 case SUB -> IROpCode.SUB;
                 case MUL -> IROpCode.MUL;
                 case DIV -> IROpCode.DIV;
+                case MOD -> IROpCode.MOD;
                 case LT -> IROpCode.LT;
                 case GT -> IROpCode.GT;
                 case LE -> IROpCode.LE;

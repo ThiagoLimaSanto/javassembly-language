@@ -31,6 +31,7 @@ import src.ast.records.SuperCallRecord;
 import src.ast.records.ThisAttributeRecord;
 import src.ast.records.ThisCallRecord;
 import src.ast.records.ThisRecord;
+import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
 
@@ -59,6 +60,8 @@ public interface ASTVisitor {
     void visit(IfRecord node);
 
     void visit(BinaryExpressionRecord node);
+
+    void visit(UnaryExpressionRecord node);
 
     void visit(LiteralRecord node);
 

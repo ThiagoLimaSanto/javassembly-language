@@ -2060,6 +2060,10 @@ public class SemanticAnalyzer implements ASTVisitor {
             return validateOperation(operation);
         }
 
+        if (expression instanceof UnaryExpressionRecord operation) {
+            return validateUnaryOperation(operation);
+        }
+
         if (expression instanceof RegisterRecord) {
             RegisterRecord register = (RegisterRecord) expression;
             validateRegisterName(register);
@@ -2126,6 +2130,19 @@ public class SemanticAnalyzer implements ASTVisitor {
 
                 return SemanticType.primitive(TokenType.INT);
 
+            case MOD:
+                if (!left.isPrimitive()
+                        || !right.isPrimitive()
+                        || left.primitiveType() != TokenType.INT
+                        || right.primitiveType() != TokenType.INT) {
+                    throw new SemanticException(
+                            "O operador 'mod' exige dois operandos int.",
+                            operation.line(),
+                            operation.column());
+                }
+
+                return SemanticType.primitive(TokenType.INT);
+
             case AND:
             case OR:
                 if (!isBoolean(left) || !isBoolean(right)) {
@@ -2172,6 +2189,21 @@ public class SemanticAnalyzer implements ASTVisitor {
                         operation.line(),
                         operation.column());
         }
+    }
+
+    private SemanticType validateUnaryOperation(UnaryExpressionRecord operation) {
+        SemanticType operandType = getExpressionType(operation.operand());
+
+        if (operation.operator() != TokenType.NEG
+                || !operandType.isPrimitive()
+                || operandType.primitiveType() != TokenType.INT) {
+            throw new SemanticException(
+                    "O operador 'neg' exige um operando int.",
+                    operation.line(),
+                    operation.column());
+        }
+
+        return SemanticType.primitive(TokenType.INT);
     }
 
     private boolean isNumeric(SemanticType type) {
@@ -2849,6 +2881,11 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(BinaryExpressionRecord node) {
+        getExpressionType(node);
+    }
+
+    @Override
+    public void visit(UnaryExpressionRecord node) {
         getExpressionType(node);
     }
 

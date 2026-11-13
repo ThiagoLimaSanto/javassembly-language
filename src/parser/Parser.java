@@ -41,6 +41,7 @@ import src.ast.records.ThisAttributeRecord;
 import src.ast.records.ThisCallRecord;
 import src.ast.records.ThisRecord;
 import src.ast.records.TypeRecord;
+import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
 import src.exceptions.DoubleOutOfRangeException;
@@ -1293,7 +1294,10 @@ public class Parser {
                                 yield new LiteralRecord(null);
                         }
 
-                        case ADD, SUB, MUL, DIV, AND, OR ->
+                        case NEG ->
+                                unaryOperation();
+
+                        case ADD, SUB, MUL, DIV, MOD, AND, OR ->
                                 operation();
 
                         case CMP ->
@@ -1513,6 +1517,20 @@ public class Parser {
                                 operator.getType(),
                                 left,
                                 right,
+                                operator.getLine(),
+                                operator.getColumn());
+        }
+
+        private ExpressionInterface unaryOperation() {
+                Token operator = tokens.consume(
+                                TokenType.NEG,
+                                "Esperado 'neg'");
+
+                ExpressionInterface operand = expression();
+
+                return new UnaryExpressionRecord(
+                                operator.getType(),
+                                operand,
                                 operator.getLine(),
                                 operator.getColumn());
         }

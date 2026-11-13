@@ -42,6 +42,8 @@ public class Lexer {
             Map.entry("sub", TokenType.SUB),
             Map.entry("mul", TokenType.MUL),
             Map.entry("div", TokenType.DIV),
+            Map.entry("mod", TokenType.MOD),
+            Map.entry("neg", TokenType.NEG),
             Map.entry("mov", TokenType.MOV),
             Map.entry("cmp", TokenType.CMP),
             Map.entry("print", TokenType.PRINT),

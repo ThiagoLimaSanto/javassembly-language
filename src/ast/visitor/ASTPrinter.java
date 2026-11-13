@@ -33,6 +33,7 @@ import src.ast.records.SuperCallRecord;
 import src.ast.records.ThisAttributeRecord;
 import src.ast.records.ThisCallRecord;
 import src.ast.records.ThisRecord;
+import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
 
@@ -211,6 +212,12 @@ public class ASTPrinter implements ASTVisitor {
         printLine(node.operator().toString());
         visitChild(node.left());
         visitChild(node.right());
+    }
+
+    @Override
+    public void visit(UnaryExpressionRecord node) {
+        printLine(node.operator().toString());
+        visitChild(node.operand());
     }
 
     @Override
