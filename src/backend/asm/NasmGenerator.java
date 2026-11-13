@@ -237,6 +237,21 @@ public class NasmGenerator {
                 storeI32(asm, instruction.destination(), "eax");
             }
 
+            case SUB, MUL -> emitIntegerBinary(
+                    asm,
+                    instruction,
+                    instruction.opCode() == IROpCode.SUB ? "sub" : "imul");
+
+            case DIV -> emitDivision(asm, instruction, false);
+
+            case MOD -> emitDivision(asm, instruction, true);
+
+            case NEG -> {
+                loadI32(asm, instruction.left(), "eax");
+                asm.append("    neg eax\n");
+                storeI32(asm, instruction.destination(), "eax");
+            }
+
             case LT, GT, LE, GE, EQ, NE ->
                 emitComparison(asm, instruction);
 
@@ -283,6 +298,30 @@ public class NasmGenerator {
         asm.append("    lea rdi, [rel fmt_i32]\n");
         asm.append("    xor eax, eax\n");
         asm.append("    call printf\n");
+    }
+
+    private void emitIntegerBinary(
+            StringBuilder asm,
+            IRInstruction instruction,
+            String opcode) {
+        loadI32(asm, instruction.left(), "eax");
+        loadI32(asm, instruction.right(), "ecx");
+        asm.append("    ").append(opcode).append(" eax, ecx\n");
+        storeI32(asm, instruction.destination(), "eax");
+    }
+
+    private void emitDivision(
+            StringBuilder asm,
+            IRInstruction instruction,
+            boolean remainder) {
+        loadI32(asm, instruction.left(), "eax");
+        loadI32(asm, instruction.right(), "ecx");
+        asm.append("    cdq\n");
+        asm.append("    idiv ecx\n");
+        storeI32(
+                asm,
+                instruction.destination(),
+                remainder ? "edx" : "eax");
     }
 
     private void emitComparison(
@@ -338,10 +377,18 @@ public class NasmGenerator {
             Operand source,
             String register) {
         if (source.kind() == Operand.Kind.CONSTANT) {
+            String immediate;
+
+            if (source.value() instanceof Boolean boolValue) {
+                immediate = boolValue ? "1" : "0";
+            } else {
+                immediate = source.value().toString();
+            }
+
             asm.append("    mov ")
                     .append(register)
                     .append(", ")
-                    .append(source.value())
+                    .append(immediate)
                     .append("\n");
         } else {
             asm.append("    mov ")

@@ -18,9 +18,6 @@ public class Main {
         try {
             ProgramAnalyzer analyzer = new ProgramAnalyzer();
             analyzer.analyze(Path.of(fileName));
-
-            System.out.println("========== Resultado ==========");
-            System.out.println("Programa compilado com sucesso!");
         } catch (LanguageException e) {
             System.err.println(
                     "[" + e.getClass().getSimpleName() + "] "

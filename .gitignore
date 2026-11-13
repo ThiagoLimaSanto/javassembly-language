@@ -1,2 +1,9 @@
-./out
 out
+src/source/backend/subtraction_test.jvs
+src/source/backend/subtraction_test.asm
+src/source/backend/multiplication_test.jvs
+src/source/backend/multiplication_test.asm
+src/source/backend/division_test.jvs
+src/source/backend/division_test.asm
+src/source/backend/testing.asm
+src/source/backend/testing.jvs

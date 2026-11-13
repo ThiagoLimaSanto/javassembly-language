@@ -8,6 +8,7 @@ import java.util.List;
 import src.ast.records.ProgramRecord;
 import src.backend.asm.NasmGenerator;
 import src.backend.ir.IRGenerator;
+import src.backend.optimization.IROptimizer;
 import src.exceptions.SemanticException;
 import src.lexer.Lexer;
 import src.lexer.Token;
@@ -50,6 +51,7 @@ public class ProgramAnalyzer {
         semantic.visit(program);
 
         var ir = new IRGenerator().generate(program);
+        ir = new IROptimizer().optimize(ir);
         return new NasmGenerator().generate(ir);
     }
 }
