@@ -159,7 +159,7 @@ public class IROptimizer {
 
     private boolean isPure(IROpCode opCode) {
         return switch (opCode) {
-            case ASSIGN, ADD, SUB, MUL, NEG, LT, GT, LE, GE, EQ, NE -> true;
+            case ASSIGN, CAST_I32_TO_I64, ADD, SUB, MUL, NEG, LT, GT, LE, GE, EQ, NE -> true;
             default -> false;
         };
     }

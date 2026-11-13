@@ -11,6 +11,7 @@ public record Operand(
 
     public enum Type {
         I32,
+        I64,
         BOOL,
         F64,
         REF
