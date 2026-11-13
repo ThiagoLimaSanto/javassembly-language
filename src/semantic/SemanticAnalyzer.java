@@ -1213,7 +1213,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         throw new SemanticException(
                 "Tipos dos argumentos incompatíveis na chamada do método '"
-                        + call.name() + "'.",
+                        + call.name() + "'; tipos recebidos: " + formatTypes(argumentTypes) + ".",
                 call.line(),
                 call.column());
     }
@@ -1637,7 +1637,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         throw new SemanticException(
                 "Tipos dos argumentos incompatíveis na chamada da função '"
-                        + call.name() + "'.",
+                        + call.name() + "'; tipos recebidos: " + formatTypes(argumentTypes) + ".",
                 call.line(),
                 call.column());
     }

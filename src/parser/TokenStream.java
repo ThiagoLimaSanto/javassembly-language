@@ -52,10 +52,9 @@ public class TokenStream {
     public Token consume(TokenType type, String message) {
         if (!verify(type)) {
             Token found = current();
-            String lexeme = found.getLexeme();
-            String detail = "Encontrado " + found.getType()
-                    + (lexeme == null || lexeme.isEmpty() ? "" : " ('" + printable(lexeme) + "')")
-                    + ".";
+            String detail = found.getType() == TokenType.EOF
+                    ? "Encontrado o fim do arquivo (EOF)."
+                    : "Encontrado " + found.getType() + " ('" + printable(found.getLexeme()) + "').";
             throw new SyntacticException(
                     message + (message.endsWith(".") ? " " : ". ") + detail,
                     found.getLine(),
@@ -87,7 +86,11 @@ public class TokenStream {
     }
 
     private String printable(String value) {
-        return value.replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t");
+        return value.replace("\\", "\\\\")
+                .replace("\n", "\\n")
+                .replace("\r", "\\r")
+                .replace("\t", "\\t")
+                .replace("'", "\\'");
     }
 
 }

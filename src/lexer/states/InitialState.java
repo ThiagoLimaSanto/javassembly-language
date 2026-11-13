@@ -74,9 +74,24 @@ public class InitialState implements LexerState {
         }
 
         throw new LexicalException(
-                "Caractere inválido: " + lexer.current(),
+                "Caractere inválido " + describeCharacter(lexer.current()) + ".",
                 lexer.getLine(),
                 lexer.getColumn());
+    }
+
+    private String describeCharacter(char character) {
+        String printable = switch (character) {
+            case '\n' -> "\\n";
+            case '\r' -> "\\r";
+            case '\t' -> "\\t";
+            case '\\' -> "\\\\";
+            case '\'' -> "\\'";
+            default -> Character.isISOControl(character) ? null : String.valueOf(character);
+        };
+        String value = printable == null
+                ? "U+%04X".formatted((int) character)
+                : "'" + printable + "' (U+%04X)".formatted((int) character);
+        return value;
     }
 
 }

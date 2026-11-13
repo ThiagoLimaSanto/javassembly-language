@@ -20,7 +20,10 @@ public class StringState implements LexerState {
     @Override
     public void process(Lexer lexer) {
         if (lexer.finished() || lexer.isLineTerminator(lexer.current())) {
-            throw new LexicalException("Faltando delimitador de string.", line, column);
+            throw new LexicalException(
+                    "Literal de texto não terminado; esperava o delimitador '" + delimiter + "'.",
+                    line,
+                    column);
         }
 
         int escapeLine = lexer.getLine();
