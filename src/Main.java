@@ -8,7 +8,7 @@ import src.exceptions.LanguageException;
 public class Main {
 
     public static void main(String[] args) throws Exception {
-        String fileName = args.length > 0 ? args[0] : "./src/source/source14_objetos_construtores.jvs";
+        String fileName = args.length > 0 ? args[0] : "./src/source/rules/syntax/accept_control_flow_and_expressions.jvs";
 
         if (!fileName.endsWith(".jvs")) {
             System.err.println("Tipo de arquivo não reconhecido");

@@ -1,0 +1,29 @@
+public class IRSmokeTest {
+    public static func int sum(int left, int right) {
+        int result = add left, right;
+        return result;
+    }
+
+    public static func void main(String[] args) {
+        int total = sum(2, 3);
+        print total;
+
+        if (cmp.gt total, 4) {
+            print total;
+        } else {
+            print 0;
+        }
+
+        int counter = 0;
+        while (cmp.lt counter, 2) {
+            print counter;
+            counter = add counter, 1;
+        }
+
+        for (int index = 0; cmp.lt index, 2; index = add index, 1) {
+            print index;
+        }
+
+        return;
+    }
+}
