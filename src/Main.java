@@ -12,7 +12,7 @@ public class Main {
 
         if (!fileName.endsWith(".jvs")) {
             System.err.println("Tipo de arquivo não reconhecido");
-            return;
+            System.exit(1);
         }
 
         try {
@@ -22,8 +22,10 @@ public class Main {
             System.err.println(
                     "[" + e.getClass().getSimpleName() + "] "
                             + e.getMessage());
+            System.exit(1);
         } catch (IOException e) {
             System.err.println("[IO] " + e.getMessage());
+            System.exit(1);
         }
     }
 }
