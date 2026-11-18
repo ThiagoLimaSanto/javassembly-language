@@ -1,0 +1,7 @@
+public class SemanticRejectPrintFormatTypeMismatch {
+    public static func void main(String[] args) {
+        long value = 3000000000L;
+        print "%d", value;
+        return;
+    }
+}

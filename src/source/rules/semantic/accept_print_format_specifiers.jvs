@@ -1,0 +1,14 @@
+public class SemanticPrintFormatSpecifiers {
+    public static func void main(String[] args) {
+        int value = 7;
+        long large = 3000000000L;
+        double decimal = 2.5;
+        String label = "Nota";
+        boolean enabled = True;
+
+        print "%d %i %u %f %lf %ld %li %s %b %%",
+                value, value, value, decimal, decimal, large, large, label, enabled;
+        print "Percentual: %% e inteiro: %d", value;
+        return;
+    }
+}

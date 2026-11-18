@@ -3211,6 +3211,90 @@ public class SemanticAnalyzer implements ASTVisitor {
                     line,
                     column);
         }
+
+        if (!node.formatArguments().isEmpty()) {
+            if (!(node.expression() instanceof LiteralRecord formatLiteral)
+                    || !(formatLiteral.value() instanceof String format)) {
+                throw new SemanticException(
+                        "O primeiro argumento do print formatado deve ser um literal de texto.",
+                        node.line(),
+                        node.column());
+            }
+            validatePrintFormat(node, format);
+        }
+    }
+
+    private void validatePrintFormat(PrintRecord node, String format) {
+        List<TokenType> expectedTypes = new ArrayList<>();
+        for (int index = 0; index < format.length(); index++) {
+            if (format.charAt(index) != '%') {
+                continue;
+            }
+            if (++index >= format.length()) {
+                throw invalidPrintFormat(node, "especificador '%' incompleto");
+            }
+            char specifier = format.charAt(index);
+            if (specifier == '%') {
+                continue;
+            }
+            if (specifier == 'l') {
+                if (++index >= format.length()) {
+                    throw invalidPrintFormat(node, "especificador '%' incompleto");
+                }
+                char lengthSpecifier = format.charAt(index);
+                if (lengthSpecifier == 'd' || lengthSpecifier == 'i') {
+                    expectedTypes.add(TokenType.LONG);
+                } else if (lengthSpecifier == 'f') {
+                    expectedTypes.add(TokenType.DOUBLE);
+                } else {
+                    throw invalidPrintFormat(node,
+                            "use %ld ou %li para long e %lf para double");
+                }
+                continue;
+            }
+            TokenType expected = switch (specifier) {
+                case 'd', 'i', 'u' -> TokenType.INT;
+                case 'f' -> TokenType.DOUBLE;
+                case 's' -> TokenType.STRING;
+                case 'b' -> TokenType.BOOLEAN;
+                default -> null;
+            };
+            if (expected == null) {
+                throw invalidPrintFormat(node, "especificador não suportado: %" + specifier);
+            }
+            expectedTypes.add(expected);
+        }
+
+        if (expectedTypes.size() != node.formatArguments().size()) {
+            throw invalidPrintFormat(node,
+                    "o formato possui " + expectedTypes.size() + " especificador(es), mas foram fornecidos "
+                            + node.formatArguments().size() + " argumento(s)");
+        }
+
+        for (int index = 0; index < expectedTypes.size(); index++) {
+            SemanticType actual = getExpressionType(node.formatArguments().get(index));
+            TokenType expected = expectedTypes.get(index);
+            if (isVoid(actual) || !actual.isPrimitive() || actual.primitiveType() != expected) {
+                throw invalidPrintFormat(node,
+                        "o argumento " + (index + 1) + " deve ser do tipo " + formatTypeName(expected));
+            }
+        }
+    }
+
+    private SemanticException invalidPrintFormat(PrintRecord node, String reason) {
+        return new SemanticException("Formato inválido em print: " + reason + ".",
+                node.line(), node.column());
+    }
+
+    private String formatTypeName(TokenType type) {
+        return switch (type) {
+            case INT -> "int (%d, %i ou %u)";
+            case LONG -> "long (%ld ou %li)";
+            case DOUBLE -> "double (%f ou %lf)";
+            case STRING -> "String (%s)";
+            case BOOLEAN -> "boolean (%b)";
+            default -> type.name().toLowerCase();
+        };
     }
 
 

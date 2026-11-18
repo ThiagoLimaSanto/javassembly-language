@@ -1,0 +1,8 @@
+public class SemanticRejectPrintFormatNonLiteral {
+    public static func void main(String[] args) {
+        String format = "%d";
+        int value = 7;
+        print format, value;
+        return;
+    }
+}

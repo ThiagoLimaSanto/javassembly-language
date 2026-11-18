@@ -1470,6 +1470,15 @@ public class Parser {
                                 "Esperado 'print'");
 
                 ExpressionInterface expression = expression();
+                List<ExpressionInterface> formatArguments = new ArrayList<>();
+                if (tokens.verify(TokenType.COMMA)) {
+                        tokens.consume(TokenType.COMMA, "Esperado ',' após o formato do print");
+                        formatArguments.add(expression());
+                        while (tokens.verify(TokenType.COMMA)) {
+                                tokens.consume(TokenType.COMMA, "Esperado ',' entre argumentos do print");
+                                formatArguments.add(expression());
+                        }
+                }
 
                 tokens.consume(
                                 TokenType.SEMICOLON,
@@ -1477,6 +1486,7 @@ public class Parser {
 
                 return new PrintRecord(
                                 expression,
+                                formatArguments,
                                 printToken.getLine(),
                                 printToken.getColumn());
         }

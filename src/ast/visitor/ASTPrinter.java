@@ -173,7 +173,14 @@ public class ASTPrinter implements ASTVisitor {
     @Override
     public void visit(PrintRecord node) {
         printLine("Print");
-        visitChild(node.expression());
+        if (node.formatArguments().isEmpty()) {
+            visitChild(node.expression());
+            return;
+        }
+        visitNamedChild("Formato", node.expression());
+        for (ExpressionInterface argument : node.formatArguments()) {
+            visitNamedChild("Argumento", argument);
+        }
     }
 
     @Override

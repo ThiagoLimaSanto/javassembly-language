@@ -11,3 +11,9 @@ src/source/backend/neg_test.jvs
 src/source/backend/neg_test.asm
 src/source/backend/testing.asm
 src/source/backend/testing.jvs
+src/source/backend/backend_long_overload_test.jvs
+src/source/backend/backend_long_overload_test.asm
+src/source/backend/backend_for_empty_clauses_test.jvs
+src/source/backend/backend_for_empty_clauses_test.asm
+src/source/backend/backend_implicit_void_return_test.jvs
+src/source/backend/backend_implicit_void_return_test.asm
