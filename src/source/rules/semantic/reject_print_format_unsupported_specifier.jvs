@@ -1,7 +1,7 @@
 public class SemanticRejectPrintFormatUnsupportedSpecifier {
     public static func void main(String[] args) {
         int value = 7;
-        print "%x", value;
+        printf "%x", value;
         return;
     }
 }

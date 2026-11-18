@@ -1,5 +1,6 @@
 package src.backend.asm;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -13,17 +14,17 @@ import src.backend.ir.Operand;
 public class NasmGenerator {
 
     private final Map<Operand, Integer> stackOffsets = new LinkedHashMap<>();
+    private final Map<String, String> stringLabels = new LinkedHashMap<>();
     private int frameSize;
     private int nextDivisionLabel;
+    private int nextStringLabel;
+    private int nextGpParameter;
+    private int nextXmmParameter;
 
     public String generate(IRProgram program) {
         StringBuilder asm = new StringBuilder();
-        asm.append("default rel\n");
-        asm.append("extern printf\n");
-        asm.append("section .data\n");
-        asm.append("fmt_i32: db \"%d\", 10, 0\n\n");
-        asm.append("fmt_i64: db \"%ld\", 10, 0\n\n");
-        asm.append("section .text\n\n");
+        prepareStringLabels(program.instructions());
+        appendHeader(asm);
 
         List<IRInstruction> function = new ArrayList<>();
 
@@ -78,14 +79,86 @@ public class NasmGenerator {
         }
 
         StringBuilder asm = new StringBuilder();
+        prepareStringLabels(target);
+        appendHeader(asm);
+        emitFunction(asm, target);
+        return asm.toString();
+    }
+
+    private void appendHeader(StringBuilder asm) {
         asm.append("default rel\n");
         asm.append("extern printf\n");
         asm.append("section .data\n");
         asm.append("fmt_i32: db \"%d\", 10, 0\n");
         asm.append("fmt_i64: db \"%ld\", 10, 0\n\n");
+        asm.append("fmt_f64: db \"%f\", 10, 0\n");
+        asm.append("fmt_string: db \"%s\", 10, 0\n\n");
+        if (!stringLabels.isEmpty()) {
+            asm.append("section .rodata\n");
+            for (Map.Entry<String, String> entry : stringLabels.entrySet()) {
+                asm.append(entry.getValue()).append(": db ")
+                        .append(utf8Bytes(entry.getKey())).append("\n");
+            }
+            asm.append('\n');
+        }
         asm.append("section .text\n\n");
-        emitFunction(asm, target);
-        return asm.toString();
+    }
+
+    private void prepareStringLabels(List<IRInstruction> instructions) {
+        stringLabels.clear();
+        nextStringLabel = 0;
+        for (IRInstruction instruction : instructions) {
+            registerString(instruction.destination());
+            if (instruction.opCode() == IROpCode.PRINT_FORMAT
+                    && instruction.left() != null
+                    && instruction.left().kind() == Operand.Kind.CONSTANT
+                    && instruction.left().value() instanceof String format) {
+                registerStringValue(normalizeBooleanFormat(format));
+            } else {
+                registerString(instruction.left());
+            }
+            registerString(instruction.right());
+            for (Operand argument : instruction.arguments()) {
+                registerString(argument);
+            }
+        }
+    }
+
+    private void registerString(Operand operand) {
+        if (operand == null || operand.kind() != Operand.Kind.CONSTANT
+                || !(operand.value() instanceof String value)) {
+            return;
+        }
+        registerStringValue(value);
+    }
+
+    private void registerStringValue(String value) {
+        stringLabels.computeIfAbsent(value, ignored -> "str_data_" + nextStringLabel++);
+    }
+
+    private String normalizeBooleanFormat(String format) {
+        StringBuilder normalized = new StringBuilder(format.length());
+        for (int index = 0; index < format.length(); index++) {
+            char current = format.charAt(index);
+            if (current == '%' && index + 1 < format.length() && format.charAt(index + 1) == 'b') {
+                normalized.append("%d");
+                index++;
+            } else {
+                normalized.append(current);
+            }
+        }
+        return normalized.toString();
+    }
+
+    private String utf8Bytes(String value) {
+        byte[] bytes = value.getBytes(StandardCharsets.UTF_8);
+        StringBuilder output = new StringBuilder();
+        for (byte valueByte : bytes) {
+            if (!output.isEmpty()) output.append(", ");
+            output.append(Byte.toUnsignedInt(valueByte));
+        }
+        if (!output.isEmpty()) output.append(", ");
+        return output.append('0').toString();
     }
 
     private boolean isFunctionLabel(IRInstruction instruction) {
@@ -142,6 +215,8 @@ public class NasmGenerator {
             asm.append("    sub rsp, ").append(frameSize).append("\n");
         }
 
+        nextGpParameter = 0;
+        nextXmmParameter = 0;
         for (int i = 1; i < instructions.size(); i++) {
             emitInstruction(asm, instructions.get(i));
         }
@@ -181,8 +256,7 @@ public class NasmGenerator {
 
         int size = switch (operand.type()) {
             case I32, BOOL -> 4;
-            case I64, REF -> 8;
-            case F64 -> throw new UnsupportedOperationException("Operando F64 não suportado pelo NASM.");
+            case I64, F64, REF -> 8;
         };
 
         frameSize = align(frameSize, size);
@@ -211,44 +285,40 @@ public class NasmGenerator {
                 asm.append(instruction.destination().value()).append(":\n");
 
             case PARAM -> {
-                int index = (Integer) instruction.left().value();
                 Operand destination = instruction.destination();
-
-                String[] intRegisters = {
-                        "edi", "esi", "edx", "ecx", "r8d", "r9d"
-                };
-                String[] refRegisters = {
-                        "rdi", "rsi", "rdx", "rcx", "r8", "r9"
-                };
-
-                if (index >= intRegisters.length) {
-                    throw new UnsupportedOperationException(
-                            "Parâmetro além do sexto ainda não suportado.");
-                }
-
-                if (destination.type() == Operand.Type.REF) {
-                    asm.append("    mov qword ")
-                            .append(address(destination))
-                            .append(", ")
-                            .append(refRegisters[index])
-                            .append("\n");
-                } else if (destination.type() == Operand.Type.I64) {
-                    asm.append("    mov qword ")
-                            .append(address(destination))
-                            .append(", ")
-                            .append(refRegisters[index])
-                            .append("\n");
-                } else if (destination.type() == Operand.Type.I32
-                        || destination.type() == Operand.Type.BOOL) {
-                    asm.append("    mov dword ")
-                            .append(address(destination))
-                            .append(", ")
-                            .append(intRegisters[index])
-                            .append("\n");
+                if (destination.type() == Operand.Type.F64) {
+                    String[] xmmRegisters = {
+                            "xmm0", "xmm1", "xmm2", "xmm3",
+                            "xmm4", "xmm5", "xmm6", "xmm7"
+                    };
+                    if (nextXmmParameter >= xmmRegisters.length) {
+                        throw new UnsupportedOperationException(
+                                "Mais de oito parâmetros double ainda não são suportados.");
+                    }
+                    asm.append("    movsd qword ").append(address(destination))
+                            .append(", ").append(xmmRegisters[nextXmmParameter++]).append("\n");
                 } else {
-                    throw new UnsupportedOperationException(
-                            "Tipo de parâmetro ainda não suportado: "
-                                    + destination.type());
+                    String[] gpRegisters = {
+                            "rdi", "rsi", "rdx", "rcx", "r8", "r9"
+                    };
+                    if (nextGpParameter >= gpRegisters.length) {
+                        throw new UnsupportedOperationException(
+                                "Mais de seis parâmetros inteiros/referência ainda não são suportados.");
+                    }
+                    String register = gpRegisters[nextGpParameter++];
+                    if (destination.type() == Operand.Type.I32
+                            || destination.type() == Operand.Type.BOOL) {
+                        register = register32(register);
+                        asm.append("    mov dword ").append(address(destination))
+                                .append(", ").append(register).append("\n");
+                    } else if (destination.type() == Operand.Type.I64
+                            || destination.type() == Operand.Type.REF) {
+                        asm.append("    mov qword ").append(address(destination))
+                                .append(", ").append(register).append("\n");
+                    } else {
+                        throw new UnsupportedOperationException(
+                                "Tipo de parâmetro ainda não suportado: " + destination.type());
+                    }
                 }
             }
 
@@ -264,6 +334,18 @@ public class NasmGenerator {
                 storeI64(asm, instruction.destination(), "rax");
             }
 
+            case CAST_I32_TO_F64 -> {
+                loadI32(asm, instruction.left(), "eax");
+                asm.append("    cvtsi2sd xmm0, eax\n");
+                storeF64(asm, instruction.destination(), "xmm0");
+            }
+
+            case CAST_I64_TO_F64 -> {
+                loadI64(asm, instruction.left(), "rax");
+                asm.append("    cvtsi2sd xmm0, rax\n");
+                storeF64(asm, instruction.destination(), "xmm0");
+            }
+
             case ADD -> {
                 emitIntegerBinary(asm, instruction, "add");
             }
@@ -276,7 +358,13 @@ public class NasmGenerator {
             case MOD -> emitDivision(asm, instruction, true);
 
             case NEG -> {
-                if (instruction.destination().type() == Operand.Type.I64) {
+                if (instruction.destination().type() == Operand.Type.F64) {
+                    loadF64(asm, instruction.left(), "xmm0");
+                    asm.append("    mov rax, 0x8000000000000000\n");
+                    asm.append("    movq xmm1, rax\n");
+                    asm.append("    xorpd xmm0, xmm1\n");
+                    storeF64(asm, instruction.destination(), "xmm0");
+                } else if (instruction.destination().type() == Operand.Type.I64) {
                     loadI64(asm, instruction.left(), "rax");
                     asm.append("    neg rax\n");
                     storeI64(asm, instruction.destination(), "rax");
@@ -312,9 +400,13 @@ public class NasmGenerator {
 
             case PRINT -> emitPrint(asm, instruction);
 
+            case PRINT_FORMAT -> emitFormattedPrint(asm, instruction);
+
             case RETURN -> {
                 if (instruction.left() != null) {
-                    if (instruction.left().type() == Operand.Type.I64
+                    if (instruction.left().type() == Operand.Type.F64) {
+                        loadF64(asm, instruction.left(), "xmm0");
+                    } else if (instruction.left().type() == Operand.Type.I64
                             || instruction.left().type() == Operand.Type.REF) {
                         loadI64(asm, instruction.left(), "rax");
                     } else {
@@ -334,22 +426,123 @@ public class NasmGenerator {
     private void emitPrint(
             StringBuilder asm,
             IRInstruction instruction) {
-        if (instruction.left().type() == Operand.Type.I64) {
+        if (instruction.left().type() == Operand.Type.F64) {
+            loadF64(asm, instruction.left(), "xmm0");
+            asm.append("    lea rdi, [rel fmt_f64]\n");
+            asm.append("    mov eax, 1\n");
+        } else if (instruction.left().type() == Operand.Type.REF) {
+            loadI64(asm, instruction.left(), "rsi");
+            asm.append("    lea rdi, [rel fmt_string]\n");
+            asm.append("    xor eax, eax\n");
+        } else if (instruction.left().type() == Operand.Type.I64) {
             loadI64(asm, instruction.left(), "rsi");
             asm.append("    lea rdi, [rel fmt_i64]\n");
+            asm.append("    xor eax, eax\n");
         } else {
             loadI32(asm, instruction.left(), "esi");
             asm.append("    lea rdi, [rel fmt_i32]\n");
+            asm.append("    xor eax, eax\n");
         }
-        asm.append("    xor eax, eax\n");
         asm.append("    call printf\n");
+    }
+
+    private void emitFormattedPrint(StringBuilder asm, IRInstruction instruction) {
+        String[] gpRegisters = {"rsi", "rdx", "rcx", "r8", "r9"};
+        String[] xmmRegisters = {
+                "xmm0", "xmm1", "xmm2", "xmm3",
+                "xmm4", "xmm5", "xmm6", "xmm7"
+        };
+        List<Operand> arguments = instruction.arguments();
+        int[] stackOffsetsByArgument = new int[arguments.size()];
+        java.util.Arrays.fill(stackOffsetsByArgument, -1);
+
+        int gpRegistersUsed = 0;
+        int xmmRegistersUsed = 0;
+        int stackArgumentCount = 0;
+        for (int index = 0; index < arguments.size(); index++) {
+            Operand argument = arguments.get(index);
+            if (argument.type() == Operand.Type.F64) {
+                if (xmmRegistersUsed < xmmRegisters.length) {
+                    xmmRegistersUsed++;
+                } else {
+                    stackOffsetsByArgument[index] = stackArgumentCount++ * 8;
+                }
+            } else if (argument.type() == Operand.Type.I32 || argument.type() == Operand.Type.I64
+                    || argument.type() == Operand.Type.BOOL || argument.type() == Operand.Type.REF) {
+                if (gpRegistersUsed < gpRegisters.length) {
+                    gpRegistersUsed++;
+                } else {
+                    stackOffsetsByArgument[index] = stackArgumentCount++ * 8;
+                }
+            } else {
+                throw new UnsupportedOperationException(
+                        "Tipo não suportado em printf: " + argument.type() + ".");
+            }
+        }
+
+        int stackSize = align(stackArgumentCount * 8, 16);
+        if (stackSize > 0) {
+            asm.append("    sub rsp, ").append(stackSize).append("\n");
+        }
+
+        int gpIndex = 0;
+        int xmmIndex = 0;
+        for (int index = 0; index < arguments.size(); index++) {
+            Operand argument = arguments.get(index);
+            int stackOffset = stackOffsetsByArgument[index];
+            if (argument.type() == Operand.Type.F64) {
+                if (stackOffset >= 0) {
+                    loadF64(asm, argument, "xmm15");
+                    asm.append("    movsd qword [rsp+").append(stackOffset)
+                            .append("], xmm15\n");
+                } else {
+                    loadF64(asm, argument, xmmRegisters[xmmIndex++]);
+                }
+            } else if (stackOffset >= 0) {
+                if (argument.type() == Operand.Type.I32 || argument.type() == Operand.Type.BOOL) {
+                    loadI32(asm, argument, "eax");
+                    asm.append("    movsxd rax, eax\n");
+                } else {
+                    loadI64(asm, argument, "rax");
+                }
+                asm.append("    mov qword [rsp+").append(stackOffset).append("], rax\n");
+            } else {
+                String register = gpRegisters[gpIndex++];
+                if (argument.type() == Operand.Type.I32 || argument.type() == Operand.Type.BOOL) {
+                    register = register32(register);
+                    loadI32(asm, argument, register);
+                } else {
+                    loadI64(asm, argument, register);
+                }
+            }
+        }
+
+        String format = normalizeBooleanFormat((String) instruction.left().value());
+        asm.append("    lea rdi, [rel ").append(stringLabels.get(format)).append("]\n");
+        asm.append("    mov eax, ").append(xmmIndex).append("\n");
+        asm.append("    call printf\n");
+        if (stackSize > 0) {
+            asm.append("    add rsp, ").append(stackSize).append("\n");
+        }
     }
 
     private void emitIntegerBinary(
             StringBuilder asm,
             IRInstruction instruction,
             String opcode) {
-        if (instruction.destination().type() == Operand.Type.I64) {
+        if (instruction.destination().type() == Operand.Type.F64) {
+            loadF64(asm, instruction.left(), "xmm0");
+            loadF64(asm, instruction.right(), "xmm1");
+            String floatingOpcode = switch (instruction.opCode()) {
+                case ADD -> "addsd";
+                case SUB -> "subsd";
+                case MUL -> "mulsd";
+                default -> throw new UnsupportedOperationException(
+                        "Operação double não implementada: " + instruction.opCode());
+            };
+            asm.append("    ").append(floatingOpcode).append(" xmm0, xmm1\n");
+            storeF64(asm, instruction.destination(), "xmm0");
+        } else if (instruction.destination().type() == Operand.Type.I64) {
             loadI64(asm, instruction.left(), "rax");
             loadI64(asm, instruction.right(), "rcx");
             asm.append("    ").append(opcode).append(" rax, rcx\n");
@@ -366,6 +559,16 @@ public class NasmGenerator {
             StringBuilder asm,
             IRInstruction instruction,
             boolean remainder) {
+        if (instruction.destination().type() == Operand.Type.F64) {
+            if (remainder) {
+                throw new UnsupportedOperationException("mod double ainda não é suportado.");
+            }
+            loadF64(asm, instruction.left(), "xmm0");
+            loadF64(asm, instruction.right(), "xmm1");
+            asm.append("    divsd xmm0, xmm1\n");
+            storeF64(asm, instruction.destination(), "xmm0");
+            return;
+        }
         int id = nextDivisionLabel++;
         String normal = ".L_div_normal_" + id;
         String done = ".L_div_done_" + id;
@@ -404,6 +607,34 @@ public class NasmGenerator {
     private void emitComparison(
             StringBuilder asm,
             IRInstruction instruction) {
+        if (instruction.left().type() == Operand.Type.F64) {
+            loadF64(asm, instruction.left(), "xmm0");
+            loadF64(asm, instruction.right(), "xmm1");
+            asm.append("    ucomisd xmm0, xmm1\n");
+            switch (instruction.opCode()) {
+                case EQ -> {
+                    asm.append("    setnp al\n    sete cl\n    and al, cl\n");
+                }
+                case NE -> {
+                    asm.append("    setp al\n    setne cl\n    or al, cl\n");
+                }
+                case LT -> {
+                    asm.append("    setb al\n    setnp cl\n    and al, cl\n");
+                }
+                case LE -> {
+                    asm.append("    setbe al\n    setnp cl\n    and al, cl\n");
+                }
+                case GT -> asm.append("    seta al\n");
+                case GE -> {
+                    asm.append("    setae al\n    setnp cl\n    and al, cl\n");
+                }
+                default -> throw new IllegalArgumentException(
+                        "Não é uma comparação: " + instruction.opCode());
+            }
+            asm.append("    movzx eax, al\n");
+            storeI32(asm, instruction.destination(), "eax");
+            return;
+        }
         boolean wide = instruction.left().type() == Operand.Type.I64
                 || instruction.left().type() == Operand.Type.REF;
         if (wide) {
@@ -435,22 +666,31 @@ public class NasmGenerator {
     private void emitCall(
             StringBuilder asm,
             IRInstruction instruction) {
-        String[] intArgumentRegisters = {
-                "edi", "esi", "edx", "ecx", "r8d", "r9d"
+        String[] gpRegisters = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
+        String[] xmmRegisters = {
+                "xmm0", "xmm1", "xmm2", "xmm3",
+                "xmm4", "xmm5", "xmm6", "xmm7"
         };
-        String[] wideArgumentRegisters = {"rdi", "rsi", "rdx", "rcx", "r8", "r9"};
-
-        if (instruction.arguments().size() > intArgumentRegisters.length) {
-            throw new UnsupportedOperationException(
-                    "Chamadas com mais de seis argumentos ainda não são suportadas.");
-        }
-
-        for (int i = 0; i < instruction.arguments().size(); i++) {
-            Operand argument = instruction.arguments().get(i);
-            if (argument.type() == Operand.Type.I64 || argument.type() == Operand.Type.REF) {
-                loadI64(asm, argument, wideArgumentRegisters[i]);
+        int gpIndex = 0;
+        int xmmIndex = 0;
+        for (Operand argument : instruction.arguments()) {
+            if (argument.type() == Operand.Type.F64) {
+                if (xmmIndex == xmmRegisters.length) {
+                    throw new UnsupportedOperationException(
+                            "Chamadas suportam até oito argumentos double em registradores.");
+                }
+                loadF64(asm, argument, xmmRegisters[xmmIndex++]);
             } else {
-                loadI32(asm, argument, intArgumentRegisters[i]);
+                if (gpIndex == gpRegisters.length) {
+                    throw new UnsupportedOperationException(
+                            "Chamadas suportam até seis argumentos inteiros/referência em registradores.");
+                }
+                String register = gpRegisters[gpIndex++];
+                if (argument.type() == Operand.Type.I32 || argument.type() == Operand.Type.BOOL) {
+                    loadI32(asm, argument, register32(register));
+                } else {
+                    loadI64(asm, argument, register);
+                }
             }
         }
 
@@ -459,7 +699,9 @@ public class NasmGenerator {
                 .append("\n");
 
         if (instruction.destination() != null) {
-            if (instruction.destination().type() == Operand.Type.I64
+            if (instruction.destination().type() == Operand.Type.F64) {
+                storeF64(asm, instruction.destination(), "xmm0");
+            } else if (instruction.destination().type() == Operand.Type.I64
                     || instruction.destination().type() == Operand.Type.REF) {
                 storeI64(asm, instruction.destination(), "rax");
             } else {
@@ -499,17 +741,26 @@ public class NasmGenerator {
         if (destination.type() == Operand.Type.I32 || destination.type() == Operand.Type.BOOL) {
             loadI32(asm, source, "eax");
             storeI32(asm, destination, "eax");
+        } else if (destination.type() == Operand.Type.F64) {
+            loadF64(asm, source, "xmm0");
+            storeF64(asm, destination, "xmm0");
         } else if (destination.type() == Operand.Type.I64 || destination.type() == Operand.Type.REF) {
             loadI64(asm, source, "rax");
             storeI64(asm, destination, "rax");
         } else {
-            throw new UnsupportedOperationException("Atribuição F64 ainda não é suportada.");
+            throw new UnsupportedOperationException(
+                    "Atribuição não suportada para o tipo " + destination.type() + ".");
         }
     }
 
     private void loadI64(StringBuilder asm, Operand source, String register) {
         if (source.kind() == Operand.Kind.CONSTANT) {
             Object value = source.value();
+            if (value instanceof String text) {
+                asm.append("    lea ").append(register).append(", [rel ")
+                        .append(stringLabels.get(text)).append("]\n");
+                return;
+            }
             String immediate;
             if (value == null) immediate = "0";
             else if (value instanceof Boolean booleanValue) immediate = booleanValue ? "1" : "0";
@@ -518,16 +769,34 @@ public class NasmGenerator {
             return;
         }
         if (source.type() == Operand.Type.I32 || source.type() == Operand.Type.BOOL) {
-            String lowRegister = register32(register);
-            asm.append("    movsxd ").append(register).append(", dword ")
-                    .append(address(source)).append("\n");
-            if (lowRegister == null) {
+            if (register32(register) == null) {
                 throw new IllegalArgumentException("Registrador de 64 bits inválido: " + register);
             }
+            asm.append("    movsxd ").append(register).append(", dword ")
+                    .append(address(source)).append("\n");
             return;
         }
         asm.append("    mov ").append(register).append(", qword ")
                 .append(address(source)).append("\n");
+    }
+
+    private void loadF64(StringBuilder asm, Operand source, String register) {
+        if (source.kind() == Operand.Kind.CONSTANT) {
+            if (!(source.value() instanceof Double value)) {
+                throw new IllegalArgumentException("Constante F64 inválida: " + source.value());
+            }
+            String bits = Long.toUnsignedString(Double.doubleToRawLongBits(value), 16);
+            asm.append("    mov rax, 0x").append(bits).append("\n");
+            asm.append("    movq ").append(register).append(", rax\n");
+            return;
+        }
+        asm.append("    movsd ").append(register).append(", qword ")
+                .append(address(source)).append("\n");
+    }
+
+    private void storeF64(StringBuilder asm, Operand destination, String register) {
+        asm.append("    movsd qword ").append(address(destination))
+                .append(", ").append(register).append("\n");
     }
 
     private String register32(String register64) {

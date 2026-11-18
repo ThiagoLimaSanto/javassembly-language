@@ -2630,9 +2630,9 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         if (operation.operator() != TokenType.NEG
                 || !operandType.isPrimitive()
-                || !isInteger(operandType)) {
+                || !isNumeric(operandType)) {
             throw new SemanticException(
-                    "O operador 'neg' exige um operando int ou long.",
+                    "O operador 'neg' exige um operando numérico (int, long ou double).",
                     operation.line(),
                     operation.column());
         }
@@ -3188,43 +3188,49 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(PrintRecord node) {
-        SemanticType expressionType = getExpressionType(node.expression());
-        if (expressionType.isPrimitive()
-                && expressionType.primitiveType() == TokenType.VOID) {
-            int line = currentFunction == null ? 1 : currentFunction.line();
-            int column = currentFunction == null ? 1 : currentFunction.column();
-            if (node.expression() instanceof CallRecord call) {
-                line = call.line();
-                column = call.column();
-            } else if (node.expression() instanceof MemberCallRecord call) {
-                line = call.line();
-                column = call.column();
-            } else if (node.expression() instanceof ThisCallRecord call) {
-                line = call.line();
-                column = call.column();
-            } else if (node.expression() instanceof SuperCallRecord call) {
-                line = call.line();
-                column = call.column();
-            }
-            throw new SemanticException(
-                    "A expressão do print não pode ser void.",
-                    line,
-                    column);
-        }
-
-        if (!node.formatArguments().isEmpty()) {
-            if (!(node.expression() instanceof LiteralRecord formatLiteral)
-                    || !(formatLiteral.value() instanceof String format)) {
-                throw new SemanticException(
-                        "O primeiro argumento do print formatado deve ser um literal de texto.",
-                        node.line(),
-                        node.column());
-            }
-            validatePrintFormat(node, format);
-        }
+        validateNotVoid(node.expression(), "print");
     }
 
-    private void validatePrintFormat(PrintRecord node, String format) {
+    @Override
+    public void visit(PrintfRecord node) {
+        validateNotVoid(node.format(), "printf");
+        if (!(node.format() instanceof LiteralRecord literal)
+                || !(literal.value() instanceof String format)) {
+            throw new SemanticException(
+                    "O primeiro argumento do printf deve ser um literal de texto.",
+                    node.line(),
+                    node.column());
+        }
+        validatePrintFormat(node, format);
+    }
+
+    private void validateNotVoid(ExpressionInterface expression, String printKind) {
+        SemanticType expressionType = getExpressionType(expression);
+        if (!isVoid(expressionType)) {
+            return;
+        }
+        int line = currentFunction == null ? 1 : currentFunction.line();
+        int column = currentFunction == null ? 1 : currentFunction.column();
+        if (expression instanceof CallRecord call) {
+            line = call.line();
+            column = call.column();
+        } else if (expression instanceof MemberCallRecord call) {
+            line = call.line();
+            column = call.column();
+        } else if (expression instanceof ThisCallRecord call) {
+            line = call.line();
+            column = call.column();
+        } else if (expression instanceof SuperCallRecord call) {
+            line = call.line();
+            column = call.column();
+        }
+        throw new SemanticException(
+                "A expressão do " + printKind + " não pode ser void.",
+                line,
+                column);
+    }
+
+    private void validatePrintFormat(PrintfRecord node, String format) {
         List<TokenType> expectedTypes = new ArrayList<>();
         for (int index = 0; index < format.length(); index++) {
             if (format.charAt(index) != '%') {
@@ -3265,14 +3271,14 @@ public class SemanticAnalyzer implements ASTVisitor {
             expectedTypes.add(expected);
         }
 
-        if (expectedTypes.size() != node.formatArguments().size()) {
+        if (expectedTypes.size() != node.arguments().size()) {
             throw invalidPrintFormat(node,
                     "o formato possui " + expectedTypes.size() + " especificador(es), mas foram fornecidos "
-                            + node.formatArguments().size() + " argumento(s)");
+                            + node.arguments().size() + " argumento(s)");
         }
 
         for (int index = 0; index < expectedTypes.size(); index++) {
-            SemanticType actual = getExpressionType(node.formatArguments().get(index));
+            SemanticType actual = getExpressionType(node.arguments().get(index));
             TokenType expected = expectedTypes.get(index);
             if (isVoid(actual) || !actual.isPrimitive() || actual.primitiveType() != expected) {
                 throw invalidPrintFormat(node,
@@ -3281,8 +3287,8 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
     }
 
-    private SemanticException invalidPrintFormat(PrintRecord node, String reason) {
-        return new SemanticException("Formato inválido em print: " + reason + ".",
+    private SemanticException invalidPrintFormat(PrintfRecord node, String reason) {
+        return new SemanticException("Formato inválido em printf: " + reason + ".",
                 node.line(), node.column());
     }
 

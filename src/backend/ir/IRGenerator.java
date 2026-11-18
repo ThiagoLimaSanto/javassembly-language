@@ -1,9 +1,13 @@
 package src.backend.ir;
 
 import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.HashSet;
 
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
@@ -20,6 +24,7 @@ import src.ast.records.IfRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PrintRecord;
+import src.ast.records.PrintfRecord;
 import src.ast.records.ProgramRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.TypeRecord;
@@ -29,18 +34,21 @@ import src.ast.records.WhileRecord;
 import src.lexer.TokenType;
 
 public final class IRGenerator {
-    private Map<String, Operand.Type> variableTypes = new HashMap<>();
+    private final Deque<Map<String, Operand>> variableScopes = new ArrayDeque<>();
+    private final Set<Operand> stringVariables = new HashSet<>();
     private final Map<String, ClassRecord> classes = new HashMap<>();
     private final Map<String, FunctionRecord> functionsByLabel = new HashMap<>();
     private final Map<String, ClassRecord> ownersByLabel = new HashMap<>();
     private int nextTemp;
     private int nextLabel;
+    private int nextVariable;
     private String currentClassName;
     private FunctionRecord currentFunction;
 
     public IRProgram generate(ProgramRecord ast) {
         nextTemp = 0;
         nextLabel = 0;
+        nextVariable = 0;
         classes.clear();
         functionsByLabel.clear();
         ownersByLabel.clear();
@@ -93,26 +101,31 @@ public final class IRGenerator {
                     continue;
                 }
                 currentFunction = function;
-                variableTypes = new HashMap<>();
+                variableScopes.clear();
+                stringVariables.clear();
+                pushVariableScope();
                 ir.add(new IRInstruction(IROpCode.LABEL,
                         Operand.label(functionLabel(classNode, function)), null, null));
 
                 for (int index = 0; index < function.parameters().size(); index++) {
                     ParameterRecord parameter = function.parameters().get(index);
                     Operand.Type parameterType = typeOf(parameter.type());
-                    variableTypes.put(parameter.name(), parameterType);
+                    Operand parameterOperand = declareVariable(parameter.name(), parameterType);
+                    if (parameter.type().name().equals("String")) {
+                        stringVariables.add(parameterOperand);
+                    }
                     ir.add(new IRInstruction(IROpCode.PARAM,
-                            Operand.variable(parameter.name(), parameterType),
+                            parameterOperand,
                             Operand.constant(index, Operand.Type.I32), null));
                 }
 
-                for (StatementInterface statement : function.block().commands()) {
-                    emitStatement(ir, statement);
-                }
+                emitStatement(ir, function.block());
 
                 if (function.returnType().name().equals("void")) {
                     ir.add(new IRInstruction(IROpCode.RETURN, null, null, null));
                 }
+                variableScopes.clear();
+                stringVariables.clear();
             }
         }
         currentFunction = null;
@@ -134,14 +147,22 @@ public final class IRGenerator {
             return;
         }
         if (statement instanceof BlockRecord block) {
-            for (StatementInterface child : block.commands()) emitStatement(ir, child);
+            pushVariableScope();
+            try {
+                for (StatementInterface child : block.commands()) emitStatement(ir, child);
+            } finally {
+                popVariableScope();
+            }
         } else if (statement instanceof DeclarationRecord declaration) {
             Operand.Type type = typeOf(declaration.type());
-            variableTypes.put(declaration.name(), type);
+            Operand destination = declareVariable(declaration.name(), type);
+            if (declaration.type().name().equals("String")) {
+                stringVariables.add(destination);
+            }
             if (declaration.value() != null) {
                 Operand source = coerce(ir, expression(ir, declaration.value()), type);
                 ir.add(new IRInstruction(IROpCode.ASSIGN,
-                        Operand.variable(declaration.name(), type), source, null));
+                        destination, source, null));
             }
         } else if (statement instanceof ReturnRecord returned) {
             Operand value = returned.value() == null ? null : expression(ir, returned.value());
@@ -173,6 +194,8 @@ public final class IRGenerator {
             ir.add(new IRInstruction(IROpCode.JUMP, Operand.label(testLabel), null, null));
             ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(endLabel), null, null));
         } else if (statement instanceof ForRecord loop) {
+            pushVariableScope();
+            try {
             String testLabel = newLabel();
             String endLabel = newLabel();
             emitStatement(ir, loop.initializer());
@@ -185,13 +208,34 @@ public final class IRGenerator {
             emitStatement(ir, loop.update());
             ir.add(new IRInstruction(IROpCode.JUMP, Operand.label(testLabel), null, null));
             ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(endLabel), null, null));
+            } finally {
+                popVariableScope();
+            }
         } else if (statement instanceof PrintRecord print) {
             Operand value = expression(ir, print.expression());
             if (value.type() != Operand.Type.I32 && value.type() != Operand.Type.I64
-                    && value.type() != Operand.Type.BOOL) {
-                throw unsupported("print só suporta int, long e boolean no backend atual.");
+                    && value.type() != Operand.Type.F64 && value.type() != Operand.Type.BOOL
+                    && !(value.type() == Operand.Type.REF && isStringExpression(print.expression(), ir))) {
+                throw unsupported("print suporta int, long, double, boolean e String no backend atual.");
             }
             ir.add(new IRInstruction(IROpCode.PRINT, null, value, null));
+        } else if (statement instanceof PrintfRecord printf) {
+            if (!(printf.format() instanceof LiteralRecord literal)
+                    || !(literal.value() instanceof String format)) {
+                throw unsupported("O formato do printf deve ser um literal de texto.");
+            }
+            List<Operand> arguments = new ArrayList<>();
+            for (ExpressionInterface argument : printf.arguments()) {
+                Operand value = expression(ir, argument);
+                if (value.type() != Operand.Type.I32 && value.type() != Operand.Type.I64
+                        && value.type() != Operand.Type.F64 && value.type() != Operand.Type.BOOL
+                        && value.type() != Operand.Type.REF) {
+                    throw unsupported("Tipo não suportado como argumento de printf: " + value.type() + ".");
+                }
+                arguments.add(value);
+            }
+            ir.add(new IRInstruction(IROpCode.PRINT_FORMAT, null,
+                    Operand.constant(format, Operand.Type.REF), null, arguments));
         } else if (statement instanceof AssignmentRecord assignment) {
             if (!(assignment.target() instanceof VariableRecord variable)) {
                 throw unsupported("Atribuições a campos e arrays ainda não são suportadas pelo backend.");
@@ -210,27 +254,62 @@ public final class IRGenerator {
         }
     }
 
+    private void pushVariableScope() {
+        variableScopes.push(new HashMap<>());
+    }
+
+    private void popVariableScope() {
+        if (variableScopes.isEmpty()) {
+            throw new IllegalStateException("Pilha de escopos da IR vazia.");
+        }
+        variableScopes.pop();
+    }
+
+    private Operand declareVariable(String sourceName, Operand.Type type) {
+        if (variableScopes.isEmpty()) {
+            throw new IllegalStateException("Declaração de variável sem escopo ativo na IR.");
+        }
+        String internalName = "v" + nextVariable++;
+        Operand variable = Operand.variable(internalName, type);
+        variableScopes.peek().put(sourceName, variable);
+        return variable;
+    }
+
+    private Operand resolveVariable(String sourceName) {
+        for (Map<String, Operand> scope : variableScopes) {
+            Operand variable = scope.get(sourceName);
+            if (variable != null) {
+                return variable;
+            }
+        }
+        return null;
+    }
+
     private Operand expression(IRProgram ir, ExpressionInterface expression) {
         if (expression instanceof LiteralRecord literal) {
             Object value = literal.value();
             if (value instanceof Integer) return Operand.constant(value, Operand.Type.I32);
             if (value instanceof Long) return Operand.constant(value, Operand.Type.I64);
+            if (value instanceof Double) return Operand.constant(value, Operand.Type.F64);
             if (value instanceof Boolean) return Operand.constant(value, Operand.Type.BOOL);
             if (value == null) return Operand.constant(null, Operand.Type.REF);
+            if (value instanceof String) return Operand.constant(value, Operand.Type.REF);
             throw unsupported("Literal de texto ainda não é suportado pelo backend.");
         }
         if (expression instanceof VariableRecord variable) {
-            Operand.Type type = variableTypes.get(variable.name());
-            if (type == null) throw unsupported("Variável sem tipo na geração de IR: " + variable.name() + ".");
-            return Operand.variable(variable.name(), type);
+            Operand operand = resolveVariable(variable.name());
+            if (operand == null) {
+                throw unsupported("Variável sem símbolo na geração de IR: " + variable.name() + ".");
+            }
+            return operand;
         }
         if (expression instanceof UnaryExpressionRecord unary) {
             if (unary.operator() != TokenType.NEG) {
                 throw unsupported("Operador unário ainda não suportado: " + unary.operator() + ".");
             }
             Operand operand = expression(ir, unary.operand());
-            if (operand.type() != Operand.Type.I32 && operand.type() != Operand.Type.I64) {
-                throw unsupported("neg só suporta int e long no backend atual.");
+            if (!isNumeric(operand.type())) {
+                throw unsupported("neg só suporta int, long e double no backend atual.");
             }
             Operand result = Operand.temporary("t" + nextTemp++, operand.type());
             ir.add(new IRInstruction(IROpCode.NEG, result, operand, null));
@@ -258,7 +337,14 @@ public final class IRGenerator {
                 default -> false;
             };
             Operand.Type operationType;
-            if (left.type() == Operand.Type.I64 || right.type() == Operand.Type.I64) {
+            if (left.type() == Operand.Type.F64 || right.type() == Operand.Type.F64) {
+                if (!isNumeric(left.type()) || !isNumeric(right.type())) {
+                    throw unsupported("Operação entre tipos incompatíveis no backend.");
+                }
+                left = coerce(ir, left, Operand.Type.F64);
+                right = coerce(ir, right, Operand.Type.F64);
+                operationType = Operand.Type.F64;
+            } else if (left.type() == Operand.Type.I64 || right.type() == Operand.Type.I64) {
                 if (!isInteger(left.type()) || !isInteger(right.type())) {
                     throw unsupported("Operação entre tipos incompatíveis no backend.");
                 }
@@ -272,21 +358,24 @@ public final class IRGenerator {
             } else {
                 throw unsupported("Operação entre tipos ainda não suportada pelo backend.");
             }
-            if (!comparison && !isInteger(operationType)) {
-                throw unsupported("A aritmética do backend só suporta int e long.");
+            if (!comparison && !isNumeric(operationType)) {
+                throw unsupported("A aritmética do backend só suporta int, long e double.");
             }
             if ((opcode == IROpCode.LT || opcode == IROpCode.GT
                     || opcode == IROpCode.LE || opcode == IROpCode.GE)
-                    && !isInteger(operationType)) {
-                throw unsupported("Comparações relacionais do backend só suportam int e long.");
+                    && !isNumeric(operationType)) {
+                throw unsupported("Comparações relacionais do backend só suportam números.");
+            }
+            if (opcode == IROpCode.MOD && operationType == Operand.Type.F64) {
+                throw unsupported("mod não suporta double no backend.");
             }
             if ((opcode == IROpCode.EQ || opcode == IROpCode.NE)
                     && operationType == Operand.Type.BOOL) {
-                // Boolean equality is a normal integer comparison.
+
             } else if ((opcode == IROpCode.EQ || opcode == IROpCode.NE)
                     && operationType == Operand.Type.REF) {
-                // Reference equality compares the 64-bit reference values.
-            } else if (comparison && !isInteger(operationType)
+
+            } else if (comparison && !isNumeric(operationType)
                     && operationType != Operand.Type.BOOL && operationType != Operand.Type.REF) {
                 throw unsupported("Comparação ainda não suportada pelo backend.");
             }
@@ -297,6 +386,24 @@ public final class IRGenerator {
         }
         if (expression instanceof CallRecord call) return emitCall(ir, call, true);
         throw unsupported("Expressão ainda não suportada: " + expression.getClass().getSimpleName() + ".");
+    }
+
+    private boolean isStringExpression(ExpressionInterface expression, IRProgram ir) {
+        if (expression instanceof LiteralRecord literal) {
+            return literal.value() instanceof String;
+        }
+        if (expression instanceof VariableRecord variable) {
+            Operand operand = resolveVariable(variable.name());
+            return operand != null && stringVariables.contains(operand);
+        }
+        if (expression instanceof CallRecord && !ir.instructions().isEmpty()) {
+            IRInstruction last = ir.instructions().get(ir.instructions().size() - 1);
+            if (last.opCode() == IROpCode.CALL && last.left() != null) {
+                FunctionRecord function = functionsByLabel.get(last.left().value().toString());
+                return function != null && function.returnType().name().equals("String");
+            }
+        }
+        return false;
     }
 
     private Operand emitCall(IRProgram ir, CallRecord call, boolean keepResult) {
@@ -362,6 +469,10 @@ public final class IRGenerator {
                     score++;
                     continue;
                 }
+                if (isInteger(actual) && expected == Operand.Type.F64) {
+                    score += actual == Operand.Type.I32 ? 2 : 1;
+                    continue;
+                }
                 applicable = false;
                 break;
             }
@@ -394,6 +505,14 @@ public final class IRGenerator {
             ir.add(new IRInstruction(IROpCode.CAST_I32_TO_I64, converted, source, null));
             return converted;
         }
+        if (expected == Operand.Type.F64 && isInteger(source.type())) {
+            Operand converted = Operand.temporary("t" + nextTemp++, Operand.Type.F64);
+            IROpCode opcode = source.type() == Operand.Type.I32
+                    ? IROpCode.CAST_I32_TO_F64
+                    : IROpCode.CAST_I64_TO_F64;
+            ir.add(new IRInstruction(opcode, converted, source, null));
+            return converted;
+        }
         throw unsupported("Conversão de " + source.type() + " para " + expected + " não suportada pelo backend.");
     }
 
@@ -402,15 +521,19 @@ public final class IRGenerator {
         return switch (name) {
             case "int" -> Operand.Type.I32;
             case "long" -> Operand.Type.I64;
+            case "double" -> Operand.Type.F64;
             case "boolean" -> Operand.Type.BOOL;
             case "void" -> throw unsupported("void não é um tipo de operando.");
-            case "double" -> throw unsupported("double ainda não é suportado pelo backend.");
             default -> Operand.Type.REF;
         };
     }
 
     private boolean isInteger(Operand.Type type) {
         return type == Operand.Type.I32 || type == Operand.Type.I64;
+    }
+
+    private boolean isNumeric(Operand.Type type) {
+        return isInteger(type) || type == Operand.Type.F64;
     }
 
     private String functionLabel(ClassRecord owner, FunctionRecord function) {

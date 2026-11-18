@@ -1,0 +1,23 @@
+package src.ast.records;
+
+import java.util.List;
+
+import src.ast.ExpressionInterface;
+import src.ast.StatementInterface;
+import src.ast.visitor.ASTVisitor;
+
+public record PrintfRecord(
+        ExpressionInterface format,
+        List<ExpressionInterface> arguments,
+        int line,
+        int column) implements StatementInterface {
+
+    public PrintfRecord {
+        arguments = arguments == null ? List.of() : List.copyOf(arguments);
+    }
+
+    @Override
+    public void accept(ASTVisitor visitor) {
+        visitor.visit(this);
+    }
+}

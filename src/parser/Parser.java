@@ -32,6 +32,7 @@ import src.ast.records.ModifiersRecord;
 import src.ast.records.NewObjectRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PrintRecord;
+import src.ast.records.PrintfRecord;
 import src.ast.records.ProgramRecord;
 import src.ast.records.RegisterDeclarationRecord;
 import src.ast.records.RegisterRecord;
@@ -999,6 +1000,9 @@ public class Parser {
                         case PRINT ->
                                 printStatement();
 
+                        case PRINTF ->
+                                printfStatement();
+
                         case IF ->
                                 ifStatement();
 
@@ -1470,25 +1474,26 @@ public class Parser {
                                 "Esperado 'print'");
 
                 ExpressionInterface expression = expression();
-                List<ExpressionInterface> formatArguments = new ArrayList<>();
-                if (tokens.verify(TokenType.COMMA)) {
-                        tokens.consume(TokenType.COMMA, "Esperado ',' após o formato do print");
-                        formatArguments.add(expression());
-                        while (tokens.verify(TokenType.COMMA)) {
-                                tokens.consume(TokenType.COMMA, "Esperado ',' entre argumentos do print");
-                                formatArguments.add(expression());
-                        }
-                }
-
                 tokens.consume(
                                 TokenType.SEMICOLON,
                                 "Esperado ';' após print");
 
                 return new PrintRecord(
                                 expression,
-                                formatArguments,
                                 printToken.getLine(),
                                 printToken.getColumn());
+        }
+
+        private StatementInterface printfStatement() {
+                Token printfToken = tokens.consume(TokenType.PRINTF, "Esperado 'printf'");
+                ExpressionInterface format = expression();
+                List<ExpressionInterface> arguments = new ArrayList<>();
+                while (tokens.verify(TokenType.COMMA)) {
+                        tokens.consume(TokenType.COMMA, "Esperado ',' entre argumentos do printf");
+                        arguments.add(expression());
+                }
+                tokens.consume(TokenType.SEMICOLON, "Esperado ';' após printf");
+                return new PrintfRecord(format, arguments, printfToken.getLine(), printfToken.getColumn());
         }
 
         private ExpressionInterface expression() {

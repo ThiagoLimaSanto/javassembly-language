@@ -112,8 +112,8 @@ final class SourceProjectLoader {
             loadFile(importedFile);
         }
 
-        // Qualified type names are valid without an import. Resolve their conventional
-        // package path when the source is part of this project tree.
+
+
         java.util.regex.Matcher qualifiedNames = java.util.regex.Pattern
                 .compile("\\b([\\p{javaJavaIdentifierStart}][\\p{javaJavaIdentifierPart}]*"
                         + "(?:\\.[\\p{javaJavaIdentifierStart}][\\p{javaJavaIdentifierPart}]*)+)\\b")

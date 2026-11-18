@@ -6,9 +6,9 @@ public class SemanticPrintFormatSpecifiers {
         String label = "Nota";
         boolean enabled = True;
 
-        print "%d %i %u %f %lf %ld %li %s %b %%",
+        printf "%d %i %u %f %lf %ld %li %s %b %%",
                 value, value, value, decimal, decimal, large, large, label, enabled;
-        print "Percentual: %% e inteiro: %d", value;
+        printf "Percentual: %% e inteiro: %d", value;
         return;
     }
 }

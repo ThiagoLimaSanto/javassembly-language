@@ -111,7 +111,7 @@ public final class RuleFixtureTests {
             firstResult.add(new Token(TokenType.EOF, "EOF", 2, 1));
             throw new AssertionError("Lexer token list should be immutable");
         } catch (UnsupportedOperationException expected) {
-            // Expected: token snapshots cannot be changed by downstream stages.
+
         }
 
         TokenStream stream = new TokenStream(firstResult);
@@ -159,7 +159,7 @@ public final class RuleFixtureTests {
             new SemanticAnalyzer().visit(program);
             throw new AssertionError("A long literal should not be assignable to int");
         } catch (SemanticException expected) {
-            // 2147483648 is now a valid long literal, but cannot narrow to int.
+
         }
 
         String longOverflow = "public class LongOverflow {\n"
@@ -172,7 +172,7 @@ public final class RuleFixtureTests {
             Frontend.parse(longOverflow);
             throw new AssertionError("Positive value beyond Long.MAX_VALUE should fail");
         } catch (LongOutOfRangeException expected) {
-            // The direct positive literal is outside the signed 64-bit range.
+
         }
     }
 

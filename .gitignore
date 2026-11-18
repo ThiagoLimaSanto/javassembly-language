@@ -17,3 +17,9 @@ src/source/backend/backend_for_empty_clauses_test.jvs
 src/source/backend/backend_for_empty_clauses_test.asm
 src/source/backend/backend_implicit_void_return_test.jvs
 src/source/backend/backend_implicit_void_return_test.asm
+src/source/backend/print_single_expression_test.jvs
+src/source/backend/print_single_expression_test.asm
+src/source/backend/printf_format_test.jvs
+src/source/backend/printf_format_test.asm
+src/source/backend/printf_double_expression_test.jvs
+src/source/backend/printf_double_expression_test.asm

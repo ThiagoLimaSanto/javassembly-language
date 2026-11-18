@@ -3,6 +3,8 @@ package src.backend.ir;
 public enum IROpCode {
     ASSIGN,
     CAST_I32_TO_I64,
+    CAST_I32_TO_F64,
+    CAST_I64_TO_F64,
     ADD,
     SUB,
     MUL,
@@ -25,5 +27,6 @@ public enum IROpCode {
     CALL,
     RETURN,
     PRINT,
+    PRINT_FORMAT,
     PARAM
 }

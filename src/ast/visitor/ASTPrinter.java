@@ -24,6 +24,7 @@ import src.ast.records.MemberCallRecord;
 import src.ast.records.NewObjectRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PrintRecord;
+import src.ast.records.PrintfRecord;
 import src.ast.records.ProgramRecord;
 import src.ast.records.RegisterRecord;
 import src.ast.records.RegisterDeclarationRecord;
@@ -173,12 +174,14 @@ public class ASTPrinter implements ASTVisitor {
     @Override
     public void visit(PrintRecord node) {
         printLine("Print");
-        if (node.formatArguments().isEmpty()) {
-            visitChild(node.expression());
-            return;
-        }
-        visitNamedChild("Formato", node.expression());
-        for (ExpressionInterface argument : node.formatArguments()) {
+        visitChild(node.expression());
+    }
+
+    @Override
+    public void visit(PrintfRecord node) {
+        printLine("Printf");
+        visitNamedChild("Formato", node.format());
+        for (ExpressionInterface argument : node.arguments()) {
             visitNamedChild("Argumento", argument);
         }
     }

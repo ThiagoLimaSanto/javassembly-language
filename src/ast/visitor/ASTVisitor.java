@@ -22,6 +22,7 @@ import src.ast.records.MemberCallRecord;
 import src.ast.records.NewObjectRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PrintRecord;
+import src.ast.records.PrintfRecord;
 import src.ast.records.ProgramRecord;
 import src.ast.records.RegisterRecord;
 import src.ast.records.RegisterDeclarationRecord;
@@ -52,6 +53,8 @@ public interface ASTVisitor {
     void visit(DeclarationRecord node);
 
     void visit(PrintRecord node);
+
+    void visit(PrintfRecord node);
 
     void visit(WhileRecord node);
 
