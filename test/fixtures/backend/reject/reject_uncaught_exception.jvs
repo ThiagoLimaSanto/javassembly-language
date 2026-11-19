@@ -1,0 +1,21 @@
+class Throwable {}
+class TestException extends Throwable {}
+
+public class UncaughtExceptionTest {
+    public static func void throwFromMethod() {
+        throw new TestException();
+    }
+
+    public static func void main(String[] args) {
+        try {
+            try {
+                throwFromMethod();
+            } finally {
+                printLn "inner finally before uncaught";
+            }
+        } finally {
+            printLn "outer finally before uncaught";
+        }
+        return;
+    }
+}

@@ -1,0 +1,16 @@
+class Throwable {}
+class ParentException extends Throwable {}
+class ChildException extends ParentException {}
+
+public class ExceptionSameMethodTest {
+    public static func void main(String[] args) {
+        try {
+            throw new ChildException();
+        } catch (ParentException error) {
+            printLn "parent caught child";
+        } finally {
+            printLn "same-method finally";
+        }
+        return;
+    }
+}

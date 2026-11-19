@@ -128,8 +128,13 @@ public final class BackendFixtureTests {
                 if (exitCode == 0) {
                     return "expected a runtime failure, but program exited successfully";
                 }
-                if (!stdout.isEmpty()) {
-                    return "expected empty stdout before runtime failure, got <" + stdout + ">";
+                Path expectedStdoutFile = replaceExtension(fixture, ".out");
+                String expectedStdout = Files.isRegularFile(expectedStdoutFile)
+                        ? Files.readString(expectedStdoutFile)
+                        : "";
+                if (!stdout.equals(expectedStdout)) {
+                    return "stdout mismatch before runtime failure; expected <"
+                            + expectedStdout + ">, got <" + stdout + ">";
                 }
                 if (!stderr.equals(expected)) {
                     return "stderr mismatch; expected <" + expected + ">, got <" + stderr + ">";

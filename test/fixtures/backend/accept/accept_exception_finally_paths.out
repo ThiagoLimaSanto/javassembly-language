@@ -1,0 +1,6 @@
+normal try
+finally on normal exit
+finally on return
+inner catch
+inner finally
+outer finally

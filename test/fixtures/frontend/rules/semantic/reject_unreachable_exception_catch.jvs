@@ -1,0 +1,16 @@
+class Throwable {}
+class ParentException extends Throwable {}
+class ChildException extends ParentException {}
+
+public class UnreachableExceptionCatchTest {
+    public static func void main(String[] args) {
+        try {
+            throw new ChildException();
+        } catch (ParentException parent) {
+            printLn "parent";
+        } catch (ChildException child) {
+            printLn "unreachable";
+        }
+        return;
+    }
+}

@@ -1,0 +1,38 @@
+class Throwable {}
+class ParentException extends Throwable {}
+class ChildException extends ParentException {}
+
+public class ExceptionFinallyPathsTest {
+    public static func void returnFromTry() {
+        try {
+            return;
+        } finally {
+            printLn "finally on return";
+        }
+    }
+
+    public static func void main(String[] args) {
+        try {
+            printLn "normal try";
+        } finally {
+            printLn "finally on normal exit";
+        }
+
+        returnFromTry();
+
+        try {
+            try {
+                throw new ChildException();
+            } catch (ParentException error) {
+                printLn "inner catch";
+            } finally {
+                printLn "inner finally";
+            }
+        } catch (Throwable error) {
+            printLn "outer catch";
+        } finally {
+            printLn "outer finally";
+        }
+        return;
+    }
+}
