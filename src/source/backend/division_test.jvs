@@ -1,0 +1,10 @@
+public class DivisionBackendTest {
+    public static func int divide(int dividend, int divisor) {
+        return div dividend, divisor;
+    }
+
+    public static func void main(String[] args) {
+        print divide(25, 5);
+        return;
+    }
+}

@@ -1,0 +1,30 @@
+public class BackendLongOverloadTest {
+    public static func int choose(int value) {
+        return add value, 10;
+    }
+
+    public static func long choose(long value) {
+        return add value, 20L;
+    }
+
+    public static func void show(int value) {
+        print value;
+    }
+
+    public static func void main(String[] args) {
+        long widened = 7;
+        print widened;
+
+        long large = add 3000000000L, 2L;
+        print large;
+
+        print choose(1);
+        print choose(1L);
+
+        show(99);
+
+        long minimum = neg 9223372036854775808L;
+        print div minimum, neg 1L;
+        print mod minimum, neg 1L;
+    }
+}

@@ -1,0 +1,21 @@
+public class PrintSingleExpressionTest {
+    // Saída esperada:
+    // 42
+    // 3000000000
+    // 3.500000
+    // 1
+    // texto com %d literal
+    public static func void main(String[] args) {
+        int integer = 42;
+        long largeInteger = 3000000000L;
+        double decimal = 3.5;
+        boolean enabled = True;
+        String text = "texto com %d literal";
+
+        print integer;
+        print largeInteger;
+        print decimal;
+        print enabled;
+        print text;
+    }
+}

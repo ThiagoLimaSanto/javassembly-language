@@ -1,17 +1,18 @@
 package src.backend.ir;
 
-import java.util.ArrayList;
 import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.HashSet;
 
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
 import src.ast.records.AssignmentRecord;
+import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
@@ -22,6 +23,8 @@ import src.ast.records.ForRecord;
 import src.ast.records.FunctionRecord;
 import src.ast.records.IfRecord;
 import src.ast.records.LiteralRecord;
+import src.ast.records.MemberAccessRecord;
+import src.ast.records.NewObjectRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PrintRecord;
 import src.ast.records.PrintfRecord;
@@ -31,10 +34,17 @@ import src.ast.records.TypeRecord;
 import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
+import src.backend.memory.ClassLayout;
+import src.backend.memory.FieldLayout;
 import src.lexer.TokenType;
 
 public final class IRGenerator {
+    private record ResolvedField(Operand receiver, FieldLayout field) {
+    }
+
     private final Deque<Map<String, Operand>> variableScopes = new ArrayDeque<>();
+    private final Map<String, ClassLayout> classLayouts;
+    private final Map<Operand, String> referenceTypesByOperand = new HashMap<>();
     private final Set<Operand> stringVariables = new HashSet<>();
     private final Map<String, ClassRecord> classes = new HashMap<>();
     private final Map<String, FunctionRecord> functionsByLabel = new HashMap<>();
@@ -45,6 +55,14 @@ public final class IRGenerator {
     private String currentClassName;
     private FunctionRecord currentFunction;
 
+    public IRGenerator() {
+        this(Map.of());
+    }
+
+    public IRGenerator(Map<String, ClassLayout> classLayouts) {
+        this.classLayouts = Map.copyOf(classLayouts);
+    }
+
     public IRProgram generate(ProgramRecord ast) {
         nextTemp = 0;
         nextLabel = 0;
@@ -52,6 +70,7 @@ public final class IRGenerator {
         classes.clear();
         functionsByLabel.clear();
         ownersByLabel.clear();
+        referenceTypesByOperand.clear();
 
         if (!ast.interfaces().isEmpty()) {
             throw unsupported("A geração de código ainda não suporta interfaces.");
@@ -62,16 +81,9 @@ public final class IRGenerator {
 
         for (ClassRecord classNode : ast.classes()) {
             classes.put(classNode.name(), classNode);
-            if (!classNode.attributes().isEmpty()) {
-                throw unsupported("A geração de código ainda não suporta atributos de classe: "
-                        + classNode.name() + ".");
-            }
+
             if (!classNode.constructors().isEmpty()) {
                 throw unsupported("A geração de código ainda não suporta construtores explícitos: "
-                        + classNode.name() + ".");
-            }
-            if (classNode.superClass() != null && !classNode.superClass().equals("Object")) {
-                throw unsupported("A geração de código ainda não suporta herança de classes: "
                         + classNode.name() + ".");
             }
             if (!classNode.interfaces().isEmpty()) {
@@ -102,6 +114,7 @@ public final class IRGenerator {
                 }
                 currentFunction = function;
                 variableScopes.clear();
+                referenceTypesByOperand.clear();
                 stringVariables.clear();
                 pushVariableScope();
                 ir.add(new IRInstruction(IROpCode.LABEL,
@@ -111,6 +124,7 @@ public final class IRGenerator {
                     ParameterRecord parameter = function.parameters().get(index);
                     Operand.Type parameterType = typeOf(parameter.type());
                     Operand parameterOperand = declareVariable(parameter.name(), parameterType);
+                    registerReferenceType(parameterOperand, parameter.type());
                     if (parameter.type().name().equals("String")) {
                         stringVariables.add(parameterOperand);
                     }
@@ -149,13 +163,15 @@ public final class IRGenerator {
         if (statement instanceof BlockRecord block) {
             pushVariableScope();
             try {
-                for (StatementInterface child : block.commands()) emitStatement(ir, child);
+                for (StatementInterface child : block.commands())
+                    emitStatement(ir, child);
             } finally {
                 popVariableScope();
             }
         } else if (statement instanceof DeclarationRecord declaration) {
             Operand.Type type = typeOf(declaration.type());
             Operand destination = declareVariable(declaration.name(), type);
+            registerReferenceType(destination, declaration.type());
             if (declaration.type().name().equals("String")) {
                 stringVariables.add(destination);
             }
@@ -196,18 +212,18 @@ public final class IRGenerator {
         } else if (statement instanceof ForRecord loop) {
             pushVariableScope();
             try {
-            String testLabel = newLabel();
-            String endLabel = newLabel();
-            emitStatement(ir, loop.initializer());
-            ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(testLabel), null, null));
-            if (loop.condition() != null) {
-                Operand condition = expression(ir, loop.condition());
-                ir.add(new IRInstruction(IROpCode.JUMP_IF_FALSE, Operand.label(endLabel), condition, null));
-            }
-            emitStatement(ir, loop.block());
-            emitStatement(ir, loop.update());
-            ir.add(new IRInstruction(IROpCode.JUMP, Operand.label(testLabel), null, null));
-            ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(endLabel), null, null));
+                String testLabel = newLabel();
+                String endLabel = newLabel();
+                emitStatement(ir, loop.initializer());
+                ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(testLabel), null, null));
+                if (loop.condition() != null) {
+                    Operand condition = expression(ir, loop.condition());
+                    ir.add(new IRInstruction(IROpCode.JUMP_IF_FALSE, Operand.label(endLabel), condition, null));
+                }
+                emitStatement(ir, loop.block());
+                emitStatement(ir, loop.update());
+                ir.add(new IRInstruction(IROpCode.JUMP, Operand.label(testLabel), null, null));
+                ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(endLabel), null, null));
             } finally {
                 popVariableScope();
             }
@@ -237,12 +253,26 @@ public final class IRGenerator {
             ir.add(new IRInstruction(IROpCode.PRINT_FORMAT, null,
                     Operand.constant(format, Operand.Type.REF), null, arguments));
         } else if (statement instanceof AssignmentRecord assignment) {
-            if (!(assignment.target() instanceof VariableRecord variable)) {
+            if (assignment.target() instanceof VariableRecord variable) {
+                Operand destination = expression(ir, variable);
+                Operand value = coerce(ir, expression(ir, assignment.value()), destination.type());
+                ir.add(new IRInstruction(IROpCode.ASSIGN, destination, value, null));
+            } else if (assignment.target() instanceof MemberAccessRecord member) {
+                ResolvedField target = resolveField(ir, member);
+                FieldLayout field = target.field();
+                Operand value = coerce(
+                        ir,
+                        expression(ir, assignment.value()),
+                        typeOf(new TypeRecord(field.type())));
+                ir.add(new IRInstruction(
+                        IROpCode.STORE_FIELD,
+                        null,
+                        target.receiver(),
+                        Operand.constant(field.offSet(), Operand.Type.I32),
+                        List.of(value)));
+            } else {
                 throw unsupported("Atribuições a campos e arrays ainda não são suportadas pelo backend.");
             }
-            Operand destination = expression(ir, variable);
-            Operand value = coerce(ir, expression(ir, assignment.value()), destination.type());
-            ir.add(new IRInstruction(IROpCode.ASSIGN, destination, value, null));
         } else if (statement instanceof ExpressionStatementRecord expressionStatement) {
             if (expressionStatement.expression() instanceof CallRecord call) {
                 emitCall(ir, call, false);
@@ -285,15 +315,28 @@ public final class IRGenerator {
         return null;
     }
 
+    private void registerReferenceType(Operand operand, TypeRecord sourceType) {
+        String className = sourceType.name();
+        if (classes.containsKey(className)) {
+            referenceTypesByOperand.put(operand, className);
+        }
+    }
+
     private Operand expression(IRProgram ir, ExpressionInterface expression) {
         if (expression instanceof LiteralRecord literal) {
             Object value = literal.value();
-            if (value instanceof Integer) return Operand.constant(value, Operand.Type.I32);
-            if (value instanceof Long) return Operand.constant(value, Operand.Type.I64);
-            if (value instanceof Double) return Operand.constant(value, Operand.Type.F64);
-            if (value instanceof Boolean) return Operand.constant(value, Operand.Type.BOOL);
-            if (value == null) return Operand.constant(null, Operand.Type.REF);
-            if (value instanceof String) return Operand.constant(value, Operand.Type.REF);
+            if (value instanceof Integer)
+                return Operand.constant(value, Operand.Type.I32);
+            if (value instanceof Long)
+                return Operand.constant(value, Operand.Type.I64);
+            if (value instanceof Double)
+                return Operand.constant(value, Operand.Type.F64);
+            if (value instanceof Boolean)
+                return Operand.constant(value, Operand.Type.BOOL);
+            if (value == null)
+                return Operand.constant(null, Operand.Type.REF);
+            if (value instanceof String)
+                return Operand.constant(value, Operand.Type.REF);
             throw unsupported("Literal de texto ainda não é suportado pelo backend.");
         }
         if (expression instanceof VariableRecord variable) {
@@ -302,6 +345,22 @@ public final class IRGenerator {
                 throw unsupported("Variável sem símbolo na geração de IR: " + variable.name() + ".");
             }
             return operand;
+        }
+        if (expression instanceof MemberAccessRecord member) {
+            ResolvedField resolved = resolveField(ir, member);
+            FieldLayout field = resolved.field();
+
+            Operand.Type fieldType = typeOf(new TypeRecord(field.type()));
+            Operand result = Operand.temporary("t" + nextTemp++, fieldType);
+
+            ir.add(new IRInstruction(
+                    IROpCode.LOAD_FIELD,
+                    result,
+                    resolved.receiver(),
+                    Operand.constant(field.offSet(), Operand.Type.I32)));
+
+            registerReferenceType(result, new TypeRecord(field.type()));
+            return result;
         }
         if (expression instanceof UnaryExpressionRecord unary) {
             if (unary.operator() != TokenType.NEG) {
@@ -384,8 +443,103 @@ public final class IRGenerator {
             ir.add(new IRInstruction(opcode, result, left, right));
             return result;
         }
-        if (expression instanceof CallRecord call) return emitCall(ir, call, true);
+        if (expression instanceof NewObjectRecord creation) {
+            if (!creation.arguments().isEmpty()) {
+                throw unsupported(
+                        "Argumentos de construtor ainda não são suportados pelo backend.");
+            }
+
+            String className = creation.type().name();
+            if (!classes.containsKey(className)) {
+                throw unsupported("Classe não encontrada: " + className + ".");
+            }
+
+            ClassLayout layout = classLayouts.get(className);
+            if (layout == null) {
+                throw unsupported("Layout não encontrado para a classe '" + className + "'.");
+            }
+
+            Operand result = Operand.temporary("t" + nextTemp++, Operand.Type.REF);
+            int allocationSize = Math.max(1, layout.size());
+
+            ir.add(new IRInstruction(
+                    IROpCode.ALLOC_OBJECT,
+                    result,
+                    Operand.constant(allocationSize, Operand.Type.I32),
+                    null));
+
+            referenceTypesByOperand.put(result, className);
+            initializeObjectFields(ir, result, classes.get(className));
+            return result;
+        }
+        if (expression instanceof CallRecord call)
+            return emitCall(ir, call, true);
         throw unsupported("Expressão ainda não suportada: " + expression.getClass().getSimpleName() + ".");
+    }
+
+    private void initializeObjectFields(
+            IRProgram ir,
+            Operand object,
+            ClassRecord classNode) {
+        String parentName = classNode.superClass();
+        if (parentName != null && !parentName.equals("Object")) {
+            ClassRecord parent = classes.get(parentName);
+            if (parent == null) {
+                throw unsupported("Classe pai não encontrada: " + parentName + ".");
+            }
+            initializeObjectFields(ir, object, parent);
+        }
+
+        ClassLayout layout = classLayouts.get(classNode.name());
+        if (layout == null) {
+            throw unsupported("Layout não encontrado para a classe '" + classNode.name() + "'.");
+        }
+
+        for (AttributeRecord attribute : classNode.attributes()) {
+            if (attribute.isStatic() || attribute.value() == null) {
+                continue;
+            }
+
+            FieldLayout field = layout.getField(attribute.name());
+            if (field == null) {
+                throw unsupported(
+                        "Campo não encontrado no layout: " + classNode.name()
+                                + "." + attribute.name() + ".");
+            }
+
+            Operand value = coerce(
+                    ir,
+                    expression(ir, attribute.value()),
+                    typeOf(new TypeRecord(field.type())));
+            ir.add(new IRInstruction(
+                    IROpCode.STORE_FIELD,
+                    null,
+                    object,
+                    Operand.constant(field.offSet(), Operand.Type.I32),
+                    List.of(value)));
+        }
+    }
+
+    private ResolvedField resolveField(IRProgram ir, MemberAccessRecord member) {
+        Operand receiver = expression(ir, member.receiver());
+        String receiverClass = referenceTypesByOperand.get(receiver);
+        if (receiverClass == null) {
+            throw unsupported(
+                    "Não foi possível determinar a classe do objeto usado em '"
+                            + member.name() + "'.");
+        }
+
+        ClassLayout layout = classLayouts.get(receiverClass);
+        if (layout == null) {
+            throw unsupported("Layout não encontrado para a classe '" + receiverClass + "'.");
+        }
+
+        FieldLayout field = layout.getField(member.name());
+        if (field == null) {
+            throw unsupported(
+                    "Campo '" + member.name() + "' não encontrado em '" + receiverClass + "'.");
+        }
+        return new ResolvedField(receiver, field);
     }
 
     private boolean isStringExpression(ExpressionInterface expression, IRProgram ir) {
@@ -408,11 +562,13 @@ public final class IRGenerator {
 
     private Operand emitCall(IRProgram ir, CallRecord call, boolean keepResult) {
         List<Operand> arguments = new ArrayList<>();
-        for (ExpressionInterface argument : call.arguments()) arguments.add(expression(ir, argument));
+        for (ExpressionInterface argument : call.arguments())
+            arguments.add(expression(ir, argument));
 
         String targetLabel = resolveCallTarget(call, arguments);
         FunctionRecord target = functionsByLabel.get(targetLabel);
-        if (target == null) throw unsupported("Não foi possível resolver a função chamada '" + call.name() + "'.");
+        if (target == null)
+            throw unsupported("Não foi possível resolver a função chamada '" + call.name() + "'.");
         if (arguments.size() != target.parameters().size()) {
             throw unsupported("Quantidade de argumentos incompatível para '" + call.name() + "'.");
         }
@@ -435,15 +591,18 @@ public final class IRGenerator {
     private String resolveCallTarget(CallRecord call, List<Operand> arguments) {
         List<String> candidateLabels = new ArrayList<>();
         for (String imported : call.staticImports()) {
-            if (!imported.startsWith("static:")) continue;
+            if (!imported.startsWith("static:"))
+                continue;
             String target = imported.substring("static:".length());
             boolean onDemand = target.endsWith(".*");
             String ownerName = onDemand ? target.substring(0, target.length() - 2)
                     : target.substring(0, target.lastIndexOf('.'));
             String importedMember = onDemand ? call.name() : target.substring(target.lastIndexOf('.') + 1);
-            if (!importedMember.equals(call.name())) continue;
+            if (!importedMember.equals(call.name()))
+                continue;
             ClassRecord owner = classes.get(ownerName);
-            if (owner != null) addMethods(candidateLabels, owner, call.name());
+            if (owner != null)
+                addMethods(candidateLabels, owner, call.name());
         }
         if (candidateLabels.isEmpty()) {
             ClassRecord owner = classes.get(currentClassName);
@@ -458,13 +617,15 @@ public final class IRGenerator {
         boolean ambiguous = false;
         for (String label : candidateLabels.stream().distinct().toList()) {
             FunctionRecord function = functionsByLabel.get(label);
-            if (function == null || function.parameters().size() != arguments.size()) continue;
+            if (function == null || function.parameters().size() != arguments.size())
+                continue;
             int score = 0;
             boolean applicable = true;
             for (int index = 0; index < arguments.size(); index++) {
                 Operand.Type actual = arguments.get(index).type();
                 Operand.Type expected = typeOf(function.parameters().get(index).type());
-                if (actual == expected) continue;
+                if (actual == expected)
+                    continue;
                 if (actual == Operand.Type.I32 && expected == Operand.Type.I64) {
                     score++;
                     continue;
@@ -476,7 +637,8 @@ public final class IRGenerator {
                 applicable = false;
                 break;
             }
-            if (!applicable) continue;
+            if (!applicable)
+                continue;
             if (score < bestScore) {
                 best = label;
                 bestScore = score;
@@ -485,8 +647,10 @@ public final class IRGenerator {
                 ambiguous = true;
             }
         }
-        if (ambiguous) throw unsupported("Chamada ambígua de '" + call.name() + "' na geração de IR.");
-        if (best == null) throw unsupported("Nenhuma sobrecarga suportada corresponde à chamada '" + call.name() + "'.");
+        if (ambiguous)
+            throw unsupported("Chamada ambígua de '" + call.name() + "' na geração de IR.");
+        if (best == null)
+            throw unsupported("Nenhuma sobrecarga suportada corresponde à chamada '" + call.name() + "'.");
         return best;
     }
 
@@ -499,7 +663,8 @@ public final class IRGenerator {
     }
 
     private Operand coerce(IRProgram ir, Operand source, Operand.Type expected) {
-        if (source.type() == expected) return source;
+        if (source.type() == expected)
+            return source;
         if (source.type() == Operand.Type.I32 && expected == Operand.Type.I64) {
             Operand converted = Operand.temporary("t" + nextTemp++, Operand.Type.I64);
             ir.add(new IRInstruction(IROpCode.CAST_I32_TO_I64, converted, source, null));
@@ -546,9 +711,11 @@ public final class IRGenerator {
     }
 
     private String mangleType(String type) {
-        if (type.equals("String[]")) return "String_array";
+        if (type.equals("String[]"))
+            return "String_array";
         if (type.equals("int") || type.equals("long") || type.equals("double")
-                || type.equals("boolean") || type.equals("void")) return type;
+                || type.equals("boolean") || type.equals("void"))
+            return type;
         StringBuilder encoded = new StringBuilder("T");
         type.codePoints().forEach(codePoint -> encoded.append('_')
                 .append(Integer.toHexString(codePoint)).append('_'));

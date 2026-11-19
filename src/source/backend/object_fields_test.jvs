@@ -1,0 +1,26 @@
+public class Pessoa {
+    int idade;
+    long documento;
+    double altura;
+    boolean ativo;
+}
+
+public class ObjectFieldsTest {
+    public static func void main(String[] args) {
+        Pessoa pessoa = new Pessoa();
+
+        pessoa.idade = 18;
+        pessoa.documento = 3000000002L;
+        pessoa.altura = 1.75;
+        pessoa.ativo = True;
+
+        print pessoa.idade;
+        print pessoa.documento;
+        print pessoa.altura;
+        print pessoa.ativo;
+
+        pessoa.idade = 25;
+        print pessoa.idade;
+        return;
+    }
+}

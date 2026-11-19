@@ -7,6 +7,7 @@ import java.nio.file.Path;
 import src.ast.records.ProgramRecord;
 import src.backend.asm.NasmGenerator;
 import src.backend.ir.IRGenerator;
+import src.backend.memory.ObjectLayout;
 import src.backend.optimization.IROptimizer;
 import src.exceptions.SemanticException;
 import src.semantic.SemanticAnalyzer;
@@ -41,8 +42,9 @@ public class ProgramAnalyzer {
     private String analyzeProgram(ProgramRecord program) {
         SemanticAnalyzer semantic = new SemanticAnalyzer();
         semantic.visit(program);
+        var classLayouts = new ObjectLayout().calculate(program);
 
-        var ir = new IRGenerator().generate(program);
+        var ir = new IRGenerator(classLayouts).generate(program);
         ir = new IROptimizer().optimize(ir);
         return new NasmGenerator().generate(ir);
     }

@@ -1,0 +1,10 @@
+public class ModBackendTest {
+    public static func int remainder(int dividend, int divisor) {
+        return mod dividend, divisor;
+    }
+
+    public static func void main(String[] args) {
+        print remainder(17, 5);
+        return;
+    }
+}

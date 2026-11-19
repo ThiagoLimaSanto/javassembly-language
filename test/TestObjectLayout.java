@@ -1,9 +1,10 @@
-package src;
+package test;
 
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Map;
 
+import src.Frontend;
 import src.ast.records.ProgramRecord;
 import src.backend.memory.ClassLayout;
 import src.backend.memory.FieldLayout;
@@ -16,7 +17,7 @@ public class TestObjectLayout {
         ObjectLayout objectLayout = new ObjectLayout();
 
         ProgramRecord ast = Frontend.loadProject(
-            Path.of("src/teste.jvs")
+            Path.of("src/source/backend/object_fields_test.jvs")
         );
 
         Map<String, ClassLayout> layouts =

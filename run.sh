@@ -14,5 +14,5 @@ mapfile -t java_sources < <(find src -name '*.java' -print)
 javac -d out "${java_sources[@]}"
 java -cp out src.Main "$source_file"
 nasm -f elf64 "$asm_file" -o "$object_dir/$program_name.o"
-gcc -no-pie "$object_dir/$program_name.o" -o "$executable_dir/$program_name"
+ld -o "$executable_dir/$program_name" "$object_dir/$program_name.o"
 "$executable_dir/$program_name"

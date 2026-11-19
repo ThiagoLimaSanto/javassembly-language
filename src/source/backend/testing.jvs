@@ -1,0 +1,9 @@
+public class IRSmokeTest {
+
+    public static func void main(String[] args) {
+        int total = add 2, 5;
+        printf "resultado: %d\n", total;
+
+        return;
+    }
+}

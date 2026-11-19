@@ -1,0 +1,16 @@
+public class PrintfDoubleExpressionTest {
+    // Saída esperada:
+    // sum=3.750000 mixed=2.500000 negative=-4.500000 function=3.000000
+    public static func double multiply(double left, double right) {
+        return mul left, right;
+    }
+
+    public static func void main(String[] args) {
+        double sum = add 1.5, 2.25;
+        double mixed = add 2, 0.5;
+        double negative = neg 4.5;
+
+        printf "sum=%lf mixed=%lf negative=%lf function=%lf\n",
+                sum, mixed, negative, multiply(1.5, 2.0);
+    }
+}
