@@ -57,6 +57,10 @@ public class Lexer {
             Map.entry("free", TokenType.FREE),
 
             Map.entry("return", TokenType.RETURN),
+            Map.entry("throw", TokenType.THROW),
+            Map.entry("try", TokenType.TRY),
+            Map.entry("catch", TokenType.CATCH),
+            Map.entry("finally", TokenType.FINALLY),
             Map.entry("while", TokenType.WHILE),
             Map.entry("for", TokenType.FOR),
             Map.entry("this", TokenType.THIS),

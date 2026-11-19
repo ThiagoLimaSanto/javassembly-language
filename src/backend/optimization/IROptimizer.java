@@ -58,6 +58,7 @@ public class IROptimizer {
             next = propagateConstants(next);
             next = propagateStaticConstants(next);
             next = simplifyConstantBranches(next);
+            next = removeRedundantJumps(next);
             next = removeUnreachable(next);
             next = propagateCopies(next);
             next = simplifyIntegerIdentity(next);
@@ -101,6 +102,13 @@ public class IROptimizer {
                 case JUMP -> addJumpEdge(block, labels, last.destination());
                 case JUMP_IF_FALSE, JUMP_IF_TRUE -> {
                     addJumpEdge(block, labels, last.destination());
+                    addFallthroughEdge(blocks, index, block);
+                }
+                case THROW -> {
+                    if (last.destination() != null) addJumpEdge(block, labels, last.destination());
+                }
+                case CHECK_EXCEPTION -> {
+                    if (last.destination() != null) addJumpEdge(block, labels, last.destination());
                     addFallthroughEdge(blocks, index, block);
                 }
                 case RETURN -> {
@@ -292,6 +300,7 @@ public class IROptimizer {
         }
         if (instruction.opCode() == IROpCode.CALL || instruction.opCode() == IROpCode.CALL_VIRTUAL)
             constants.clear();
+        if (isExceptionBarrier(instruction.opCode())) constants.clear();
     }
 
     private IRProgram propagateStaticConstants(IRProgram input) {
@@ -382,6 +391,31 @@ public class IROptimizer {
         return output;
     }
 
+    private IRProgram removeRedundantJumps(IRProgram input) {
+        List<IRInstruction> instructions = input.instructions();
+        IRProgram output = new IRProgram();
+        for (int index = 0; index < instructions.size(); index++) {
+            IRInstruction instruction = instructions.get(index);
+            if (instruction.opCode() == IROpCode.JUMP
+                    && instruction.destination() != null
+                    && index + 1 < instructions.size()) {
+                String target = instruction.destination().value().toString();
+                int next = index + 1;
+                while (next < instructions.size()
+                        && instructions.get(next).opCode() == IROpCode.LABEL
+                        && instructions.get(next).destination() != null) {
+                    if (target.equals(instructions.get(next).destination().value().toString())) {
+                        instruction = null;
+                        break;
+                    }
+                    next++;
+                }
+            }
+            if (instruction != null) output.add(instruction);
+        }
+        return output;
+    }
+
     private IRProgram propagateCopies(IRProgram input) {
         IRProgram output = new IRProgram();
         for (BasicBlock block : buildControlFlowGraph(input)) {
@@ -389,7 +423,7 @@ public class IROptimizer {
             for (IRInstruction instruction : block.instructions) {
                 IRInstruction rewritten = rewriteCopies(instruction, copies);
                 output.add(rewritten);
-                if (isHeapMutation(rewritten.opCode()))
+                if (isOptimizationBarrier(rewritten.opCode()))
                     copies.clear();
 
                 Operand destination = rewritten.destination();
@@ -439,7 +473,7 @@ public class IROptimizer {
             Map<ExpressionKey, Operand> available = new HashMap<>();
             for (IRInstruction instruction : block.instructions) {
                 Operand destination = instruction.destination();
-                if (isHeapMutation(instruction.opCode())) {
+                if (isOptimizationBarrier(instruction.opCode())) {
                     available.clear();
                 }
                 if (destination != null && destination.kind() == Operand.Kind.VARIABLE) {
@@ -872,12 +906,21 @@ public class IROptimizer {
         };
     }
 
-    private boolean isHeapMutation(IROpCode opcode) {
+    private boolean isOptimizationBarrier(IROpCode opcode) {
         return switch (opcode) {
             case CALL, CALL_VIRTUAL, ALLOC_OBJECT, FREE_OBJECT, ALLOC_ARRAY, FREE_ARRAY,
-                    STORE_FIELD, STORE_STATIC, STORE_ARRAY -> true;
+                    STORE_FIELD, STORE_STATIC, STORE_ARRAY,
+                    THROW, CHECK_EXCEPTION, GET_EXCEPTION, CLEAR_EXCEPTION, CATCH_MATCH -> true;
             default -> false;
         };
+    }
+
+    private boolean isExceptionBarrier(IROpCode opcode) {
+        return opcode == IROpCode.THROW
+                || opcode == IROpCode.CHECK_EXCEPTION
+                || opcode == IROpCode.GET_EXCEPTION
+                || opcode == IROpCode.CLEAR_EXCEPTION
+                || opcode == IROpCode.CATCH_MATCH;
     }
 
     private boolean isFreeOperation(IROpCode opcode) {
@@ -900,7 +943,8 @@ public class IROptimizer {
 
     private boolean isTerminator(IROpCode opcode) {
         return opcode == IROpCode.JUMP || opcode == IROpCode.JUMP_IF_FALSE
-                || opcode == IROpCode.JUMP_IF_TRUE || opcode == IROpCode.RETURN;
+                || opcode == IROpCode.JUMP_IF_TRUE || opcode == IROpCode.RETURN
+                || opcode == IROpCode.THROW || opcode == IROpCode.CHECK_EXCEPTION;
     }
 
     private static boolean isFunctionLabel(IRInstruction instruction) {

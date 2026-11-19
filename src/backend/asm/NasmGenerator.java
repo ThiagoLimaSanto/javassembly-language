@@ -139,6 +139,8 @@ public class NasmGenerator {
         appendRuntimeMessage(asm, "__arithmetic_error_message", new ArithmeticException());
         appendRuntimeMessage(asm, "__out_of_memory_message", new OutOfMemoryError());
         appendRuntimeMessage(asm, "__abstract_method_message", new AbstractMethodError());
+        asm.append("__uncaught_exception_message: db \"Uncaught exception\", 10, 0\n");
+        asm.append("__uncaught_exception_message_length equ $ - __uncaught_exception_message - 1\n");
         if (!stringLabels.isEmpty()) {
             for (Map.Entry<String, String> entry : stringLabels.entrySet()) {
                 asm.append(entry.getValue()).append(": db ")
@@ -152,6 +154,7 @@ public class NasmGenerator {
         appendStaticStorage(asm);
         asm.append("__heap_start: resq 1\n");
         asm.append("__heap_end: resq 1\n");
+        asm.append("__jvs_exception_ptr: resq 1\n");
         asm.append("__number_buffer: resb 32\n\n");
         asm.append("__scanner_token: resb 4096\n");
         asm.append("__scanner_byte: resb 1\n");
@@ -340,6 +343,8 @@ public class NasmGenerator {
         asm.append("    call __JVS.static_init__void__ret_void\n");
         asm.append("    lea rdi, [rsp+8]\n");
         asm.append("    call ").append(entryFunction).append("\n");
+        asm.append("    cmp qword [rel __jvs_exception_ptr], 0\n");
+        asm.append("    jne __uncaught_exception\n");
         asm.append("    xor edi, edi\n");
         asm.append("    mov eax, 60\n");
         asm.append("    syscall\n");
@@ -469,6 +474,33 @@ public class NasmGenerator {
             case CALL -> emitCall(asm, instruction);
 
             case CALL_VIRTUAL -> emitVirtualCall(asm, instruction);
+
+            case THROW -> {
+                loadI64(asm, instruction.left(), "rax");
+                asm.append("    mov qword [rel __jvs_exception_ptr], rax\n");
+                if (instruction.destination() != null) {
+                    asm.append("    jmp ").append(instruction.destination().value()).append('\n');
+                } else {
+                    asm.append("    xor eax, eax\n    leave\n    ret\n");
+                }
+            }
+            case CHECK_EXCEPTION -> {
+                asm.append("    cmp qword [rel __jvs_exception_ptr], 0\n");
+                if (instruction.destination() != null) {
+                    asm.append("    jne ").append(instruction.destination().value()).append('\n');
+                } else {
+                    String noException = "__exception_clear_" + nextFreeLabel++;
+                    asm.append("    je ").append(noException).append('\n')
+                            .append("    xor eax, eax\n    leave\n    ret\n")
+                            .append(noException).append(":\n");
+                }
+            }
+            case GET_EXCEPTION -> {
+                asm.append("    mov rax, qword [rel __jvs_exception_ptr]\n");
+                storeI64(asm, instruction.destination(), "rax");
+            }
+            case CLEAR_EXCEPTION -> asm.append("    mov qword [rel __jvs_exception_ptr], 0\n");
+            case CATCH_MATCH -> emitCatchMatch(asm, instruction);
 
             case LOAD_FIELD -> emitFieldLoad(asm, instruction);
 
@@ -1632,6 +1664,43 @@ public class NasmGenerator {
 
         asm.append("    call r10\n");
         storeCallResult(asm, instruction.destination());
+    }
+
+    private void emitCatchMatch(StringBuilder asm, IRInstruction instruction) {
+        if (sourceProgram == null || instruction.destination() == null
+                || instruction.right() == null || instruction.right().kind() != Operand.Kind.LABEL) {
+            throw new InvalidIRException("CATCH_MATCH exige programa fonte e tipo catch.");
+        }
+        String catchType = instruction.right().value().toString();
+        String matchLabel = "__catch_match_" + nextFreeLabel++;
+        String doneLabel = "__catch_done_" + nextFreeLabel++;
+        asm.append("    mov rax, qword [rel __jvs_exception_ptr]\n");
+        asm.append("    test rax, rax\n    jz ").append(doneLabel).append("_false\n");
+        asm.append("    mov rax, qword [rax]\n");
+        for (ClassRecord candidate : sourceProgram.classes()) {
+            if (!isClassSubtype(candidate, catchType)) continue;
+            asm.append("    lea r10, [rel __vtable_").append(candidate.name()).append("]\n");
+            asm.append("    cmp rax, r10\n    je ").append(matchLabel).append('\n');
+        }
+        asm.append(doneLabel).append("_false:\n");
+        asm.append("    mov eax, 0\n");
+        asm.append("    jmp ").append(doneLabel).append("\n");
+        asm.append(matchLabel).append(":\n    mov eax, 1\n");
+        asm.append(doneLabel).append(":\n");
+        storeI32(asm, instruction.destination(), "eax");
+    }
+
+    private boolean isClassSubtype(ClassRecord candidate, String targetName) {
+        String current = candidate.name();
+        while (current != null) {
+            if (current.equals(targetName)) return true;
+            String currentName = current;
+            ClassRecord node = sourceProgram.classes().stream()
+                    .filter(type -> type.name().equals(currentName))
+                    .findFirst().orElse(null);
+            current = node == null ? null : node.superClass();
+        }
+        return false;
     }
 
     private void storeCallResult(StringBuilder asm, Operand destination) {

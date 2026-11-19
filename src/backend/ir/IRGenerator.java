@@ -45,6 +45,9 @@ import src.ast.records.SuperCallRecord;
 import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
+import src.ast.records.ThrowRecord;
+import src.ast.records.TryRecord;
+import src.ast.records.CatchRecord;
 import src.backend.memory.ClassLayout;
 import src.backend.memory.FieldLayout;
 import src.backend.memory.StaticFieldSupport;
@@ -78,6 +81,8 @@ public final class IRGenerator {
     private int nextTemp;
     private int nextLabel;
     private int nextVariable;
+    private final Deque<String> exceptionHandlers = new ArrayDeque<>();
+    private final Deque<BlockRecord> activeFinallyBlocks = new ArrayDeque<>();
     private String currentClassName;
     private FunctionRecord currentFunction;
 
@@ -93,6 +98,8 @@ public final class IRGenerator {
         nextTemp = 0;
         nextLabel = 0;
         nextVariable = 0;
+        exceptionHandlers.clear();
+        activeFinallyBlocks.clear();
         classes.clear();
         interfaces.clear();
         functionsByLabel.clear();
@@ -374,6 +381,7 @@ public final class IRGenerator {
                     Operand.label(constructorLabel(targetClass, targetConstructor)),
                     null,
                     callArguments));
+            emitExceptionCheck(ir);
         } else if (!invocationArguments.isEmpty()) {
             throw unsupported("O construtor de Object não aceita argumentos.");
         }
@@ -583,7 +591,25 @@ public final class IRGenerator {
             if (value != null) {
                 value = coerce(ir, value, typeOf(currentFunction.returnType()));
             }
+            List<BlockRecord> cleanups = new ArrayList<>(activeFinallyBlocks);
+            for (BlockRecord finallyBlock : cleanups) {
+                activeFinallyBlocks.pop();
+                emitStatement(ir, finallyBlock);
+            }
+            for (int index = cleanups.size() - 1; index >= 0; index--) {
+                activeFinallyBlocks.push(cleanups.get(index));
+            }
             ir.add(new IRInstruction(IROpCode.RETURN, null, value, null));
+        } else if (statement instanceof ThrowRecord thrown) {
+            Operand exception = expression(ir, thrown.expression());
+            if (exception.type() != Operand.Type.REF) {
+                throw unsupported("throw exige referência a um objeto.");
+            }
+            String handler = exceptionHandlers.peek();
+            ir.add(new IRInstruction(IROpCode.THROW,
+                    handler == null ? null : Operand.label(handler), exception, null));
+        } else if (statement instanceof TryRecord tryRecord) {
+            emitTryStatement(ir, tryRecord);
         } else if (statement instanceof IfRecord conditional) {
             String elseLabel = newLabel();
             String endLabel = newLabel();
@@ -782,6 +808,60 @@ public final class IRGenerator {
         } else {
             throw unsupported("Comando ainda não suportado: " + statement.getClass().getSimpleName() + ".");
         }
+    }
+
+    private void emitTryStatement(IRProgram ir, TryRecord statement) {
+        String exceptionEntry = newLabel();
+        String finallyLabel = statement.finallyBlock() == null ? null : newLabel();
+        String endLabel = newLabel();
+        String outerHandler = exceptionHandlers.peek();
+        exceptionHandlers.push(exceptionEntry);
+        if (statement.finallyBlock() != null) activeFinallyBlocks.push(statement.finallyBlock());
+        emitStatement(ir, statement.tryBlock());
+        exceptionHandlers.pop();
+        ir.add(new IRInstruction(IROpCode.JUMP,
+                Operand.label(finallyLabel == null ? endLabel : finallyLabel), null, null));
+        ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(exceptionEntry), null, null));
+
+        for (CatchRecord handler : statement.catches()) {
+            String nextCatch = newLabel();
+            Operand matches = Operand.temporary("t" + nextTemp++, Operand.Type.BOOL);
+            ir.add(new IRInstruction(IROpCode.CATCH_MATCH, matches,
+                    null, Operand.label(handler.type().name())));
+            ir.add(new IRInstruction(IROpCode.JUMP_IF_FALSE,
+                    Operand.label(nextCatch), matches, null));
+            pushVariableScope();
+            Operand exception = declareVariable(handler.name(), Operand.Type.REF);
+            registerReferenceType(exception, handler.type());
+            ir.add(new IRInstruction(IROpCode.GET_EXCEPTION, exception, null, null));
+            ir.add(new IRInstruction(IROpCode.CLEAR_EXCEPTION, null, null, null));
+            String catchExceptionHandler = finallyLabel != null ? finallyLabel : outerHandler;
+            if (catchExceptionHandler != null) exceptionHandlers.push(catchExceptionHandler);
+            emitStatement(ir, handler.block());
+            if (catchExceptionHandler != null) exceptionHandlers.pop();
+            popVariableScope();
+            ir.add(new IRInstruction(IROpCode.JUMP,
+                    Operand.label(finallyLabel == null ? endLabel : finallyLabel), null, null));
+            ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(nextCatch), null, null));
+        }
+
+        if (finallyLabel != null) {
+            ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(finallyLabel), null, null));
+            activeFinallyBlocks.pop();
+            emitStatement(ir, statement.finallyBlock());
+            ir.add(new IRInstruction(IROpCode.CHECK_EXCEPTION,
+                    outerHandler == null ? null : Operand.label(outerHandler), null, null));
+        } else {
+            ir.add(new IRInstruction(IROpCode.CHECK_EXCEPTION,
+                    outerHandler == null ? null : Operand.label(outerHandler), null, null));
+        }
+        ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(endLabel), null, null));
+    }
+
+    private void emitExceptionCheck(IRProgram ir) {
+        String handler = exceptionHandlers.peek();
+        ir.add(new IRInstruction(IROpCode.CHECK_EXCEPTION,
+                handler == null ? null : Operand.label(handler), null, null));
     }
 
     private void pushVariableScope() {
@@ -1035,6 +1115,7 @@ public final class IRGenerator {
                     Operand.label(constructorLabel(classes.get(className), constructor)),
                     null,
                     constructorArguments));
+            emitExceptionCheck(ir);
             return result;
         }
         if (expression instanceof CallRecord call)
@@ -1376,6 +1457,7 @@ public final class IRGenerator {
                 ? Operand.temporary("t" + nextTemp++, typeOf(target.returnType()))
                 : null;
         ir.add(new IRInstruction(IROpCode.CALL, destination, Operand.label(targetLabel), null, arguments));
+        emitExceptionCheck(ir);
         if (destination != null) {
             registerReferenceType(destination, target.returnType());
         }
@@ -1416,6 +1498,7 @@ public final class IRGenerator {
                     Operand.label(targetLabel),
                     null,
                     convertedArguments));
+            emitExceptionCheck(ir);
             if (destination != null) {
                 registerReferenceType(destination, target.returnType());
             }
@@ -1613,6 +1696,7 @@ public final class IRGenerator {
                 : null;
         ir.add(new IRInstruction(
                 IROpCode.CALL, destination, Operand.label(targetLabel), null, convertedArguments));
+        emitExceptionCheck(ir);
         if (destination != null) registerReferenceType(destination, target.returnType());
         return destination;
     }
@@ -1778,6 +1862,7 @@ public final class IRGenerator {
                     receiver,
                     Operand.constant(virtualMethodTable.slot(function), Operand.Type.I32),
                     convertedArguments));
+            emitExceptionCheck(ir);
         } else {
             List<Operand> allArguments = new ArrayList<>(convertedArguments.size() + 1);
             allArguments.add(receiver);
@@ -1788,6 +1873,7 @@ public final class IRGenerator {
                     Operand.label(functionLabel(method.owner(), function)),
                     null,
                     allArguments));
+            emitExceptionCheck(ir);
         }
         if (destination != null) {
             registerReferenceType(destination, function.returnType());

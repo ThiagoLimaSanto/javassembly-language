@@ -307,6 +307,26 @@ public class ASTPrinter implements ASTVisitor {
     }
 
     @Override
+    public void visit(src.ast.records.ThrowRecord node) {
+        printLine("Throw");
+        visitChild(node.expression());
+    }
+
+    @Override
+    public void visit(src.ast.records.TryRecord node) {
+        printLine("Try");
+        visitChild(node.tryBlock());
+        for (src.ast.records.CatchRecord handler : node.catches()) {
+            printLine("Catch " + handler.type().name() + " " + handler.name());
+            visitChild(handler.block());
+        }
+        if (node.finallyBlock() != null) {
+            printLine("Finally");
+            visitChild(node.finallyBlock());
+        }
+    }
+
+    @Override
     public void visit(CallRecord node) {
         printLine("Chamada: " + node.name()
                 + (node.arguments().isEmpty() ? " (sem argumentos)" : ""));

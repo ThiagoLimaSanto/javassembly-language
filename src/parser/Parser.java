@@ -47,6 +47,9 @@ import src.ast.records.TypeRecord;
 import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
+import src.ast.records.ThrowRecord;
+import src.ast.records.TryRecord;
+import src.ast.records.CatchRecord;
 import src.exceptions.DoubleOutOfRangeException;
 import src.exceptions.CompilerInvariantException;
 import src.exceptions.LongOutOfRangeException;
@@ -1059,6 +1062,10 @@ public class Parser {
                         case RETURN ->
                                 returnStatement();
 
+                        case THROW -> throwStatement();
+
+                        case TRY -> tryStatement();
+
                         case REGISTER ->
                                 registerAssignment();
 
@@ -1142,6 +1149,38 @@ public class Parser {
                                 elseBranch,
                                 ifToken.getLine(),
                                 ifToken.getColumn());
+        }
+
+        private ThrowRecord throwStatement() {
+                Token token = tokens.consume(TokenType.THROW, "Esperado 'throw'");
+                ExpressionInterface expression = expression();
+                tokens.consume(TokenType.SEMICOLON, "Esperado ';' após throw");
+                return new ThrowRecord(expression, token.getLine(), token.getColumn());
+        }
+
+        private TryRecord tryStatement() {
+                Token token = tokens.consume(TokenType.TRY, "Esperado 'try'");
+                BlockRecord tryBlock = block();
+                List<CatchRecord> catches = new ArrayList<>();
+                while (tokens.verify(TokenType.CATCH)) {
+                        Token catchToken = tokens.consume(TokenType.CATCH, "Esperado 'catch'");
+                        tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '(' após catch");
+                        TypeRecord type = type(false);
+                        Token name = tokens.consume(TokenType.IDENTIFIER, "Esperado nome da variável catch");
+                        tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')' após parâmetro catch");
+                        catches.add(new CatchRecord(type, name.getLexeme(), block(),
+                                catchToken.getLine(), catchToken.getColumn()));
+                }
+                BlockRecord finallyBlock = null;
+                if (tokens.verify(TokenType.FINALLY)) {
+                        tokens.consume(TokenType.FINALLY, "Esperado 'finally'");
+                        finallyBlock = block();
+                }
+                if (catches.isEmpty() && finallyBlock == null) {
+                        throw new SyntacticException("try precisa ter ao menos um catch ou finally",
+                                token.getLine(), token.getColumn());
+                }
+                return new TryRecord(tryBlock, catches, finallyBlock, token.getLine(), token.getColumn());
         }
 
         private StatementInterface thisStatement() {

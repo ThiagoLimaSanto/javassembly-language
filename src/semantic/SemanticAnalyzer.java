@@ -778,6 +778,17 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (statement instanceof ReturnRecord) {
             return false;
         }
+        if (statement instanceof ThrowRecord) {
+            return false;
+        }
+        if (statement instanceof TryRecord tryStatement) {
+            boolean tryCanComplete = canCompleteNormally(tryStatement.tryBlock());
+            boolean catchCanComplete = tryStatement.catches().stream()
+                    .anyMatch(handler -> canCompleteNormally(handler.block()));
+            boolean finallyCanComplete = tryStatement.finallyBlock() == null
+                    || canCompleteNormally(tryStatement.finallyBlock());
+            return finallyCanComplete && (tryCanComplete || catchCanComplete);
+        }
         if (statement instanceof BlockRecord block) {
             return canCompleteNormally(block);
         }
@@ -3863,6 +3874,64 @@ public class SemanticAnalyzer implements ASTVisitor {
                 node.value(),
                 node.line(),
                 node.column());
+    }
+
+    @Override
+    public void visit(ThrowRecord node) {
+        SemanticType thrown = getExpressionType(node.expression());
+        if (!thrown.isClass() || !isSubclassOf(thrown.className(), "Throwable")) {
+            throw new SemanticException("throw exige um objeto cuja classe estenda Throwable.",
+                    node.line(), node.column());
+        }
+    }
+
+    @Override
+    public void visit(TryRecord node) {
+        Set<VariableSymbolRecord> assignedBefore = new HashSet<>(definitelyAssignedVariables);
+        Set<String> fieldsBefore = new HashSet<>(assignedFinalFields);
+        node.tryBlock().accept(this);
+        List<Set<VariableSymbolRecord>> branchAssignments = new ArrayList<>();
+        branchAssignments.add(new HashSet<>(definitelyAssignedVariables));
+        List<Set<String>> branchFields = new ArrayList<>();
+        branchFields.add(new HashSet<>(assignedFinalFields));
+        Set<String> earlierCatchTypes = new HashSet<>();
+        for (CatchRecord handler : node.catches()) {
+            validateTypeExists(handler.type(), false, handler.line(), handler.column());
+            SemanticType catchType = convertType(handler.type());
+            if (!catchType.isClass() || !isSubclassOf(catchType.className(), "Throwable")) {
+                throw new SemanticException("O tipo do catch deve estender Throwable.",
+                        handler.line(), handler.column());
+            }
+            if (earlierCatchTypes.stream().anyMatch(previous ->
+                    isSubclassOf(catchType.className(), previous))) {
+                throw new SemanticException("Este catch é inalcançável porque uma exceção mais geral já foi capturada.",
+                        handler.line(), handler.column());
+            }
+            earlierCatchTypes.add(catchType.className());
+            definitelyAssignedVariables = new HashSet<>(assignedBefore);
+            assignedFinalFields = new HashSet<>(fieldsBefore);
+            enterScope();
+            try {
+                VariableSymbolRecord variable = new VariableSymbolRecord(handler.name(), catchType,
+                        handler.line(), handler.column());
+                currentScope.define(variable);
+                definitelyAssignedVariables.add(variable);
+                handler.block().accept(this);
+            } finally {
+                exitScope();
+            }
+            branchAssignments.add(new HashSet<>(definitelyAssignedVariables));
+            branchFields.add(new HashSet<>(assignedFinalFields));
+        }
+        definitelyAssignedVariables = branchAssignments.get(0);
+        assignedFinalFields = branchFields.get(0);
+        for (int i = 1; i < branchAssignments.size(); i++) {
+            definitelyAssignedVariables.retainAll(branchAssignments.get(i));
+            assignedFinalFields.retainAll(branchFields.get(i));
+        }
+        if (node.finallyBlock() != null) {
+            node.finallyBlock().accept(this);
+        }
     }
 
 

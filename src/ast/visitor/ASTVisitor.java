@@ -36,6 +36,8 @@ import src.ast.records.ThisRecord;
 import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
+import src.ast.records.ThrowRecord;
+import src.ast.records.TryRecord;
 
 public interface ASTVisitor {
 
@@ -84,6 +86,10 @@ public interface ASTVisitor {
     void visit(ParameterRecord node);
 
     void visit(ReturnRecord node);
+
+    void visit(ThrowRecord node);
+
+    void visit(TryRecord node);
 
     void visit(CallRecord node);
 
