@@ -56,6 +56,7 @@ public class IROptimizer {
         for (int round = 0; round < MAX_OPTIMIZATION_ROUNDS; round++) {
             IRProgram next = removeUnreachable(current);
             next = propagateConstants(next);
+            next = propagateStaticConstants(next);
             next = simplifyConstantBranches(next);
             next = removeUnreachable(next);
             next = propagateCopies(next);
@@ -293,6 +294,51 @@ public class IROptimizer {
             constants.clear();
     }
 
+    private IRProgram propagateStaticConstants(IRProgram input) {
+        IRProgram output = new IRProgram();
+        for (BasicBlock block : buildControlFlowGraph(input)) {
+            Map<String, Operand> values = new HashMap<>();
+            for (IRInstruction instruction : block.instructions) {
+                if (instruction.opCode() == IROpCode.LOAD_STATIC) {
+                    String label = staticFieldLabel(instruction.left());
+                    Operand knownValue = values.get(label);
+                    if (knownValue != null) {
+                        output.add(new IRInstruction(
+                                IROpCode.ASSIGN,
+                                instruction.destination(),
+                                knownValue,
+                                null));
+                    } else {
+                        output.add(instruction);
+                    }
+                    continue;
+                }
+
+                output.add(instruction);
+                if (instruction.opCode() == IROpCode.STORE_STATIC) {
+                    String label = staticFieldLabel(instruction.left());
+                    Operand value = instruction.arguments().size() == 1
+                            ? instruction.arguments().get(0) : null;
+                    if (label != null && value != null && isConstant(value, value.type())) {
+                        values.put(label, value);
+                    } else if (label != null) {
+                        values.remove(label);
+                    }
+                } else if (instruction.opCode() == IROpCode.CALL
+                        || instruction.opCode() == IROpCode.CALL_VIRTUAL) {
+                    // Any called method can write a static field, including through an interface.
+                    values.clear();
+                }
+            }
+        }
+        return output;
+    }
+
+    private String staticFieldLabel(Operand operand) {
+        if (operand == null || operand.kind() != Operand.Kind.LABEL) return null;
+        return operand.value().toString();
+    }
+
     private IRInstruction rewriteOperands(
             IRInstruction instruction,
             Map<Operand, Operand> constants) {
@@ -436,7 +482,7 @@ public class IROptimizer {
     private boolean isCseCandidate(IROpCode opcode) {
         return switch (opcode) {
             case CAST_I32_TO_I64, CAST_I32_TO_F64, CAST_I64_TO_F64,
-                    ADD, SUB, MUL, NEG, LT, GT, LE, GE, EQ, NE ->
+                    ADD, SUB, MUL, NEG, LT, GT, LE, GE, EQ, NE, LOAD_STATIC ->
                 true;
             default -> false;
         };
