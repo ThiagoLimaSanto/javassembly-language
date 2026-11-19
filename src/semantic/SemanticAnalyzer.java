@@ -1068,6 +1068,10 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (staticReceiver != null) {
             return resolveStaticClassMethod(staticReceiver, call);
         }
+        InterfaceRecord staticInterface = resolveStaticInterfaceReceiver(call.receiver());
+        if (staticInterface != null) {
+            return resolveStaticInterfaceMethod(staticInterface, call);
+        }
 
         SemanticType receiverType = getExpressionType(call.receiver());
 
@@ -1245,6 +1249,69 @@ public class SemanticAnalyzer implements ASTVisitor {
                     variable.column());
         }
         return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private InterfaceRecord resolveStaticInterfaceReceiver(ExpressionInterface receiver) {
+        if (!(receiver instanceof VariableRecord variable)
+                || findLocalVariable(variable.name()) != null
+                || findInheritedAttribute(currentClass, variable.name()) != null
+                || resolveStaticClassReceiver(receiver) != null) {
+            return null;
+        }
+        List<InterfaceRecord> matches = interfaces.values().stream()
+                .filter(interfaceNode -> simpleName(interfaceNode.name()).equals(variable.name()))
+                .toList();
+        if (matches.size() > 1) {
+            throw new SemanticException(
+                    "O nome da interface '" + variable.name()
+                            + "' é ambíguo; use o nome qualificado.",
+                    variable.line(), variable.column());
+        }
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private FunctionRecord resolveStaticInterfaceMethod(
+            InterfaceRecord receiverInterface,
+            MemberCallRecord call) {
+        List<SemanticType> argumentTypes = getArgumentTypes(
+                call.arguments(), call.line(), call.column());
+        List<FunctionRecord> candidates = new ArrayList<>();
+        boolean methodFound = false;
+        boolean instanceMethodFound = false;
+        for (FunctionRecord function : receiverInterface.functions()) {
+            if (!function.name().equals(call.name())) continue;
+            methodFound = true;
+            if (!function.isStatic()) {
+                instanceMethodFound = true;
+                continue;
+            }
+            if (function.visibility() == TokenType.PRIVATE
+                    && !java.util.Objects.equals(currentClass, receiverInterface.name())) {
+                continue;
+            }
+            if (matchesCall(function, call.name(), argumentTypes)) {
+                candidates.add(function);
+            }
+        }
+        FunctionRecord bestMatch = mostSpecificMethod(candidates);
+        if (bestMatch != null) return bestMatch;
+        if (candidates.size() > 1) {
+            throw new SemanticException(
+                    "Chamada ambígua do método static '" + call.name() + "'.",
+                    call.line(), call.column());
+        }
+        if (instanceMethodFound) {
+            throw new SemanticException(
+                    "O método de instância '" + call.name()
+                            + "' não pode ser chamado pela interface.",
+                    call.line(), call.column());
+        }
+        throw new SemanticException(
+                methodFound
+                        ? "Nenhum método static '" + call.name() + "' aceita os argumentos informados."
+                        : "Método static '" + call.name() + "' não declarado na interface '"
+                                + receiverInterface.name() + "'.",
+                call.line(), call.column());
     }
 
     private AttributeRecord resolveStaticClassAttribute(
@@ -3825,6 +3892,16 @@ public class SemanticAnalyzer implements ASTVisitor {
                                     + function.name() + "'.",
                             function.line(),
                             function.column());
+                }
+
+                if (function.isStatic()
+                        && (function.isAbstract() || function.isDefault() || function.isFinal()
+                                || function.isNative() || function.block() == null
+                                || function.visibility() == TokenType.PROTECTED)) {
+                    throw new SemanticException(
+                            "Método static de interface precisa ter corpo e não pode ser abstract, "
+                                    + "default, final, native ou protected.",
+                            function.line(), function.column());
                 }
 
                 function.accept(this);

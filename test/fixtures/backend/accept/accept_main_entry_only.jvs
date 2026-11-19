@@ -1,0 +1,13 @@
+class MainEntryHelper {
+    public static func void unused() {
+        printLn 999;
+        return;
+    }
+}
+
+public class MainEntryOnlyTest {
+    public static func void main(String[] args) {
+        printLn 1;
+        return;
+    }
+}

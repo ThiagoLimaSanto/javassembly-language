@@ -12,6 +12,7 @@ import src.backend.ir.IRProgram;
 import src.backend.ir.Operand;
 import src.backend.memory.VirtualMethodTable;
 import src.backend.memory.StaticFieldSupport;
+import src.semantic.EntryPointValidator;
 import src.ast.records.AttributeRecord;
 import src.ast.records.ClassRecord;
 import src.ast.records.ProgramRecord;
@@ -40,6 +41,9 @@ public class NasmGenerator {
     }
 
     public String generate(IRProgram program) {
+        if (sourceProgram != null) {
+            EntryPointValidator.validate(sourceProgram);
+        }
         nextFreeLabel = 0;
         StringBuilder asm = new StringBuilder();
         prepareStringLabels(program.instructions());

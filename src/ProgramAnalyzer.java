@@ -11,6 +11,7 @@ import src.backend.memory.ObjectLayout;
 import src.backend.optimization.IROptimizer;
 import src.exceptions.SemanticException;
 import src.semantic.SemanticAnalyzer;
+import src.semantic.EntryPointValidator;
 
 public class ProgramAnalyzer {
     public void analyze(Path sourceFile) throws IOException {
@@ -46,6 +47,7 @@ public class ProgramAnalyzer {
     private String analyzeProgram(ProgramRecord program) {
         SemanticAnalyzer semantic = new SemanticAnalyzer();
         semantic.visit(program);
+        EntryPointValidator.validate(program);
         var classLayouts = new ObjectLayout().calculate(program);
 
         var ir = new IRGenerator(classLayouts).generate(program);

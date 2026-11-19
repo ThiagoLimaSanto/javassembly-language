@@ -104,14 +104,25 @@ public final class IRGenerator {
         for (InterfaceRecord interfaceNode : ast.interfaces()) {
             interfaces.put(interfaceNode.name(), interfaceNode);
             for (FunctionRecord function : interfaceNode.functions()) {
-                if (function.isStatic() || function.visibility() == TokenType.PRIVATE
-                        || (function.isDefault() && function.block() == null)
-                        || (function.isAbstract() && function.block() != null)
-                        || (!function.isAbstract() && !function.isDefault())) {
+                boolean supportedStatic = function.isStatic()
+                        && function.block() != null
+                        && !function.isAbstract()
+                        && !function.isDefault()
+                        && !function.isFinal()
+                        && !function.isNative();
+                boolean supportedInstance = !function.isStatic()
+                        && function.visibility() != TokenType.PRIVATE
+                        && ((function.isAbstract() && !function.isDefault() && function.block() == null)
+                                || (!function.isAbstract() && function.isDefault()
+                                        && function.block() != null));
+                if (!supportedStatic && !supportedInstance) {
                     throw unsupported("Forma de método de interface ainda não suportada: '"
                             + interfaceNode.name() + "." + function.name() + "'.");
                 }
                 validateFunctionTypes(function);
+                if (function.isStatic()) {
+                    functionsByLabel.put(functionLabel(interfaceNode.name(), function), function);
+                }
             }
         }
 
@@ -141,7 +152,7 @@ public final class IRGenerator {
         for (InterfaceRecord interfaceNode : ast.interfaces()) {
             currentClassName = interfaceNode.name();
             for (FunctionRecord function : interfaceNode.functions()) {
-                if (!function.isDefault()) {
+                if (!function.isDefault() && !function.isStatic()) {
                     continue;
                 }
                 currentFunction = function;
@@ -155,13 +166,15 @@ public final class IRGenerator {
                         Operand.label(functionLabel(interfaceNode.name(), function)),
                         null,
                         null));
-                Operand thisOperand = declareVariable("this", Operand.Type.REF);
-                registerReferenceType(thisOperand, new TypeRecord(interfaceNode.name()));
-                ir.add(new IRInstruction(
-                        IROpCode.PARAM,
-                        thisOperand,
-                        Operand.constant(-1, Operand.Type.I32),
-                        null));
+                if (!function.isStatic()) {
+                    Operand thisOperand = declareVariable("this", Operand.Type.REF);
+                    registerReferenceType(thisOperand, new TypeRecord(interfaceNode.name()));
+                    ir.add(new IRInstruction(
+                            IROpCode.PARAM,
+                            thisOperand,
+                            Operand.constant(-1, Operand.Type.I32),
+                            null));
+                }
                 emitFunctionParameters(ir, function);
                 emitStatement(ir, function.block());
                 if (function.returnType().name().equals("void")) {
@@ -1407,6 +1420,22 @@ public final class IRGenerator {
             return destination;
         }
 
+        InterfaceRecord staticInterface = resolveStaticInterfaceReceiver(call);
+        if (staticInterface != null) {
+            List<Operand> arguments = new ArrayList<>();
+            for (ExpressionInterface argument : call.arguments()) {
+                arguments.add(expression(ir, argument));
+            }
+            FunctionRecord target = resolveStaticInterfaceMethod(
+                    staticInterface, call.name(), arguments);
+            String targetLabel = functionLabel(staticInterface.name(), target);
+            if (!functionsByLabel.containsKey(targetLabel)) {
+                throw unsupported("Método static de interface não foi registrado na IR: "
+                        + targetLabel + ".");
+            }
+            return emitDirectCall(ir, targetLabel, target, arguments, keepResult);
+        }
+
         Operand receiver = expression(ir, call.receiver());
         String receiverClass = sourceTypesByOperand.get(receiver);
         if (receiverClass == null) {
@@ -1456,6 +1485,22 @@ public final class IRGenerator {
         return matches.isEmpty() ? null : matches.get(0);
     }
 
+    private InterfaceRecord resolveStaticInterfaceReceiver(MemberCallRecord call) {
+        if (!(call.receiver() instanceof VariableRecord variable)
+                || resolveVariable(variable.name()) != null
+                || resolveStaticClassReceiver(call) != null) {
+            return null;
+        }
+        List<InterfaceRecord> matches = interfaces.values().stream()
+                .filter(interfaceNode -> simpleName(interfaceNode.name()).equals(variable.name()))
+                .toList();
+        if (matches.size() > 1) {
+            throw unsupported("Nome de interface ambíguo na chamada static: "
+                    + variable.name() + ".");
+        }
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
     private FunctionRecord resolveStaticMethod(
             ClassRecord owner,
             String methodName,
@@ -1497,6 +1542,77 @@ public final class IRGenerator {
         if (ambiguous) throw unsupported("Chamada static ambígua para '" + methodName + "'.");
         if (best == null) throw unsupported("Método static não encontrado: " + methodName + ".");
         return best;
+    }
+
+    private FunctionRecord resolveStaticInterfaceMethod(
+            InterfaceRecord owner,
+            String methodName,
+            List<Operand> arguments) {
+        FunctionRecord best = null;
+        int bestScore = Integer.MAX_VALUE;
+        boolean ambiguous = false;
+        for (FunctionRecord function : owner.functions()) {
+            if (!function.isStatic() || !function.name().equals(methodName)
+                    || function.parameters().size() != arguments.size()) {
+                continue;
+            }
+            int score = 0;
+            boolean applicable = true;
+            for (int index = 0; index < arguments.size(); index++) {
+                Operand.Type actual = arguments.get(index).type();
+                Operand.Type expected = typeOf(function.parameters().get(index).type());
+                if (actual == expected) continue;
+                if (actual == Operand.Type.I32 && expected == Operand.Type.I64) score++;
+                else if (isInteger(actual) && expected == Operand.Type.F64) {
+                    score += actual == Operand.Type.I32 ? 2 : 1;
+                } else {
+                    applicable = false;
+                    break;
+                }
+            }
+            if (!applicable) continue;
+            if (score < bestScore) {
+                best = function;
+                bestScore = score;
+                ambiguous = false;
+            } else if (score == bestScore) {
+                ambiguous = true;
+            }
+        }
+        if (ambiguous) {
+            throw unsupported("Chamada static ambígua para '" + methodName + "' na interface '"
+                    + owner.name() + "'.");
+        }
+        if (best == null) {
+            throw unsupported("Método static não encontrado: " + owner.name() + "." + methodName + ".");
+        }
+        return best;
+    }
+
+    private Operand emitDirectCall(
+            IRProgram ir,
+            String targetLabel,
+            FunctionRecord target,
+            List<Operand> arguments,
+            boolean keepResult) {
+        List<Operand> convertedArguments = new ArrayList<>();
+        for (int index = 0; index < arguments.size(); index++) {
+            convertedArguments.add(coerce(
+                    ir,
+                    arguments.get(index),
+                    typeOf(target.parameters().get(index).type())));
+        }
+        boolean returnsVoid = target.returnType().name().equals("void");
+        if (keepResult && returnsVoid) {
+            throw unsupported("Uma função void não pode ser usada como expressão.");
+        }
+        Operand destination = keepResult
+                ? Operand.temporary("t" + nextTemp++, typeOf(target.returnType()))
+                : null;
+        ir.add(new IRInstruction(
+                IROpCode.CALL, destination, Operand.label(targetLabel), null, convertedArguments));
+        if (destination != null) registerReferenceType(destination, target.returnType());
+        return destination;
     }
 
     private String simpleName(String qualifiedName) {
@@ -1757,12 +1873,22 @@ public final class IRGenerator {
             ClassRecord owner = classes.get(ownerName);
             if (owner != null)
                 addMethods(candidateLabels, owner, call.name());
+            InterfaceRecord interfaceOwner = interfaces.get(ownerName);
+            if (interfaceOwner != null)
+                addInterfaceStaticMethods(candidateLabels, interfaceOwner, call.name());
         }
         if (candidateLabels.isEmpty()) {
             ClassRecord owner = classes.get(currentClassName);
-            while (owner != null) {
-                addMethods(candidateLabels, owner, call.name());
-                owner = owner.superClass() == null ? null : classes.get(owner.superClass());
+            if (owner != null) {
+                while (owner != null) {
+                    addMethods(candidateLabels, owner, call.name());
+                    owner = owner.superClass() == null ? null : classes.get(owner.superClass());
+                }
+            } else {
+                InterfaceRecord interfaceOwner = interfaces.get(currentClassName);
+                if (interfaceOwner != null) {
+                    addInterfaceStaticMethods(candidateLabels, interfaceOwner, call.name());
+                }
             }
         }
 
@@ -1812,6 +1938,17 @@ public final class IRGenerator {
         for (FunctionRecord function : owner.functions()) {
             if (function.name().equals(methodName) && function.isStatic() && !function.isAbstract()) {
                 labels.add(functionLabel(owner, function));
+            }
+        }
+    }
+
+    private void addInterfaceStaticMethods(
+            List<String> labels,
+            InterfaceRecord owner,
+            String methodName) {
+        for (FunctionRecord function : owner.functions()) {
+            if (function.name().equals(methodName) && function.isStatic()) {
+                labels.add(functionLabel(owner.name(), function));
             }
         }
     }
