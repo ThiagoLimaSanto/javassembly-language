@@ -190,7 +190,7 @@ public final class IRGenerator {
             case "readLong" -> "long";
             case "readDouble" -> "double";
             case "readBoolean" -> "boolean";
-            case "readString" -> "String";
+            case "readString", "readLine" -> "String";
             default -> null;
         };
         if (!owner.name().equals("io.Scanner")

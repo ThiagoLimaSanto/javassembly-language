@@ -4,8 +4,8 @@ import io.Scanner;
 
 public class Teste {
     public static func void main(String[] args) {
-        printLn "Digite a sua idade: ";
-        int idade = Scanner.readInt();
-        printfLn "Sua idade = %d", idade;
+        print "Digite o seu nome: ";
+        String name = Scanner.readLine();
+        printfLn "Seu nome é: %s", name;
     }
 }

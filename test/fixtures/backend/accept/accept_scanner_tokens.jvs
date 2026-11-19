@@ -1,0 +1,17 @@
+import io.Scanner;
+
+public class ScannerTokensTest {
+    public static func void main(String[] args) {
+        int integer = Scanner.readInt();
+        long longValue = Scanner.readLong();
+        double decimal = Scanner.readDouble();
+        boolean enabled = Scanner.readBoolean();
+        String word = Scanner.readString();
+        printLn integer;
+        printLn longValue;
+        printLn decimal;
+        printLn enabled;
+        printLn word;
+        return;
+    }
+}

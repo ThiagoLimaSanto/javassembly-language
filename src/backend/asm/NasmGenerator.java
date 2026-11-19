@@ -140,7 +140,7 @@ public class NasmGenerator {
         asm.append("__heap_start: resq 1\n");
         asm.append("__heap_end: resq 1\n");
         asm.append("__number_buffer: resb 32\n\n");
-        asm.append("__scanner_token: resb 256\n");
+        asm.append("__scanner_token: resb 4096\n");
         asm.append("__scanner_byte: resb 1\n");
         asm.append("__scanner_token_length: resq 1\n");
         asm.append("__scanner_string_result: resq 1\n");

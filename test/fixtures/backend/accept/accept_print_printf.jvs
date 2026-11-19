@@ -3,7 +3,7 @@ public class BackendPrintFormat {
         printLn "single expression";
         printLn 42;
         printf "d=%d i=%i ld=%ld u=%u f=%f lf=%lf s=%s b=%b %%\n",
-                7, 8, 9L, 10, 1.25, 2.5, "ok", true;
+                7, 8, 9L, 10, 1.25, 2.5, "ok", True;
         return;
     }
 }

@@ -10,5 +10,7 @@ public class Scanner {
 
     public static native func String readString();
 
+    public static native func String readLine();
+
     public static native func long readLong();
 }

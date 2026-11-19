@@ -1,0 +1,13 @@
+import io.Scanner;
+
+public class ScannerDecimalsTest {
+    public static func void main(String[] args) {
+        double negative = Scanner.readDouble();
+        double small = Scanner.readDouble();
+        double fractional = Scanner.readDouble();
+        printLn negative;
+        printLn small;
+        printLn fractional;
+        return;
+    }
+}

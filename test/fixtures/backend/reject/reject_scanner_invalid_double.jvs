@@ -1,0 +1,8 @@
+import io.Scanner;
+
+public class ScannerInvalidDoubleTest {
+    public static func void main(String[] args) {
+        double value = Scanner.readDouble();
+        return;
+    }
+}

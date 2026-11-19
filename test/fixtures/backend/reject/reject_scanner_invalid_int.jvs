@@ -1,0 +1,8 @@
+import io.Scanner;
+
+public class ScannerInvalidIntTest {
+    public static func void main(String[] args) {
+        int value = Scanner.readInt();
+        return;
+    }
+}

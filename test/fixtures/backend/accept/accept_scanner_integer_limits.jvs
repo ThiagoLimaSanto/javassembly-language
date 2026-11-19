@@ -1,0 +1,15 @@
+import io.Scanner;
+
+public class ScannerIntegerLimitsTest {
+    public static func void main(String[] args) {
+        int minimumInt = Scanner.readInt();
+        int maximumInt = Scanner.readInt();
+        long minimumLong = Scanner.readLong();
+        long maximumLong = Scanner.readLong();
+        printLn minimumInt;
+        printLn maximumInt;
+        printLn minimumLong;
+        printLn maximumLong;
+        return;
+    }
+}

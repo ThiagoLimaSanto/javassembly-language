@@ -11,7 +11,7 @@ public class BackendArrayString {
         doubles[0] = 3.5;
 
         boolean[] booleans = new boolean[1];
-        booleans[0] = true;
+        booleans[0] = True;
 
         String[] strings = new String[1];
         strings[0] = "array string";

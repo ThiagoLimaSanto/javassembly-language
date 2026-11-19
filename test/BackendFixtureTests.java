@@ -100,11 +100,15 @@ public final class BackendFixtureTests {
                 return "ld failed (" + linked.exitCode() + "): " + linked.stderr();
             }
 
-            Process process = new ProcessBuilder(executable.toString())
+            ProcessBuilder execution = new ProcessBuilder(executable.toString())
                     .directory(tempDirectory.toFile())
                     .redirectOutput(stdoutFile.toFile())
-                    .redirectError(stderrFile.toFile())
-                    .start();
+                    .redirectError(stderrFile.toFile());
+            Path inputFile = replaceExtension(fixture, ".in");
+            if (Files.isRegularFile(inputFile)) {
+                execution.redirectInput(inputFile.toFile());
+            }
+            Process process = execution.start();
             int exitCode = process.waitFor();
             String stdout = Files.readString(stdoutFile);
             String stderr = Files.readString(stderrFile);
