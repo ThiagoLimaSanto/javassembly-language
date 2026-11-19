@@ -1,0 +1,21 @@
+public class HeapSplitCoalesceTest {
+    public static func void main(String[] args) {
+        long[] large = new long[10];
+        free(large);
+
+        int[] first = new int[4];
+        int[] second = new int[2];
+        first[0] = 17;
+        second[0] = 25;
+        print first[0];
+        print second[0];
+        free(first);
+        free(second);
+
+        long[] combined = new long[6];
+        print combined.length;
+        print combined[0];
+        free(combined);
+        return;
+    }
+}

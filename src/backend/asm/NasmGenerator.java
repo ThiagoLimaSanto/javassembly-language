@@ -20,11 +20,9 @@ public class NasmGenerator {
     private int nextStringLabel;
     private int nextGpParameter;
     private int nextXmmParameter;
-    private int nextAllocationLabel;
     private int nextFreeLabel;
 
     public String generate(IRProgram program) {
-        nextAllocationLabel = 0;
         nextFreeLabel = 0;
         StringBuilder asm = new StringBuilder();
         prepareStringLabels(program.instructions());
@@ -110,6 +108,10 @@ public class NasmGenerator {
                 .append(utf8Bytes("Erro de execução: tamanho inválido para o array.\n"))
                 .append("\n");
         asm.append("__array_size_message_length equ $ - __array_size_message - 1\n");
+        asm.append("__invalid_free_message: db ")
+                .append(utf8Bytes("Erro de execução: free recebeu um ponteiro inválido ou já liberado.\n"))
+                .append("\n");
+        asm.append("__invalid_free_message_length equ $ - __invalid_free_message - 1\n");
         if (!stringLabels.isEmpty()) {
             for (Map.Entry<String, String> entry : stringLabels.entrySet()) {
                 asm.append(entry.getValue()).append(": db ")
@@ -119,6 +121,8 @@ public class NasmGenerator {
         asm.append("__f64_scale: dq 0x412e848000000000\n");
         asm.append("__f64_round: dq 0x3fe0000000000000\n\n");
         asm.append("section .bss\n");
+        asm.append("__heap_start: resq 1\n");
+        asm.append("__heap_end: resq 1\n");
         asm.append("__number_buffer: resb 32\n\n");
         asm.append("section .text\n\n");
     }
@@ -649,6 +653,163 @@ public class NasmGenerator {
         asm.append("    sub rdx, rsi\n");
         asm.append("    jmp __write_all\n");
 
+        asm.append("__heap_alloc:\n");
+        asm.append("    mov r8, rdi\n"); // tamanho solicitado
+        asm.append("    add r8, 15\n"); // arredonda o payload
+        asm.append("    jc .heap_alloc_failed\n");
+        asm.append("    and r8, -16\n"); // alinhamento de 16 bytes
+        asm.append("    add r8, 16\n"); // espaço do cabeçalho
+        asm.append("    jc .heap_alloc_failed\n");
+
+        asm.append("    mov r9, qword [rel __heap_start]\n");
+        asm.append("    test r9, r9\n");
+        asm.append("    jnz .heap_search\n");
+        asm.append("    xor edi, edi\n"); // consulta o break atual
+        asm.append("    mov eax, 12\n"); // syscall brk
+        asm.append("    syscall\n");
+        asm.append("    add rax, 15\n");
+        asm.append("    jc .heap_alloc_failed\n");
+        asm.append("    and rax, -16\n");
+        asm.append("    mov qword [rel __heap_start], rax\n");
+        asm.append("    mov qword [rel __heap_end], rax\n");
+        asm.append("    mov r9, rax\n");
+
+        asm.append(".heap_search:\n");
+        asm.append("    cmp r9, qword [rel __heap_end]\n");
+        asm.append("    jae .heap_grow\n");
+        asm.append("    cmp qword [r9 + 8], 0\n");
+        asm.append("    jne .heap_next_block\n");
+        asm.append("    cmp qword [r9], r8\n");
+        asm.append("    jae .heap_reuse_block\n");
+        asm.append(".heap_next_block:\n");
+        asm.append("    add r9, qword [r9]\n");
+        asm.append("    jmp .heap_search\n");
+
+        asm.append(".heap_reuse_block:\n");
+        asm.append("    mov r10, qword [r9]\n");
+        asm.append("    sub r10, r8\n");
+        asm.append("    cmp r10, 32\n"); // cabeçalho + payload mínimo alinhado
+        asm.append("    jb .heap_mark_allocated\n");
+        asm.append("    lea rax, [r9 + r8]\n");
+        asm.append("    mov qword [rax], r10\n");
+        asm.append("    mov qword [rax + 8], 0\n");
+        asm.append("    mov qword [r9], r8\n");
+        asm.append(".heap_mark_allocated:\n");
+        asm.append("    mov qword [r9 + 8], 1\n");
+        asm.append("    jmp .heap_clear_payload\n");
+
+        asm.append(".heap_grow:\n");
+        asm.append("    mov r9, qword [rel __heap_end]\n");
+        asm.append("    mov r10, r9\n");
+        asm.append("    add r10, r8\n"); // novo break
+        asm.append("    jc .heap_alloc_failed\n");
+        asm.append("    mov rdi, r10\n");
+        asm.append("    mov eax, 12\n");
+        asm.append("    syscall\n");
+        asm.append("    cmp rax, r10\n");
+        asm.append("    jb .heap_alloc_failed\n");
+        asm.append("    mov qword [rel __heap_end], r10\n");
+        asm.append("    mov qword [r9], r8\n");
+        asm.append("    mov qword [r9 + 8], 1\n");
+
+        asm.append(".heap_clear_payload:\n");
+        asm.append("    mov qword [r9 + 8], 1\n");
+        asm.append("    lea rdi, [r9 + 16]\n");
+        asm.append("    mov rcx, r8\n");
+        asm.append("    shr rcx, 3\n");
+        asm.append("    sub rcx, 2\n");
+        asm.append("    xor eax, eax\n");
+        asm.append("    cld\n");
+        asm.append("    rep stosq\n");
+        asm.append("    lea rax, [r9 + 16]\n");
+        asm.append("    ret\n");
+
+        asm.append(".heap_alloc_failed:\n");
+        asm.append("    mov edi, 1\n");
+        asm.append("    mov eax, 60\n"); // exit
+        asm.append("    syscall\n");
+        asm.append("    ud2\n");
+
+        asm.append("__heap_free:\n");
+        asm.append("    test rdi, rdi\n");
+        asm.append("    jz .heap_free_done\n");
+        asm.append("    mov r11, rdi\n"); // preserva o ponteiro entregue
+        asm.append("    mov r8, qword [rel __heap_start]\n");
+        asm.append("    test r8, r8\n");
+        asm.append("    jz .heap_invalid_free\n");
+        asm.append(".heap_free_search:\n");
+        asm.append("    cmp r8, qword [rel __heap_end]\n");
+        asm.append("    jae .heap_invalid_free\n");
+        asm.append("    lea rax, [r8 + 16]\n");
+        asm.append("    cmp rax, r11\n");
+        asm.append("    je .heap_free_found\n");
+        asm.append("    mov rax, qword [r8]\n");
+        asm.append("    test rax, rax\n");
+        asm.append("    jz .heap_invalid_free\n");
+        asm.append("    add r8, rax\n");
+        asm.append("    jmp .heap_free_search\n");
+        asm.append(".heap_free_found:\n");
+        asm.append("    cmp qword [r8 + 8], 1\n");
+        asm.append("    jne .heap_invalid_free\n"); // double-free
+        asm.append("    mov qword [r8 + 8], 0\n");
+        asm.append("    mov r9, qword [r8]\n");
+        asm.append("    lea r10, [r8 + r9]\n"); // combina com o próximo bloco livre
+        asm.append("    cmp r10, qword [rel __heap_end]\n");
+        asm.append("    jae .heap_try_previous\n");
+        asm.append("    cmp qword [r10 + 8], 0\n");
+        asm.append("    jne .heap_try_previous\n");
+        asm.append("    add r9, qword [r10]\n");
+        asm.append("    mov qword [r8], r9\n");
+        asm.append(".heap_try_previous:\n");
+        asm.append("    mov r10, qword [rel __heap_start]\n");
+        asm.append("    xor edx, edx\n"); // bloco anterior
+        asm.append(".heap_previous_search:\n");
+        asm.append("    cmp r10, r8\n");
+        asm.append("    jae .heap_free_done\n");
+        asm.append("    mov rdx, r10\n");
+        asm.append("    add r10, qword [r10]\n");
+        asm.append("    jmp .heap_previous_search\n");
+        asm.append(".heap_free_done:\n");
+        asm.append("    test rdx, rdx\n");
+        asm.append("    jz .heap_free_return\n");
+        asm.append("    cmp qword [rdx + 8], 0\n");
+        asm.append("    jne .heap_free_return\n");
+        asm.append("    mov rax, qword [r8]\n");
+        asm.append("    add qword [rdx], rax\n");
+        asm.append(".heap_free_return:\n");
+        asm.append("    ret\n");
+        asm.append(".heap_invalid_free:\n");
+        asm.append("    mov eax, 1\n");
+        asm.append("    mov edi, 2\n");
+        asm.append("    lea rsi, [rel __invalid_free_message]\n");
+        asm.append("    mov edx, __invalid_free_message_length\n");
+        asm.append("    syscall\n");
+        asm.append("    mov eax, 60\n");
+        asm.append("    mov edi, 1\n");
+        asm.append("    syscall\n");
+        asm.append("    ud2\n");
+
+        asm.append("__heap_validate:\n");
+        asm.append("    mov r11, rdi\n");
+        asm.append("    mov r8, qword [rel __heap_start]\n");
+        asm.append("    test r8, r8\n");
+        asm.append("    jz __runtime_invalid_reference\n");
+        asm.append(".heap_validate_search:\n");
+        asm.append("    cmp r8, qword [rel __heap_end]\n");
+        asm.append("    jae __runtime_invalid_reference\n");
+        asm.append("    lea rax, [r8 + 16]\n");
+        asm.append("    cmp rax, r11\n");
+        asm.append("    je .heap_validate_found\n");
+        asm.append("    mov rax, qword [r8]\n");
+        asm.append("    test rax, rax\n");
+        asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    add r8, rax\n");
+        asm.append("    jmp .heap_validate_search\n");
+        asm.append(".heap_validate_found:\n");
+        asm.append("    cmp qword [r8 + 8], 1\n");
+        asm.append("    jne __runtime_invalid_reference\n");
+        asm.append("    ret\n");
+
         asm.append("__runtime_invalid_reference:\n");
         asm.append("    mov eax, 1\n");
         asm.append("    mov edi, 2\n");
@@ -799,31 +960,8 @@ public class NasmGenerator {
                     "ALLOC_OBJECT exige destino REF e tamanho.");
         }
 
-        int labelId = nextAllocationLabel++;
-        String successLabel = ".L_alloc_ok_" + labelId;
-
-        loadI32(asm, instruction.left(), "esi");
-        // Cada objeto guarda o tamanho completo do mmap em um cabeçalho de 8 bytes.
-        asm.append("    add rsi, 8\n");
-
-        asm.append("    mov eax, 9\n"); // mmap
-        asm.append("    xor edi, edi\n"); // endereço escolhido pelo kernel
-        asm.append("    mov edx, 3\n"); // leitura e escrita
-        asm.append("    mov r10d, 34\n"); // MAP_PRIVATE | MAP_ANONYMOUS
-        asm.append("    mov r8, -1\n"); // sem arquivo associado
-        asm.append("    xor r9d, r9d\n"); // offset zero
-        asm.append("    syscall\n");
-
-        asm.append("    test rax, rax\n");
-        asm.append("    jns ").append(successLabel).append("\n");
-        asm.append("    mov edi, 1\n");
-        asm.append("    mov eax, 60\n"); // exit em caso de falha
-        asm.append("    syscall\n");
-        asm.append(successLabel).append(":\n");
-
-        asm.append("    mov qword [rax], rsi\n");
-        asm.append("    add rax, 8\n");
-
+        loadI32(asm, instruction.left(), "edi");
+        asm.append("    call __heap_alloc\n");
         storeI64(asm, instruction.destination(), "rax");
     }
 
@@ -837,10 +975,7 @@ public class NasmGenerator {
         loadI64(asm, instruction.left(), "rdi");
         asm.append("    test rdi, rdi\n");
         asm.append("    jz ").append(doneLabel).append("\n");
-        asm.append("    sub rdi, 8\n");
-        asm.append("    mov rsi, qword [rdi]\n");
-        asm.append("    mov eax, 11\n"); // munmap
-        asm.append("    syscall\n");
+        asm.append("    call __heap_free\n");
         if (instruction.left().kind() == Operand.Kind.VARIABLE
                 || instruction.left().kind() == Operand.Kind.TEMPORARY) {
             asm.append("    xor eax, eax\n");
@@ -860,32 +995,16 @@ public class NasmGenerator {
             throw new IllegalArgumentException("ALLOC_ARRAY exige destino, tamanho e tipo de elemento válidos.");
         }
 
-        int labelId = nextAllocationLabel++;
-        String successLabel = ".L_array_alloc_ok_" + labelId;
         loadI32(asm, instruction.left(), "eax");
         asm.append("    test eax, eax\n");
         asm.append("    js __runtime_invalid_array_size\n");
-        asm.append("    movsxd rsi, eax\n");
-        asm.append("    imul rsi, ").append(elementSize).append("\n");
-        asm.append("    add rsi, 16\n");
+        asm.append("    movsxd rdi, eax\n");
+        asm.append("    imul rdi, ").append(elementSize).append("\n");
+        asm.append("    add rdi, 8\n"); // espaço para o comprimento
         asm.append("    jc __runtime_invalid_array_size\n");
-        asm.append("    mov eax, 9\n");
-        asm.append("    xor edi, edi\n");
-        asm.append("    mov edx, 3\n");
-        asm.append("    mov r10d, 34\n");
-        asm.append("    mov r8, -1\n");
-        asm.append("    xor r9d, r9d\n");
-        asm.append("    syscall\n");
-        asm.append("    test rax, rax\n");
-        asm.append("    jns ").append(successLabel).append("\n");
-        asm.append("    mov edi, 1\n");
-        asm.append("    mov eax, 60\n");
-        asm.append("    syscall\n");
-        asm.append(successLabel).append(":\n");
-        asm.append("    mov qword [rax], rsi\n");
+        asm.append("    call __heap_alloc\n");
         loadI32(asm, instruction.left(), "ecx");
-        asm.append("    mov qword [rax + 8], rcx\n");
-        asm.append("    add rax, 16\n");
+        asm.append("    mov qword [rax], rcx\n"); // comprimento no início do array
         storeI64(asm, instruction.destination(), "rax");
     }
 
@@ -898,10 +1017,7 @@ public class NasmGenerator {
         loadI64(asm, instruction.left(), "rdi");
         asm.append("    test rdi, rdi\n");
         asm.append("    jz ").append(doneLabel).append("\n");
-        asm.append("    sub rdi, 16\n");
-        asm.append("    mov rsi, qword [rdi]\n");
-        asm.append("    mov eax, 11\n");
-        asm.append("    syscall\n");
+        asm.append("    call __heap_free\n");
         if (instruction.left().kind() == Operand.Kind.VARIABLE
                 || instruction.left().kind() == Operand.Kind.TEMPORARY) {
             asm.append("    xor eax, eax\n");
@@ -917,7 +1033,9 @@ public class NasmGenerator {
         loadI64(asm, instruction.left(), "r11");
         asm.append("    test r11, r11\n");
         asm.append("    jz __runtime_invalid_reference\n");
-        asm.append("    mov eax, dword [r11 - 8]\n");
+        asm.append("    mov rdi, r11\n");
+        asm.append("    call __heap_validate\n");
+        asm.append("    mov eax, dword [r11]\n");
         storeI32(asm, instruction.destination(), "eax");
     }
 
@@ -1003,16 +1121,18 @@ public class NasmGenerator {
         loadI64(asm, array, "r11");
         asm.append("    test r11, r11\n");
         asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    mov rdi, r11\n");
+        asm.append("    call __heap_validate\n");
         loadI32(asm, index, "eax");
         asm.append("    test eax, eax\n");
         asm.append("    js __runtime_array_bounds\n");
         asm.append("    movsxd r10, eax\n");
-        asm.append("    cmp r10, qword [r11 - 8]\n");
+        asm.append("    cmp r10, qword [r11]\n");
         asm.append("    jae __runtime_array_bounds\n");
         if (elementSize != 1) {
             asm.append("    imul r10, ").append(elementSize).append("\n");
         }
-        asm.append("    add r11, 16\n");
+        asm.append("    add r11, 8\n");
     }
 
     private void emitFieldStore(StringBuilder asm, IRInstruction instruction) {
@@ -1033,6 +1153,8 @@ public class NasmGenerator {
         loadI64(asm, receiver, "r11");
         asm.append("    test r11, r11\n");
         asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    mov rdi, r11\n");
+        asm.append("    call __heap_validate\n");
 
         String fieldAddress = offset == 0
                 ? "[r11]"
@@ -1077,6 +1199,10 @@ public class NasmGenerator {
         loadI64(asm, base, "rax");
         asm.append("    test rax, rax\n");
         asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    mov rdi, rax\n");
+        asm.append("    push rax\n");
+        asm.append("    call __heap_validate\n");
+        asm.append("    pop rax\n");
 
         String fieldAddress = offset == 0
                 ? "[rax]"

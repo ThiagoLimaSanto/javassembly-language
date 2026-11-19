@@ -1,0 +1,17 @@
+public class HeapReuseBox {
+    int value;
+}
+
+public class HeapReuseTest {
+    public static func void main(String[] args) {
+        HeapReuseBox first = new HeapReuseBox();
+        HeapReuseBox staleAlias = first;
+        first.value = 42;
+        free(first);
+
+        HeapReuseBox reused = new HeapReuseBox();
+        print staleAlias.value;
+        free(reused);
+        return;
+    }
+}

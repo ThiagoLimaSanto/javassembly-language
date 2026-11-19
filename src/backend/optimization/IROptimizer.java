@@ -283,6 +283,12 @@ public class IROptimizer {
                 constants.remove(destination);
             }
         }
+        if (isFreeOperation(instruction.opCode())) {
+            Operand freedReference = instruction.left();
+            if (isMutableReferenceSlot(freedReference)) {
+                constants.put(freedReference, Operand.constant(null, Operand.Type.REF));
+            }
+        }
         if (instruction.opCode() == IROpCode.CALL)
             constants.clear();
     }
@@ -337,9 +343,7 @@ public class IROptimizer {
             for (IRInstruction instruction : block.instructions) {
                 IRInstruction rewritten = rewriteCopies(instruction, copies);
                 output.add(rewritten);
-                if (rewritten.opCode() == IROpCode.CALL
-                        || rewritten.opCode() == IROpCode.FREE_OBJECT
-                        || rewritten.opCode() == IROpCode.FREE_ARRAY)
+                if (isHeapMutation(rewritten.opCode()))
                     copies.clear();
 
                 Operand destination = rewritten.destination();
@@ -389,7 +393,7 @@ public class IROptimizer {
             Map<ExpressionKey, Operand> available = new HashMap<>();
             for (IRInstruction instruction : block.instructions) {
                 Operand destination = instruction.destination();
-                if (instruction.opCode() == IROpCode.CALL) {
+                if (isHeapMutation(instruction.opCode())) {
                     available.clear();
                 }
                 if (destination != null && destination.kind() == Operand.Kind.VARIABLE) {
@@ -472,6 +476,11 @@ public class IROptimizer {
                 for (Operand argument : instruction.arguments()) {
                     addVariableUse(argument, blockUses, blockDefinitions);
                 }
+                if (isFreeOperation(instruction.opCode())
+                        && instruction.left() != null
+                        && instruction.left().kind() == Operand.Kind.VARIABLE) {
+                    blockDefinitions.add(instruction.left());
+                }
                 Operand destination = instruction.destination();
                 if (destination != null && destination.kind() == Operand.Kind.VARIABLE) {
                     blockDefinitions.add(destination);
@@ -518,6 +527,11 @@ public class IROptimizer {
                 if (instruction.opCode() == IROpCode.CALL) {
 
                     live.addAll(allVariables);
+                }
+                if (isFreeOperation(instruction.opCode())
+                        && instruction.left() != null
+                        && instruction.left().kind() == Operand.Kind.VARIABLE) {
+                    live.remove(instruction.left());
                 }
                 boolean removableStore = destination != null
                         && destination.kind() == Operand.Kind.VARIABLE
@@ -715,6 +729,11 @@ public class IROptimizer {
             if (opcode == IROpCode.NE)
                 return assign(destination, Operand.constant(a != b, Operand.Type.BOOL));
         }
+        if (type == Operand.Type.REF && destination.type() == Operand.Type.BOOL
+                && (opcode == IROpCode.EQ || opcode == IROpCode.NE)
+                && isNullReference(left) && isNullReference(right)) {
+            return assign(destination, Operand.constant(opcode == IROpCode.EQ, Operand.Type.BOOL));
+        }
         return instruction;
     }
 
@@ -804,6 +823,32 @@ public class IROptimizer {
                 true;
             default -> false;
         };
+    }
+
+    private boolean isHeapMutation(IROpCode opcode) {
+        return switch (opcode) {
+            case CALL, ALLOC_OBJECT, FREE_OBJECT, ALLOC_ARRAY, FREE_ARRAY,
+                    STORE_FIELD, STORE_ARRAY -> true;
+            default -> false;
+        };
+    }
+
+    private boolean isFreeOperation(IROpCode opcode) {
+        return opcode == IROpCode.FREE_OBJECT || opcode == IROpCode.FREE_ARRAY;
+    }
+
+    private boolean isMutableReferenceSlot(Operand operand) {
+        return operand != null
+                && operand.type() == Operand.Type.REF
+                && (operand.kind() == Operand.Kind.VARIABLE
+                        || operand.kind() == Operand.Kind.TEMPORARY);
+    }
+
+    private boolean isNullReference(Operand operand) {
+        return operand != null
+                && operand.kind() == Operand.Kind.CONSTANT
+                && operand.type() == Operand.Type.REF
+                && operand.value() == null;
     }
 
     private boolean isTerminator(IROpCode opcode) {
