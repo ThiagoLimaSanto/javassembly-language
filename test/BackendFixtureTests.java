@@ -22,7 +22,7 @@ public final class BackendFixtureTests {
 
     public static void main(String[] args) throws IOException, InterruptedException {
         Path fixtureRoot = args.length == 0
-                ? Path.of("src/source/backend/fixtures")
+                ? Path.of("test/fixtures/backend")
                 : Path.of(args[0]);
         if (!Files.isDirectory(fixtureRoot)) {
             throw new IllegalArgumentException("Backend fixture directory not found: " + fixtureRoot);

@@ -29,7 +29,7 @@ public final class RuleFixtureTests {
     public static void main(String[] args) throws IOException {
         runFrontendCoreChecks();
         Path fixtureRoot = args.length == 0
-                ? Path.of("src/source/rules")
+                ? Path.of("test/fixtures/frontend/rules")
                 : Path.of(args[0]);
 
         if (!Files.isDirectory(fixtureRoot)) {

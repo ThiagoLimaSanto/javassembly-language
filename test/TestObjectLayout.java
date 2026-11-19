@@ -17,7 +17,7 @@ public class TestObjectLayout {
         ObjectLayout objectLayout = new ObjectLayout();
 
         ProgramRecord ast = Frontend.loadProject(
-            Path.of("src/source/backend/object_fields_test.jvs")
+            Path.of("test/fixtures/backend/accept/accept_object_arrays_fields.jvs")
         );
 
         Map<String, ClassLayout> layouts =
