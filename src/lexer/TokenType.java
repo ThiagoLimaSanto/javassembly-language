@@ -11,6 +11,7 @@ public enum TokenType {
     CLASS,
     INTERFACE,
     ABSTRACT,
+    NATIVE,
     DEFAULT,
     PACKAGE,
     IMPORT,
@@ -46,6 +47,8 @@ public enum TokenType {
     CMP,
     PRINT,
     PRINTF,
+    PRINT_LN,
+    PRINTF_LN,
     FREE,
 
     EQ,

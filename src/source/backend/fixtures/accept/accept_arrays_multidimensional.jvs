@@ -3,9 +3,9 @@ public class BackendArray2D {
         int[][] matrix = new int[2][3];
         matrix[1][2] = 27;
 
-        print matrix.length;
-        print matrix[1].length;
-        print matrix[1][2];
+        printLn matrix.length;
+        printLn matrix[1].length;
+        printLn matrix[1][2];
 
         free(matrix[0]);
         free(matrix[1]);

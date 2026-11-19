@@ -24,9 +24,9 @@ public class BackendObjectArray {
         cells[0] = new BackendCell(14);
         cells[1] = new BackendCell(25);
         BackendHolder holder = new BackendHolder(cells[0]);
-        print cells[0].value;
-        print cells[1].value;
-        print holder.readValue();
+        printLn cells[0].value;
+        printLn cells[1].value;
+        printLn holder.readValue();
         free(holder);
         free(cells[0]);
         free(cells[1]);

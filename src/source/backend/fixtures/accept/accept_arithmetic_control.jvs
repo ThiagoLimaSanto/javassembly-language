@@ -6,27 +6,27 @@ public class BackendArithmetic {
         int quotient = div product, 2;
         int remainder = mod left, right;
         int negative = neg right;
-        print sum;
-        print difference;
-        print quotient;
-        print remainder;
-        print negative;
+        printLn sum;
+        printLn difference;
+        printLn quotient;
+        printLn remainder;
+        printLn negative;
         return quotient;
     }
 
     public static func void main(String[] args) {
         int result = calculate(9, 3);
         if (cmp.eq result, 18) {
-            print 1;
+            printLn 1;
         } else {
-            print 0;
+            printLn 0;
         }
 
         int index = 0;
         while (cmp.lt index, 3) {
             index = add index, 1;
         }
-        print index;
+        printLn index;
         return;
     }
 }

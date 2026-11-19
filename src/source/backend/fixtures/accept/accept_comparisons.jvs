@@ -1,24 +1,24 @@
 public class BackendComparisons {
     public static func void compare(int left, int right) {
         if (cmp.gt right, left) {
-            print 1;
+            printLn 1;
         } else {
-            print 0;
+            printLn 0;
         }
         if (cmp.le right, left) {
-            print 1;
+            printLn 1;
         } else {
-            print 0;
+            printLn 0;
         }
         if (cmp.ge right, left) {
-            print 1;
+            printLn 1;
         } else {
-            print 0;
+            printLn 0;
         }
         if (cmp.ne right, left) {
-            print 1;
+            printLn 1;
         } else {
-            print 0;
+            printLn 0;
         }
         return;
     }

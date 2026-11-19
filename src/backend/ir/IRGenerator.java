@@ -6,6 +6,7 @@ import java.util.Deque;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
@@ -107,6 +108,9 @@ public final class IRGenerator {
                 if (function.isAbstract()) {
                     continue;
                 }
+                if (function.isNative()) {
+                    validateNativeScannerFunction(classNode, function);
+                }
                 validateFunctionTypes(function);
                 String label = functionLabel(classNode, function);
                 functionsByLabel.put(label, function);
@@ -122,7 +126,7 @@ public final class IRGenerator {
         for (ClassRecord classNode : ast.classes()) {
             currentClassName = classNode.name();
             for (FunctionRecord function : classNode.functions()) {
-                if (function.isAbstract()) {
+                if (function.isAbstract() || function.isNative()) {
                     continue;
                 }
                 currentFunction = function;
@@ -177,6 +181,24 @@ public final class IRGenerator {
         }
         for (ParameterRecord parameter : function.parameters()) {
             typeOf(parameter.type());
+        }
+    }
+
+    private void validateNativeScannerFunction(ClassRecord owner, FunctionRecord function) {
+        String expectedReturn = switch (function.name()) {
+            case "readInt" -> "int";
+            case "readLong" -> "long";
+            case "readDouble" -> "double";
+            case "readBoolean" -> "boolean";
+            case "readString" -> "String";
+            default -> null;
+        };
+        if (!owner.name().equals("io.Scanner")
+                || expectedReturn == null
+                || !function.parameters().isEmpty()
+                || !function.returnType().name().equals(expectedReturn)) {
+            throw unsupported("Método native ainda sem implementação no runtime: '"
+                    + owner.name() + "." + function.name() + "'.");
         }
     }
 
@@ -515,7 +537,11 @@ public final class IRGenerator {
                     && !(value.type() == Operand.Type.REF && isStringExpression(print.expression(), value))) {
                 throw unsupported("print suporta int, long, double, boolean e String no backend atual.");
             }
-            ir.add(new IRInstruction(IROpCode.PRINT, null, value, null));
+            ir.add(new IRInstruction(
+                    print.lineBreak() ? IROpCode.PRINT_LN : IROpCode.PRINT,
+                    null,
+                    value,
+                    null));
         } else if (statement instanceof PrintfRecord printf) {
             if (!(printf.format() instanceof LiteralRecord literal)
                     || !(literal.value() instanceof String format)) {
@@ -531,7 +557,9 @@ public final class IRGenerator {
                 }
                 arguments.add(value);
             }
-            ir.add(new IRInstruction(IROpCode.PRINT_FORMAT, null,
+            ir.add(new IRInstruction(
+                    printf.lineBreak() ? IROpCode.PRINT_FORMAT_LN : IROpCode.PRINT_FORMAT,
+                    null,
                     Operand.constant(format, Operand.Type.REF), null, arguments));
         } else if (statement instanceof FreeRecord free) {
             Operand object = expression(ir, free.expression());
@@ -1190,6 +1218,45 @@ public final class IRGenerator {
     }
 
     private Operand emitMemberCall(IRProgram ir, MemberCallRecord call, boolean keepResult) {
+        ClassRecord staticOwner = resolveStaticClassReceiver(call);
+        if (staticOwner != null) {
+            List<Operand> arguments = new ArrayList<>();
+            for (ExpressionInterface argument : call.arguments()) {
+                arguments.add(expression(ir, argument));
+            }
+            FunctionRecord target = resolveStaticMethod(staticOwner, call.name(), arguments);
+            String targetLabel = functionLabel(staticOwner, target);
+            if (!functionsByLabel.containsKey(targetLabel)) {
+                throw unsupported("Método static não foi registrado na IR: " + targetLabel + ".");
+            }
+            if (arguments.size() != target.parameters().size()) {
+                throw unsupported("Quantidade de argumentos incompatível para '" + call.name() + "'.");
+            }
+            List<Operand> convertedArguments = new ArrayList<>();
+            for (int index = 0; index < arguments.size(); index++) {
+                convertedArguments.add(coerce(
+                        ir,
+                        arguments.get(index),
+                        typeOf(target.parameters().get(index).type())));
+            }
+            if (keepResult && target.returnType().name().equals("void")) {
+                throw unsupported("Uma função void não pode ser usada como expressão.");
+            }
+            Operand destination = keepResult
+                    ? Operand.temporary("t" + nextTemp++, typeOf(target.returnType()))
+                    : null;
+            ir.add(new IRInstruction(
+                    IROpCode.CALL,
+                    destination,
+                    Operand.label(targetLabel),
+                    null,
+                    convertedArguments));
+            if (destination != null) {
+                registerReferenceType(destination, target.returnType());
+            }
+            return destination;
+        }
+
         Operand receiver = expression(ir, call.receiver());
         String receiverClass = sourceTypesByOperand.get(receiver);
         if (receiverClass == null) {
@@ -1206,6 +1273,68 @@ public final class IRGenerator {
         ResolvedMethod method = resolveInstanceMethod(receiverClass, call.name(), arguments);
         return emitInstanceCall(ir, receiver, arguments, method, keepResult,
                 VirtualMethodTable.isVirtual(method.function()));
+    }
+
+    private ClassRecord resolveStaticClassReceiver(MemberCallRecord call) {
+        if (!(call.receiver() instanceof VariableRecord variable)
+                || resolveVariable(variable.name()) != null) {
+            return null;
+        }
+        List<ClassRecord> matches = classes.values().stream()
+                .filter(classNode -> simpleName(classNode.name()).equals(variable.name()))
+                .toList();
+        if (matches.size() > 1) {
+            throw unsupported("Nome de classe ambíguo na chamada static: " + variable.name() + ".");
+        }
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private FunctionRecord resolveStaticMethod(
+            ClassRecord owner,
+            String methodName,
+            List<Operand> arguments) {
+        FunctionRecord best = null;
+        int bestScore = Integer.MAX_VALUE;
+        boolean ambiguous = false;
+        Set<String> visited = new java.util.HashSet<>();
+        while (owner != null && visited.add(owner.name())) {
+            for (FunctionRecord function : owner.functions()) {
+                if (!function.isStatic() || !function.name().equals(methodName)
+                        || function.parameters().size() != arguments.size()) {
+                    continue;
+                }
+                int score = 0;
+                boolean applicable = true;
+                for (int index = 0; index < arguments.size(); index++) {
+                    Operand.Type actual = arguments.get(index).type();
+                    Operand.Type expected = typeOf(function.parameters().get(index).type());
+                    if (actual == expected) continue;
+                    if (actual == Operand.Type.I32 && expected == Operand.Type.I64) score++;
+                    else if (isInteger(actual) && expected == Operand.Type.F64) score += actual == Operand.Type.I32 ? 2 : 1;
+                    else {
+                        applicable = false;
+                        break;
+                    }
+                }
+                if (!applicable) continue;
+                if (score < bestScore) {
+                    best = function;
+                    bestScore = score;
+                    ambiguous = false;
+                } else if (score == bestScore) {
+                    ambiguous = true;
+                }
+            }
+            owner = owner.superClass() == null ? null : classes.get(owner.superClass());
+        }
+        if (ambiguous) throw unsupported("Chamada static ambígua para '" + methodName + "'.");
+        if (best == null) throw unsupported("Método static não encontrado: " + methodName + ".");
+        return best;
+    }
+
+    private String simpleName(String qualifiedName) {
+        int separator = qualifiedName.lastIndexOf('.');
+        return separator < 0 ? qualifiedName : qualifiedName.substring(separator + 1);
     }
 
     private Operand emitThisCall(IRProgram ir, ThisCallRecord call, boolean keepResult) {

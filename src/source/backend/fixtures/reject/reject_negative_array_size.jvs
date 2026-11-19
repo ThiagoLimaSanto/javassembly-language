@@ -1,7 +1,7 @@
 public class BackendNegativeArraySizeFailure {
     public static func void main(String[] args) {
         int[] values = new int[neg 1];
-        print values.length;
+        printLn values.length;
         return;
     }
 }

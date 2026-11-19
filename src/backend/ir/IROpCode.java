@@ -29,6 +29,8 @@ public enum IROpCode {
     RETURN,
     PRINT,
     PRINT_FORMAT,
+    PRINT_LN,
+    PRINT_FORMAT_LN,
     PARAM,
 
     LOAD_FIELD,

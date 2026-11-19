@@ -30,11 +30,11 @@ public class BackendDog extends BackendAnimal {
 public class BackendConstructorDispatch {
     public static func void main(String[] args) {
         BackendAnimal animal = new BackendDog(17, 29);
-        print animal.value();
+        printLn animal.value();
         free(animal);
 
         BackendAnimal delegated = new BackendDog();
-        print delegated.value();
+        printLn delegated.value();
         free(delegated);
         return;
     }

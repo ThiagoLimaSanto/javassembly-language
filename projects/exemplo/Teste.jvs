@@ -1,0 +1,11 @@
+package projects.exemplo;
+
+import io.Scanner;
+
+public class Teste {
+    public static func void main(String[] args) {
+        printLn "Digite a sua idade: ";
+        int idade = Scanner.readInt();
+        printfLn "Sua idade = %d", idade;
+    }
+}

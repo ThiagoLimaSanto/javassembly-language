@@ -7,7 +7,7 @@ public class BackendNullVirtual {
 public class BackendNullVirtualFailure {
     public static func void main(String[] args) {
         BackendNullVirtual object = null;
-        print object.value();
+        printLn object.value();
         return;
     }
 }

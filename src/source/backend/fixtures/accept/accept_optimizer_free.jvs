@@ -9,8 +9,8 @@ public class BackendOptimizerFree {
         boolean beforeFree = cmp.eq first, alias;
         free(first);
         boolean afterFree = cmp.eq first, alias;
-        print beforeFree;
-        print afterFree;
+        printLn beforeFree;
+        printLn afterFree;
         return;
     }
 }

@@ -123,6 +123,10 @@ public class NasmGenerator {
                 .append(utf8Bytes("Erro de execução: free recebeu um ponteiro inválido ou já liberado.\n"))
                 .append("\n");
         asm.append("__invalid_free_message_length equ $ - __invalid_free_message - 1\n");
+        asm.append("__scanner_input_error_message: db ")
+                .append(utf8Bytes("Erro de execução: entrada inválida para Scanner.\n"))
+                .append("\n");
+        asm.append("__scanner_input_error_message_length equ $ - __scanner_input_error_message - 1\n");
         if (!stringLabels.isEmpty()) {
             for (Map.Entry<String, String> entry : stringLabels.entrySet()) {
                 asm.append(entry.getValue()).append(": db ")
@@ -136,6 +140,18 @@ public class NasmGenerator {
         asm.append("__heap_start: resq 1\n");
         asm.append("__heap_end: resq 1\n");
         asm.append("__number_buffer: resb 32\n\n");
+        asm.append("__scanner_token: resb 256\n");
+        asm.append("__scanner_byte: resb 1\n");
+        asm.append("__scanner_token_length: resq 1\n");
+        asm.append("__scanner_string_result: resq 1\n");
+        asm.append("__scanner_double_integer: resq 1\n");
+        asm.append("__scanner_double_fraction: resq 1\n");
+        asm.append("__scanner_double_divisor: resq 1\n");
+        asm.append("__scanner_double_index: resq 1\n");
+        asm.append("__scanner_double_sign: resq 1\n");
+        asm.append("__scanner_double_dot: resq 1\n");
+        asm.append("__scanner_double_digits: resq 1\n");
+        asm.append("__scanner_double_fraction_digits: resq 1\n\n");
         asm.append("section .text\n\n");
     }
 
@@ -169,7 +185,8 @@ public class NasmGenerator {
         registerStringValue("(null)");
         for (IRInstruction instruction : instructions) {
             registerString(instruction.destination());
-            if (instruction.opCode() == IROpCode.PRINT_FORMAT
+            if ((instruction.opCode() == IROpCode.PRINT_FORMAT
+                    || instruction.opCode() == IROpCode.PRINT_FORMAT_LN)
                     && instruction.left() != null
                     && instruction.left().kind() == Operand.Kind.CONSTANT
                     && instruction.left().value() instanceof String format) {
@@ -497,9 +514,13 @@ public class NasmGenerator {
                         .append("\n");
             }
 
-            case PRINT -> emitPrint(asm, instruction);
+            case PRINT -> emitPrint(asm, instruction, false);
 
-            case PRINT_FORMAT -> emitFormattedPrint(asm, instruction);
+            case PRINT_LN -> emitPrint(asm, instruction, true);
+
+            case PRINT_FORMAT -> emitFormattedPrint(asm, instruction, false);
+
+            case PRINT_FORMAT_LN -> emitFormattedPrint(asm, instruction, true);
 
             case RETURN -> {
                 if (instruction.left() != null) {
@@ -524,7 +545,8 @@ public class NasmGenerator {
 
     private void emitPrint(
             StringBuilder asm,
-            IRInstruction instruction) {
+            IRInstruction instruction,
+            boolean lineBreak) {
         Operand value = instruction.left();
         switch (value.type()) {
             case F64 -> {
@@ -550,10 +572,15 @@ public class NasmGenerator {
                 asm.append("    call __print_u64\n");
             }
         }
-        emitLiteralWrite(asm, "\n");
+        if (lineBreak) {
+            emitLiteralWrite(asm, "\n");
+        }
     }
 
-    private void emitFormattedPrint(StringBuilder asm, IRInstruction instruction) {
+    private void emitFormattedPrint(
+            StringBuilder asm,
+            IRInstruction instruction,
+            boolean lineBreak) {
         String format = (String) instruction.left().value();
         List<Operand> arguments = instruction.arguments();
         StringBuilder literal = new StringBuilder();
@@ -595,6 +622,9 @@ public class NasmGenerator {
         emitLiteralWrite(asm, literal.toString());
         if (argumentIndex != arguments.size()) {
             throw new IllegalArgumentException("Há argumentos excedentes no formato de printf.");
+        }
+        if (lineBreak) {
+            emitLiteralWrite(asm, "\n");
         }
     }
 
@@ -905,6 +935,7 @@ public class NasmGenerator {
         asm.append("    jmp __print_u64\n");
 
         appendFloatPrinter(asm);
+        ScannerRuntime.append(asm);
     }
 
     private void appendFloatPrinter(StringBuilder asm) {

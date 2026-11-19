@@ -1064,6 +1064,11 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private FunctionRecord resolveObjectMethod(MemberCallRecord call) {
+        ClassRecord staticReceiver = resolveStaticClassReceiver(call);
+        if (staticReceiver != null) {
+            return resolveStaticClassMethod(staticReceiver, call);
+        }
+
         SemanticType receiverType = getExpressionType(call.receiver());
 
         if (receiverType == null || !receiverType.isClass()) {
@@ -1216,6 +1221,84 @@ public class SemanticAnalyzer implements ASTVisitor {
                         + call.name() + "'; tipos recebidos: " + formatTypes(argumentTypes) + ".",
                 call.line(),
                 call.column());
+    }
+
+    private ClassRecord resolveStaticClassReceiver(MemberCallRecord call) {
+        if (!(call.receiver() instanceof VariableRecord variable)
+                || findLocalVariable(variable.name()) != null
+                || findInheritedAttribute(currentClass, variable.name()) != null) {
+            return null;
+        }
+
+        List<ClassRecord> matches = classes.values().stream()
+                .filter(classNode -> simpleName(classNode.name()).equals(variable.name()))
+                .toList();
+        if (matches.size() > 1) {
+            throw new SemanticException(
+                    "O nome de classe '" + variable.name()
+                            + "' é ambíguo; use o nome qualificado.",
+                    variable.line(),
+                    variable.column());
+        }
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private FunctionRecord resolveStaticClassMethod(
+            ClassRecord receiverClass,
+            MemberCallRecord call) {
+        List<SemanticType> argumentTypes = getArgumentTypes(
+                call.arguments(), call.line(), call.column());
+        List<FunctionRecord> staticCandidates = new ArrayList<>();
+        boolean instanceMethodFound = false;
+        Set<String> shadowedSignatures = new HashSet<>();
+        Set<String> visited = new HashSet<>();
+        ClassRecord owner = receiverClass;
+
+        while (owner != null && visited.add(owner.name())) {
+            for (FunctionRecord function : owner.functions()) {
+                if (!function.name().equals(call.name())
+                        || !shadowedSignatures.add(methodSignature(function))) {
+                    continue;
+                }
+                if (!function.isStatic()) {
+                    instanceMethodFound = true;
+                } else if (isMemberAccessibleFromCurrentClass(function.visibility(), owner.name())
+                        && matchesCall(function, call.name(), argumentTypes)) {
+                    staticCandidates.add(function);
+                }
+            }
+            owner = owner.superClass() == null ? null : classes.get(owner.superClass());
+        }
+
+        FunctionRecord bestMatch = mostSpecificMethod(staticCandidates);
+        if (bestMatch != null) {
+            ClassRecord declaringClass = findDeclaringClassForMethod(receiverClass.name(), bestMatch);
+            validateMemberVisibility(
+                    bestMatch.visibility(),
+                    declaringClass == null ? receiverClass.name() : declaringClass.name(),
+                    call.name(),
+                    receiverClass.name(),
+                    call.line(),
+                    call.column());
+            return bestMatch;
+        }
+        if (instanceMethodFound) {
+            throw new SemanticException(
+                    "O método '" + call.name()
+                            + "' é de instância e não pode ser chamado pela classe.",
+                    call.line(),
+                    call.column());
+        }
+        throw new SemanticException(
+                "Método static '" + call.name() + "' não encontrado na classe '"
+                        + receiverClass.name() + "' para os argumentos informados.",
+                call.line(),
+                call.column());
+    }
+
+    private String simpleName(String qualifiedName) {
+        int separator = qualifiedName.lastIndexOf('.');
+        return separator < 0 ? qualifiedName : qualifiedName.substring(separator + 1);
     }
 
     private ClassRecord findDeclaringClassForMethod(
@@ -2963,6 +3046,13 @@ public class SemanticAnalyzer implements ASTVisitor {
                             function.line(),
                             function.column());
                 }
+                if (function.isNative()
+                        && (!function.isStatic() || function.isAbstract() || function.block() != null)) {
+                    throw new SemanticException(
+                            "Método native precisa ser static, não abstract e não pode ter corpo.",
+                            function.line(),
+                            function.column());
+                }
                 validateOverride(node, function);
 
                 functionTable.define(function);
@@ -3013,6 +3103,16 @@ public class SemanticAnalyzer implements ASTVisitor {
 
             for (ParameterRecord parameter : node.parameters()) {
                 parameter.accept(this);
+            }
+
+            if (node.isNative()) {
+                if (!node.isStatic() || node.isAbstract() || node.block() != null) {
+                    throw new SemanticException(
+                            "Método native precisa ser static, não abstract e não pode ter corpo.",
+                            node.line(),
+                            node.column());
+                }
+                return;
             }
 
             if (node.block() != null) {
@@ -3188,12 +3288,12 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     @Override
     public void visit(PrintRecord node) {
-        validateNotVoid(node.expression(), "print");
+        validateNotVoid(node.expression(), node.lineBreak() ? "printLn" : "print");
     }
 
     @Override
     public void visit(PrintfRecord node) {
-        validateNotVoid(node.format(), "printf");
+        validateNotVoid(node.format(), node.lineBreak() ? "printfLn" : "printf");
         if (!(node.format() instanceof LiteralRecord literal)
                 || !(literal.value() instanceof String format)) {
             throw new SemanticException(

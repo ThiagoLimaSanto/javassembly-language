@@ -11,7 +11,7 @@ public class BackendHeapTest {
         free(first);
 
         BackendHeapBox reused = new BackendHeapBox();
-        print alias.value;
+        printLn alias.value;
         free(reused);
 
         long[] large = new long[10];
@@ -20,13 +20,13 @@ public class BackendHeapTest {
         int[] right = new int[2];
         left[0] = 17;
         right[0] = 25;
-        print left[0];
-        print right[0];
+        printLn left[0];
+        printLn right[0];
         free(left);
         free(right);
         long[] merged = new long[6];
-        print merged.length;
-        print merged[0];
+        printLn merged.length;
+        printLn merged[0];
         free(merged);
         return;
     }

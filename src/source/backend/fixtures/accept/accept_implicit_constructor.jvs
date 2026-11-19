@@ -17,9 +17,9 @@ public class BackendDefaultChild extends BackendDefaultBase {
 public class BackendImplicitConstructor {
     public static func void main(String[] args) {
         BackendDefaultBase value = new BackendDefaultChild();
-        print value.value();
+        printLn value.value();
         BackendDefaultChild child = new BackendDefaultChild();
-        print child.combined();
+        printLn child.combined();
         free(value);
         free(child);
         return;

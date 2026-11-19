@@ -20,11 +20,15 @@ public class ProgramAnalyzer {
         String fileName = sourceFile.getFileName().toString();
         int extension = fileName.lastIndexOf('.');
         String baseName = extension < 0 ? fileName : fileName.substring(0, extension);
-        String asmName = baseName + ".asm";
-        Path asmFile = sourceFile.resolveSibling(asmName);
+        Path projectDirectory = sourceFile.toAbsolutePath().normalize().getParent();
+        if (projectDirectory == null) {
+            throw new IOException("Não foi possível determinar a pasta do projeto.");
+        }
+        Path outputDirectory = projectDirectory.resolve("out");
+        Files.createDirectories(outputDirectory);
+        Path asmFile = outputDirectory.resolve(baseName + ".asm");
 
         Files.writeString(asmFile, asm);
-        System.out.println("Assembly salvo em: " + asmFile);
     }
 
     public void analyze(String source) {

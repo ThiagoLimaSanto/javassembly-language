@@ -1,0 +1,14 @@
+package io;
+
+public class Scanner {
+
+    public static native func int readInt();
+
+    public static native func double readDouble();
+
+    public static native func boolean readBoolean();
+
+    public static native func String readString();
+
+    public static native func long readLong();
+}

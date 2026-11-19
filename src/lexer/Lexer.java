@@ -21,6 +21,7 @@ public class Lexer {
             Map.entry("class", TokenType.CLASS),
             Map.entry("interface", TokenType.INTERFACE),
             Map.entry("abstract", TokenType.ABSTRACT),
+            Map.entry("native", TokenType.NATIVE),
             Map.entry("default", TokenType.DEFAULT),
             Map.entry("package", TokenType.PACKAGE),
             Map.entry("import", TokenType.IMPORT),
@@ -51,6 +52,8 @@ public class Lexer {
             Map.entry("cmp", TokenType.CMP),
             Map.entry("print", TokenType.PRINT),
             Map.entry("printf", TokenType.PRINTF),
+            Map.entry("printLn", TokenType.PRINT_LN),
+            Map.entry("printfLn", TokenType.PRINTF_LN),
             Map.entry("free", TokenType.FREE),
 
             Map.entry("return", TokenType.RETURN),

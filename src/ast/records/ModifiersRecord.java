@@ -6,9 +6,19 @@ public record ModifiersRecord(
     TokenType visibility,
     boolean isStatic,
     boolean isFinal,
-    boolean isAbstract
+    boolean isAbstract,
+    boolean isNative
 ) {
+    public ModifiersRecord(
+        TokenType visibility,
+        boolean isStatic,
+        boolean isFinal,
+        boolean isAbstract
+    ) {
+        this(visibility, isStatic, isFinal, isAbstract, false);
+    }
+
     public ModifiersRecord(TokenType visibility, boolean isStatic, boolean isFinal) {
-        this(visibility, isStatic, isFinal, false);
+        this(visibility, isStatic, isFinal, false, false);
     }
 }

@@ -395,18 +395,19 @@ public class Parser {
                         } else if (tokens.verify(TokenType.IDENTIFIER)
                                         && tokens.current().getLexeme().equals(name.getLexeme())
                                         && tokens.peekNext().getType() == TokenType.OPEN_PARENTHESIS) {
-                                if (modifiers.isStatic() || modifiers.isFinal() || modifiers.isAbstract()) {
+                                if (modifiers.isStatic() || modifiers.isFinal()
+                                                || modifiers.isAbstract() || modifiers.isNative()) {
                                         throw new SyntacticException(
-                                                        "Construtores não aceitam os modificadores static, final ou abstract.",
+                                                        "Construtores não aceitam os modificadores static, final, abstract ou native.",
                                                         tokens.current().getLine(),
                                                         tokens.current().getColumn());
                                 }
                                 constructors.add(constructorDeclaration(modifiers.visibility()));
 
                         } else {
-                                if (modifiers.isAbstract()) {
+                                if (modifiers.isAbstract() || modifiers.isNative()) {
                                         throw syntacticError(
-                                                        "O modificador abstract só pode ser usado em classes e métodos.");
+                                                        "Os modificadores abstract e native só podem ser usados em métodos.");
                                 }
                                 attributes.add(attributeDeclaration(modifiers));
                         }
@@ -637,6 +638,7 @@ public class Parser {
                 boolean isStatic = false;
                 boolean isFinal = false;
                 boolean isAbstract = false;
+                boolean isNative = false;
 
                 while (true) {
 
@@ -699,12 +701,24 @@ public class Parser {
                                         isAbstract = true;
                                 }
 
+                                case NATIVE -> {
+                                        if (isNative) {
+                                                throw new SyntacticException(
+                                                                "Modificador 'native' repetido.",
+                                                                token.getLine(),
+                                                                token.getColumn());
+                                        }
+                                        tokens.consume(TokenType.NATIVE, "Esperado 'native'");
+                                        isNative = true;
+                                }
+
                                 default -> {
                                         return new ModifiersRecord(
                                                         visibility,
                                                         isStatic,
                                                         isFinal,
-                                                        isAbstract);
+                                                        isAbstract,
+                                                        isNative);
                                 }
                         }
                 }
@@ -854,6 +868,18 @@ public class Parser {
                                 "Esperado ')' para fechar os parâmetros");
 
                 BlockRecord block;
+                if (modifiers.isNative() && modifiers.isAbstract()) {
+                        throw new SyntacticException(
+                                        "Um método não pode ser native e abstract ao mesmo tempo.",
+                                        name.getLine(),
+                                        name.getColumn());
+                }
+                if (modifiers.isNative() && !modifiers.isStatic()) {
+                        throw new SyntacticException(
+                                        "Nesta versão, métodos native precisam ser static.",
+                                        name.getLine(),
+                                        name.getColumn());
+                }
                 if (modifiers.isAbstract()) {
                         if (modifiers.isStatic() || modifiers.isFinal()
                                         || visibility == TokenType.PRIVATE) {
@@ -865,6 +891,11 @@ public class Parser {
                         tokens.consume(
                                         TokenType.SEMICOLON,
                                         "Esperado ';' após assinatura do método abstract");
+                        block = null;
+                } else if (modifiers.isNative()) {
+                        tokens.consume(
+                                        TokenType.SEMICOLON,
+                                        "Esperado ';' após assinatura do método native");
                         block = null;
                 } else {
                         block = block();
@@ -879,6 +910,8 @@ public class Parser {
                                 parameters,
                                 block,
                                 modifiers.isAbstract(),
+                                false,
+                                modifiers.isNative(),
                                 name.getLine(),
                                 name.getColumn());
         }
@@ -999,10 +1032,16 @@ public class Parser {
                                 declaration();
 
                         case PRINT ->
-                                printStatement();
+                                printStatement(false);
+
+                        case PRINT_LN ->
+                                printStatement(true);
 
                         case PRINTF ->
-                                printfStatement();
+                                printfStatement(false);
+
+                        case PRINTF_LN ->
+                                printfStatement(true);
 
                         case FREE ->
                                 freeStatement();
@@ -1471,11 +1510,11 @@ public class Parser {
                                                 : "Atualização do for deve ser uma expressão.");
         }
 
-        private StatementInterface printStatement() {
+        private StatementInterface printStatement(boolean lineBreak) {
 
                 Token printToken = tokens.consume(
-                                TokenType.PRINT,
-                                "Esperado 'print'");
+                                lineBreak ? TokenType.PRINT_LN : TokenType.PRINT,
+                                lineBreak ? "Esperado 'printLn'" : "Esperado 'print'");
 
                 ExpressionInterface expression = expression();
                 tokens.consume(
@@ -1484,12 +1523,15 @@ public class Parser {
 
                 return new PrintRecord(
                                 expression,
+                                lineBreak,
                                 printToken.getLine(),
                                 printToken.getColumn());
         }
 
-        private StatementInterface printfStatement() {
-                Token printfToken = tokens.consume(TokenType.PRINTF, "Esperado 'printf'");
+        private StatementInterface printfStatement(boolean lineBreak) {
+                Token printfToken = tokens.consume(
+                                lineBreak ? TokenType.PRINTF_LN : TokenType.PRINTF,
+                                lineBreak ? "Esperado 'printfLn'" : "Esperado 'printf'");
                 ExpressionInterface format = expression();
                 List<ExpressionInterface> arguments = new ArrayList<>();
                 while (tokens.verify(TokenType.COMMA)) {
@@ -1497,7 +1539,12 @@ public class Parser {
                         arguments.add(expression());
                 }
                 tokens.consume(TokenType.SEMICOLON, "Esperado ';' após printf");
-                return new PrintfRecord(format, arguments, printfToken.getLine(), printfToken.getColumn());
+                return new PrintfRecord(
+                                format,
+                                arguments,
+                                lineBreak,
+                                printfToken.getLine(),
+                                printfToken.getColumn());
         }
 
         private StatementInterface freeStatement() {

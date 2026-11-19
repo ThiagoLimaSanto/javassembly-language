@@ -10,9 +10,9 @@ public class BackendIntegerWidths {
         double widenedInt = 7;
         double widenedLongToDouble = total;
         double sum = add 1.25, 2.5;
-        print total;
-        print minimum;
-        print widenedLong;
+        printLn total;
+        printLn minimum;
+        printLn widenedLong;
         printf "widen=%f long=%lf sum=%lf", widenedInt, widenedLongToDouble, sum;
         return;
     }

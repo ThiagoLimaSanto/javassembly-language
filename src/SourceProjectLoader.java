@@ -21,6 +21,7 @@ import src.exceptions.SourceProjectException;
 import src.lexer.TokenType;
 
 final class SourceProjectLoader {
+    private final Path libraryRoot = Path.of("lib").toAbsolutePath().normalize();
     private final Set<Path> loadedFiles = new HashSet<>();
     private final Map<Path, ProgramRecord> parsedFiles = new HashMap<>();
     private final List<ClassRecord> classes = new ArrayList<>();
@@ -52,7 +53,7 @@ final class SourceProjectLoader {
             }
             if (importedType.endsWith(".*")) {
                 String importedPackage = importedType.substring(0, importedType.length() - 2);
-                Path importedDirectory = sourceRoot.resolve(importedPackage.replace('.', '/')).normalize();
+                Path importedDirectory = resolvePackageDirectory(importedPackage, sourceRoot);
                 loadPackageSources(importedDirectory);
                 continue;
             }
@@ -63,8 +64,7 @@ final class SourceProjectLoader {
                         1);
             }
 
-            Path importedFile = sourceRoot.resolve(importedType.replace('.', '/') + ".jvs").normalize();
-            requireFile(importedFile);
+            Path importedFile = resolveTypeFile(importedType, sourceRoot);
             ProgramRecord importedUnit = parseProjectFile(importedFile);
             String expectedPackage = packageOf(importedType);
             String expectedType = simpleName(importedType);
@@ -121,8 +121,8 @@ final class SourceProjectLoader {
         while (qualifiedNames.find()) {
             String candidate = qualifiedNames.group(1);
             if (candidate.startsWith("static:")) continue;
-            Path candidateFile = sourceRoot.resolve(candidate.replace('.', '/') + ".jvs").normalize();
-            if (Files.isRegularFile(candidateFile) && !candidateFile.equals(normalizedFile)) {
+            Path candidateFile = findTypeFile(candidate, sourceRoot);
+            if (candidateFile != null && !candidateFile.equals(normalizedFile)) {
                 loadFile(candidateFile);
             }
         }
@@ -134,13 +134,6 @@ final class SourceProjectLoader {
         classes.addAll(unit.classes());
         interfaces.addAll(unit.interfaces());
         registers.addAll(unit.registers());
-    }
-
-    private Path requireFile(Path path) throws IOException {
-        if (!Files.isRegularFile(path)) {
-            throw new SourceProjectException("Arquivo-fonte importado não encontrado.", path);
-        }
-        return path;
     }
 
     private ProgramRecord parse(String source) {
@@ -169,15 +162,20 @@ final class SourceProjectLoader {
         Set<String> packagesToIndex = new HashSet<>();
         packagesToIndex.add(unit.packageName());
         for (String importedName : unit.imports()) {
-            if (!importedName.startsWith("static:") && importedName.endsWith(".*")) {
+            if (importedName.startsWith("static:")) {
+                continue;
+            }
+            if (importedName.endsWith(".*")) {
                 packagesToIndex.add(importedName.substring(0, importedName.length() - 2));
+            } else {
+                packagesToIndex.add(packageOf(importedName));
             }
         }
 
         Set<String> typeNames = new HashSet<>();
         for (String packageName : packagesToIndex) {
-            Path directory = sourceRoot.resolve(packageName.replace('.', '/'));
-            if (!Files.isDirectory(directory)) {
+            Path directory = findPackageDirectory(packageName, sourceRoot);
+            if (directory == null) {
                 continue;
             }
             try (Stream<Path> files = Files.list(directory)) {
@@ -233,8 +231,7 @@ final class SourceProjectLoader {
                     : importingUnit.packageName() + "." + ownerName;
         }
 
-        Path ownerFile = sourceRoot.resolve(ownerName.replace('.', '/') + ".jvs").normalize();
-        requireFile(ownerFile);
+        Path ownerFile = resolveTypeFile(ownerName, sourceRoot);
         ProgramRecord ownerUnit = parseProjectFile(ownerFile);
         final String resolvedOwnerName = ownerName;
         String ownerPackage = packageOf(ownerName);
@@ -356,6 +353,56 @@ final class SourceProjectLoader {
         }
 
         return root;
+    }
+
+    private Path resolveTypeFile(String qualifiedName, Path projectRoot) throws IOException {
+        Path file = findTypeFile(qualifiedName, projectRoot);
+        if (file == null) {
+            throw new SourceProjectException(
+                    "Arquivo-fonte importado não encontrado nas raízes do projeto ou da biblioteca.",
+                    projectRoot.resolve(qualifiedName.replace('.', '/') + ".jvs"));
+        }
+        return file;
+    }
+
+    private Path findTypeFile(String qualifiedName, Path projectRoot) {
+        Path relativeFile = Path.of(qualifiedName.replace('.', '/') + ".jvs");
+        for (Path root : sourceRoots(projectRoot)) {
+            Path candidate = root.resolve(relativeFile).normalize();
+            if (candidate.startsWith(root) && Files.isRegularFile(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private Path resolvePackageDirectory(String packageName, Path projectRoot) throws IOException {
+        Path directory = findPackageDirectory(packageName, projectRoot);
+        if (directory == null) {
+            throw new SourceProjectException(
+                    "Diretório do package importado não encontrado nas raízes do projeto ou da biblioteca.",
+                    projectRoot.resolve(packageName.replace('.', '/')));
+        }
+        return directory;
+    }
+
+    private Path findPackageDirectory(String packageName, Path projectRoot) {
+        Path relativeDirectory = packageName.isEmpty()
+                ? Path.of("")
+                : Path.of(packageName.replace('.', '/'));
+        for (Path root : sourceRoots(projectRoot)) {
+            Path candidate = root.resolve(relativeDirectory).normalize();
+            if (candidate.startsWith(root) && Files.isDirectory(candidate)) {
+                return candidate;
+            }
+        }
+        return null;
+    }
+
+    private List<Path> sourceRoots(Path projectRoot) {
+        return Stream.of(projectRoot.toAbsolutePath().normalize(), libraryRoot)
+                .distinct()
+                .toList();
     }
 
     private String packageOf(String qualifiedName) {

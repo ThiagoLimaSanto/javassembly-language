@@ -140,6 +140,7 @@ public class ASTPrinter implements ASTVisitor {
                 + (node.isStatic() ? " [STATIC]" : "")
                 + (node.isFinal() ? " [FINAL]" : "")
                 + (node.isAbstract() ? " [ABSTRACT]" : "")
+                + (node.isNative() ? " [NATIVE]" : "")
                 + (node.isDefault() ? " [DEFAULT]" : ""));
 
         for (ParameterRecord parameter : node.parameters()) {
@@ -174,13 +175,13 @@ public class ASTPrinter implements ASTVisitor {
 
     @Override
     public void visit(PrintRecord node) {
-        printLine("Print");
+        printLine(node.lineBreak() ? "PrintLn" : "Print");
         visitChild(node.expression());
     }
 
     @Override
     public void visit(PrintfRecord node) {
-        printLine("Printf");
+        printLine(node.lineBreak() ? "PrintfLn" : "Printf");
         visitNamedChild("Formato", node.format());
         for (ExpressionInterface argument : node.arguments()) {
             visitNamedChild("Argumento", argument);

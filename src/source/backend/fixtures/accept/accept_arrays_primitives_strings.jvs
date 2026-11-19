@@ -16,13 +16,13 @@ public class BackendArrayString {
         String[] strings = new String[1];
         strings[0] = "array string";
 
-        print integers.length;
-        print integers[0];
-        print integers[1];
-        print longs[0];
-        print doubles[0];
-        print booleans[0];
-        print strings[0];
+        printLn integers.length;
+        printLn integers[0];
+        printLn integers[1];
+        printLn longs[0];
+        printLn doubles[0];
+        printLn booleans[0];
+        printLn strings[0];
 
         free(integers);
         free(longs);
