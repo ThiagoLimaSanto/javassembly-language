@@ -1,0 +1,14 @@
+public class BackendUseAfterFreeBox {
+    int value;
+}
+
+public class BackendUseAfterFreeFailure {
+    public static func void main(String[] args) {
+        BackendUseAfterFreeBox first = new BackendUseAfterFreeBox();
+        BackendUseAfterFreeBox alias = first;
+        first.value = 42;
+        free(first);
+        print alias.value;
+        return;
+    }
+}

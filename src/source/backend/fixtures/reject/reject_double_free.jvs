@@ -1,0 +1,13 @@
+public class BackendDoubleFreeBox {
+    int value;
+}
+
+public class BackendDoubleFreeFailure {
+    public static func void main(String[] args) {
+        BackendDoubleFreeBox first = new BackendDoubleFreeBox();
+        BackendDoubleFreeBox alias = first;
+        free(first);
+        free(alias);
+        return;
+    }
+}

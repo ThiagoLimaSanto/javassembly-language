@@ -1,0 +1,34 @@
+public class BackendArrayString {
+    public static func void main(String[] args) {
+        int[] integers = new int[2];
+        integers[0] = 12;
+        integers[1] = 34;
+
+        long[] longs = new long[1];
+        longs[0] = 5000000001L;
+
+        double[] doubles = new double[1];
+        doubles[0] = 3.5;
+
+        boolean[] booleans = new boolean[1];
+        booleans[0] = true;
+
+        String[] strings = new String[1];
+        strings[0] = "array string";
+
+        print integers.length;
+        print integers[0];
+        print integers[1];
+        print longs[0];
+        print doubles[0];
+        print booleans[0];
+        print strings[0];
+
+        free(integers);
+        free(longs);
+        free(doubles);
+        free(booleans);
+        free(strings);
+        return;
+    }
+}

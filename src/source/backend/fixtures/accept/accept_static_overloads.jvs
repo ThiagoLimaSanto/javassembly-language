@@ -1,0 +1,21 @@
+public class BackendOverloads {
+    public static func int pick(int value) {
+        return add value, 1;
+    }
+
+    public static func long pick(long value) {
+        return add value, 2L;
+    }
+
+    public static func void touch() {
+        print 8;
+        return;
+    }
+
+    public static func void main(String[] args) {
+        print pick(4);
+        print pick(5L);
+        touch();
+        return;
+    }
+}

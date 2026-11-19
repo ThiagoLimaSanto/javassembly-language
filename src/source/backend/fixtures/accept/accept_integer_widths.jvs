@@ -1,0 +1,19 @@
+public class BackendIntegerWidths {
+    public static func long addLong(long left, long right) {
+        return add left, right;
+    }
+
+    public static func void main(String[] args) {
+        long total = addLong(3000000000L, 2L);
+        long minimum = neg 9223372036854775807L;
+        long widenedLong = 7;
+        double widenedInt = 7;
+        double widenedLongToDouble = total;
+        double sum = add 1.25, 2.5;
+        print total;
+        print minimum;
+        print widenedLong;
+        printf "widen=%f long=%lf sum=%lf", widenedInt, widenedLongToDouble, sum;
+        return;
+    }
+}

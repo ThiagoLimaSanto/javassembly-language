@@ -1,0 +1,27 @@
+public class BackendDefaultBase {
+    int baseValue = 11;
+
+    public func int value() {
+        return this.baseValue;
+    }
+}
+
+public class BackendDefaultChild extends BackendDefaultBase {
+    int childValue = 12;
+
+    public func int combined() {
+        return add this.value(), this.childValue;
+    }
+}
+
+public class BackendImplicitConstructor {
+    public static func void main(String[] args) {
+        BackendDefaultBase value = new BackendDefaultChild();
+        print value.value();
+        BackendDefaultChild child = new BackendDefaultChild();
+        print child.combined();
+        free(value);
+        free(child);
+        return;
+    }
+}

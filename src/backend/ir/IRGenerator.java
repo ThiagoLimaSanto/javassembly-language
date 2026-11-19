@@ -18,6 +18,8 @@ import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
 import src.ast.records.CallRecord;
 import src.ast.records.ClassRecord;
+import src.ast.records.ConstructorInvocationRecord;
+import src.ast.records.ConstructorRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
@@ -51,6 +53,9 @@ public final class IRGenerator {
     }
 
     private record ResolvedMethod(ClassRecord owner, FunctionRecord function) {
+    }
+
+    private record ScoredConstructor(ConstructorRecord constructor, int score) {
     }
 
     private final Deque<Map<String, Operand>> variableScopes = new ArrayDeque<>();
@@ -94,10 +99,6 @@ public final class IRGenerator {
         for (ClassRecord classNode : ast.classes()) {
             classes.put(classNode.name(), classNode);
 
-            if (!classNode.constructors().isEmpty()) {
-                throw unsupported("A geração de código ainda não suporta construtores explícitos: "
-                        + classNode.name() + ".");
-            }
             if (!classNode.interfaces().isEmpty()) {
                 throw unsupported("A geração de código ainda não suporta implementação de interfaces: "
                         + classNode.name() + ".");
@@ -109,6 +110,11 @@ public final class IRGenerator {
                 validateFunctionTypes(function);
                 String label = functionLabel(classNode, function);
                 functionsByLabel.put(label, function);
+            }
+            for (ConstructorRecord constructor : classNode.constructors()) {
+                for (ParameterRecord parameter : constructor.parameters()) {
+                    typeOf(parameter.type());
+                }
             }
         }
 
@@ -152,6 +158,13 @@ public final class IRGenerator {
                 }
                 variableScopes.clear();
             }
+            if (classNode.constructors().isEmpty()) {
+                emitConstructor(ir, classNode, null);
+            } else {
+                for (ConstructorRecord constructor : classNode.constructors()) {
+                    emitConstructor(ir, classNode, constructor);
+                }
+            }
         }
         currentFunction = null;
         currentClassName = null;
@@ -165,6 +178,258 @@ public final class IRGenerator {
         for (ParameterRecord parameter : function.parameters()) {
             typeOf(parameter.type());
         }
+    }
+
+    private void emitConstructor(
+            IRProgram ir,
+            ClassRecord owner,
+            ConstructorRecord constructor) {
+        List<ParameterRecord> parameters = constructor == null
+                ? List.of()
+                : constructor.parameters();
+        BlockRecord body = constructor == null
+                ? new BlockRecord(List.of())
+                : constructor.block();
+        currentClassName = owner.name();
+        currentFunction = new FunctionRecord(
+                constructor == null ? TokenType.PUBLIC : constructor.visibility(),
+                false,
+                false,
+                new TypeRecord("void"),
+                owner.name(),
+                parameters,
+                body,
+                constructor == null ? owner.line() : constructor.line(),
+                constructor == null ? owner.column() : constructor.column());
+        variableScopes.clear();
+        referenceTypesByOperand.clear();
+        sourceTypesByOperand.clear();
+        pushVariableScope();
+
+        Operand thisOperand = declareVariable("this", Operand.Type.REF);
+        registerReferenceType(thisOperand, new TypeRecord(owner.name()));
+        ir.add(new IRInstruction(
+                IROpCode.LABEL,
+                Operand.label(constructorLabel(owner, constructor)),
+                null,
+                null));
+        ir.add(new IRInstruction(
+                IROpCode.PARAM,
+                thisOperand,
+                Operand.constant(-1, Operand.Type.I32),
+                null));
+
+        for (int index = 0; index < parameters.size(); index++) {
+            ParameterRecord parameter = parameters.get(index);
+            Operand parameterOperand = declareVariable(parameter.name(), typeOf(parameter.type()));
+            registerReferenceType(parameterOperand, parameter.type());
+            ir.add(new IRInstruction(
+                    IROpCode.PARAM,
+                    parameterOperand,
+                    Operand.constant(index, Operand.Type.I32),
+                    null));
+        }
+
+        ConstructorInvocationRecord invocation = constructor == null ? null : constructor.invocation();
+        boolean delegatesToThis = invocation != null && invocation.delegatesToThis();
+        String targetClassName = delegatesToThis
+                ? owner.name()
+                : owner.superClass();
+        List<Operand> invocationArguments = new ArrayList<>();
+        if (invocation != null) {
+            for (ExpressionInterface argument : invocation.arguments()) {
+                invocationArguments.add(expression(ir, argument));
+            }
+        }
+        if (targetClassName != null && !targetClassName.equals("Object")) {
+            ClassRecord targetClass = classes.get(targetClassName);
+            if (targetClass == null) {
+                throw unsupported("Classe pai não encontrada: " + targetClassName + ".");
+            }
+            ConstructorRecord targetConstructor = selectConstructor(targetClassName, invocationArguments);
+            List<Operand> converted = convertConstructorArguments(ir, targetConstructor, invocationArguments);
+            List<Operand> callArguments = new ArrayList<>(converted.size() + 1);
+            callArguments.add(thisOperand);
+            callArguments.addAll(converted);
+            ir.add(new IRInstruction(
+                    IROpCode.CALL,
+                    null,
+                    Operand.label(constructorLabel(targetClass, targetConstructor)),
+                    null,
+                    callArguments));
+        } else if (!invocationArguments.isEmpty()) {
+            throw unsupported("O construtor de Object não aceita argumentos.");
+        }
+
+        if (!delegatesToThis) {
+            initializeDeclaredFields(ir, thisOperand, owner);
+        }
+        emitStatement(ir, body);
+        ir.add(new IRInstruction(IROpCode.RETURN, null, null, null));
+        variableScopes.clear();
+        currentFunction = null;
+    }
+
+    private ConstructorRecord selectConstructor(String className, List<Operand> arguments) {
+        ClassRecord classNode = classes.get(className);
+        if (classNode == null) {
+            throw unsupported("Classe não encontrada: " + className + ".");
+        }
+        if (classNode.constructors().isEmpty()) {
+            if (!arguments.isEmpty()) {
+                throw unsupported("O construtor implícito de '" + className + "' não recebe argumentos.");
+            }
+            return null;
+        }
+
+        List<ScoredConstructor> matches = new ArrayList<>();
+        for (ConstructorRecord candidate : classNode.constructors()) {
+            if (candidate.parameters().size() != arguments.size()) {
+                continue;
+            }
+            int score = 0;
+            boolean applicable = true;
+            for (int index = 0; index < arguments.size(); index++) {
+                int conversion = conversionScore(arguments.get(index), candidate.parameters().get(index).type());
+                if (conversion < 0) {
+                    applicable = false;
+                    break;
+                }
+                score += conversion;
+            }
+            if (!applicable) {
+                continue;
+            }
+            matches.add(new ScoredConstructor(candidate, score));
+        }
+        if (matches.isEmpty()) {
+            throw unsupported("Nenhum construtor correspondente encontrado para '" + className + "'.");
+        }
+        int bestScore = matches.stream().mapToInt(ScoredConstructor::score).min().orElseThrow();
+        List<ConstructorRecord> bestCandidates = matches.stream()
+                .filter(candidate -> candidate.score() == bestScore)
+                .map(ScoredConstructor::constructor)
+                .toList();
+        ConstructorRecord best = null;
+        for (ConstructorRecord candidate : bestCandidates) {
+            boolean mostSpecific = true;
+            for (ConstructorRecord other : bestCandidates) {
+                if (candidate != other && !isMoreSpecific(candidate, other)) {
+                    mostSpecific = false;
+                    break;
+                }
+            }
+            if (mostSpecific) {
+                if (best != null) {
+                    throw unsupported("Chamada ambígua de construtor para '" + className + "'.");
+                }
+                best = candidate;
+            }
+        }
+        if (best == null) {
+            throw unsupported("Chamada ambígua de construtor para '" + className + "'.");
+        }
+        return best;
+    }
+
+    private int conversionScore(Operand argument, TypeRecord parameterType) {
+        Operand.Type expected = typeOf(parameterType);
+        if (argument.type() == expected) {
+            String actualSourceType = sourceTypesByOperand.get(argument);
+            String expectedSourceType = parameterType.name();
+            if (argument.type() != Operand.Type.REF) {
+                return 0;
+            }
+            if (argument.kind() == Operand.Kind.CONSTANT && argument.value() == null) {
+                return 1;
+            }
+            if (argument.kind() == Operand.Kind.CONSTANT && argument.value() instanceof String) {
+                actualSourceType = "String";
+            }
+            if (actualSourceType == null) {
+                return -1;
+            }
+            if (actualSourceType.equals(expectedSourceType)) {
+                return 0;
+            }
+            return expectedSourceType.equals("Object")
+                    || isSubclassOf(actualSourceType, expectedSourceType) ? 1 : -1;
+        }
+        if (argument.type() == Operand.Type.I32 && expected == Operand.Type.I64) {
+            return 1;
+        }
+        if (isInteger(argument.type()) && expected == Operand.Type.F64) {
+            return argument.type() == Operand.Type.I32 ? 2 : 1;
+        }
+        return -1;
+    }
+
+    private boolean isSubclassOf(String className, String expectedClassName) {
+        String current = className;
+        while (current != null) {
+            if (current.equals(expectedClassName)) {
+                return true;
+            }
+            ClassRecord classNode = classes.get(current);
+            current = classNode == null ? null : classNode.superClass();
+        }
+        return false;
+    }
+
+    private boolean isMoreSpecific(ConstructorRecord candidate, ConstructorRecord other) {
+        boolean strict = false;
+        for (int index = 0; index < candidate.parameters().size(); index++) {
+            String candidateType = candidate.parameters().get(index).type().name();
+            String otherType = other.parameters().get(index).type().name();
+            if (candidateType.equals(otherType)) {
+                continue;
+            }
+            Operand.Type candidateOperandType = typeOf(new TypeRecord(candidateType));
+            Operand.Type otherOperandType = typeOf(new TypeRecord(otherType));
+            boolean moreSpecific;
+            if (isInteger(candidateOperandType) && otherOperandType == Operand.Type.F64) {
+                moreSpecific = true;
+            } else if (candidateOperandType == Operand.Type.I32
+                    && otherOperandType == Operand.Type.I64) {
+                moreSpecific = true;
+            } else if (candidateOperandType == Operand.Type.REF
+                    && otherOperandType == Operand.Type.REF) {
+                moreSpecific = isSubclassOf(candidateType, otherType)
+                        || ((candidateType.endsWith("[]") || candidateType.equals("String"))
+                                && otherType.equals("Object"));
+            } else {
+                return false;
+            }
+            if (!moreSpecific) {
+                return false;
+            }
+            strict = true;
+        }
+        return strict;
+    }
+
+    private List<Operand> convertConstructorArguments(
+            IRProgram ir,
+            ConstructorRecord constructor,
+            List<Operand> arguments) {
+        if (constructor == null) {
+            return List.of();
+        }
+        List<Operand> converted = new ArrayList<>(arguments.size());
+        for (int index = 0; index < arguments.size(); index++) {
+            converted.add(coerce(ir, arguments.get(index), typeOf(constructor.parameters().get(index).type())));
+        }
+        return converted;
+    }
+
+    private String constructorLabel(ClassRecord owner, ConstructorRecord constructor) {
+        List<String> parameters = constructor == null
+                ? List.of()
+                : constructor.parameters().stream()
+                        .map(parameter -> mangleType(parameter.type().name()))
+                        .toList();
+        return owner.name() + ".__ctor__"
+                + (parameters.isEmpty() ? "void" : String.join("__", parameters));
     }
 
     private void emitStatement(IRProgram ir, StatementInterface statement) {
@@ -583,11 +848,6 @@ public final class IRGenerator {
             return result;
         }
         if (expression instanceof NewObjectRecord creation) {
-            if (!creation.arguments().isEmpty()) {
-                throw unsupported(
-                        "Argumentos de construtor ainda não são suportados pelo backend.");
-            }
-
             String className = creation.type().name();
             if (!classes.containsKey(className)) {
                 throw unsupported("Classe não encontrada: " + className + ".");
@@ -597,6 +857,13 @@ public final class IRGenerator {
             if (layout == null) {
                 throw unsupported("Layout não encontrado para a classe '" + className + "'.");
             }
+
+            List<Operand> arguments = new ArrayList<>();
+            for (ExpressionInterface argument : creation.arguments()) {
+                arguments.add(expression(ir, argument));
+            }
+            ConstructorRecord constructor = selectConstructor(className, arguments);
+            List<Operand> convertedArguments = convertConstructorArguments(ir, constructor, arguments);
 
             Operand result = Operand.temporary("t" + nextTemp++, Operand.Type.REF);
             int allocationSize = Math.max(1, layout.size());
@@ -609,7 +876,15 @@ public final class IRGenerator {
 
             referenceTypesByOperand.put(result, className);
             sourceTypesByOperand.put(result, className);
-            initializeObjectFields(ir, result, classes.get(className));
+            List<Operand> constructorArguments = new ArrayList<>(convertedArguments.size() + 1);
+            constructorArguments.add(result);
+            constructorArguments.addAll(convertedArguments);
+            ir.add(new IRInstruction(
+                    IROpCode.CALL,
+                    null,
+                    Operand.label(constructorLabel(classes.get(className), constructor)),
+                    null,
+                    constructorArguments));
             return result;
         }
         if (expression instanceof CallRecord call)
@@ -776,19 +1051,10 @@ public final class IRGenerator {
         return dimensions;
     }
 
-    private void initializeObjectFields(
+    private void initializeDeclaredFields(
             IRProgram ir,
             Operand object,
             ClassRecord classNode) {
-        String parentName = classNode.superClass();
-        if (parentName != null && !parentName.equals("Object")) {
-            ClassRecord parent = classes.get(parentName);
-            if (parent == null) {
-                throw unsupported("Classe pai não encontrada: " + parentName + ".");
-            }
-            initializeObjectFields(ir, object, parent);
-        }
-
         ClassLayout layout = classLayouts.get(classNode.name());
         if (layout == null) {
             throw unsupported("Layout não encontrado para a classe '" + classNode.name() + "'.");

@@ -1,0 +1,41 @@
+public class BackendAnimal {
+    int baseValue = 2;
+
+    public BackendAnimal(int value) {
+        this.baseValue = value;
+    }
+
+    public func int value() {
+        return this.baseValue;
+    }
+}
+
+public class BackendDog extends BackendAnimal {
+    int dogValue = 3;
+
+    public BackendDog(int base, int dog) {
+        super(base);
+        this.dogValue = dog;
+    }
+
+    public BackendDog() {
+        this(10, 20);
+    }
+
+    public func int value() {
+        return add super.value(), this.dogValue;
+    }
+}
+
+public class BackendConstructorDispatch {
+    public static func void main(String[] args) {
+        BackendAnimal animal = new BackendDog(17, 29);
+        print animal.value();
+        free(animal);
+
+        BackendAnimal delegated = new BackendDog();
+        print delegated.value();
+        free(delegated);
+        return;
+    }
+}

@@ -1,0 +1,13 @@
+public class BackendNullVirtual {
+    public func int value() {
+        return 1;
+    }
+}
+
+public class BackendNullVirtualFailure {
+    public static func void main(String[] args) {
+        BackendNullVirtual object = null;
+        print object.value();
+        return;
+    }
+}

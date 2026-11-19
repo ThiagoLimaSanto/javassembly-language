@@ -1,0 +1,32 @@
+public class BackendArithmetic {
+    public static func int calculate(int left, int right) {
+        int sum = add left, right;
+        int difference = sub left, right;
+        int product = mul sum, difference;
+        int quotient = div product, 2;
+        int remainder = mod left, right;
+        int negative = neg right;
+        print sum;
+        print difference;
+        print quotient;
+        print remainder;
+        print negative;
+        return quotient;
+    }
+
+    public static func void main(String[] args) {
+        int result = calculate(9, 3);
+        if (cmp.eq result, 18) {
+            print 1;
+        } else {
+            print 0;
+        }
+
+        int index = 0;
+        while (cmp.lt index, 3) {
+            index = add index, 1;
+        }
+        print index;
+        return;
+    }
+}

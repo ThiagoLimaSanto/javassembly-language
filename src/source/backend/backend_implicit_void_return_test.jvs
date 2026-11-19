@@ -1,9 +1,0 @@
-public class BackendImplicitVoidReturnTest {
-    public static func void printValue() {
-        print 42;
-    }
-
-    public static func void main(String[] args) {
-        printValue();
-    }
-}

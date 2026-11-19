@@ -1,0 +1,7 @@
+public class BackendArrayBoundsFailure {
+    public static func void main(String[] args) {
+        int[] values = new int[1];
+        print values[1];
+        return;
+    }
+}

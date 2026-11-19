@@ -1,0 +1,7 @@
+public class BackendNullArrayFailure {
+    public static func void main(String[] args) {
+        int[] values = null;
+        print values.length;
+        return;
+    }
+}

@@ -1,0 +1,15 @@
+public class BackendDivisionEdges {
+    public static func int divide(int numerator, int denominator) {
+        return div numerator, denominator;
+    }
+
+    public static func long divideLong(long numerator, long denominator) {
+        return div numerator, denominator;
+    }
+
+    public static func void main(String[] args) {
+        print divide(neg 2147483648, -1);
+        print divideLong(neg 9223372036854775808L, -1L);
+        return;
+    }
+}

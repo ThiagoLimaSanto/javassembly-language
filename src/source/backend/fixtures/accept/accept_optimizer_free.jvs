@@ -1,0 +1,16 @@
+public class BackendOptimizerBox {
+    int value;
+}
+
+public class BackendOptimizerFree {
+    public static func void main(String[] args) {
+        BackendOptimizerBox first = new BackendOptimizerBox();
+        BackendOptimizerBox alias = first;
+        boolean beforeFree = cmp.eq first, alias;
+        free(first);
+        boolean afterFree = cmp.eq first, alias;
+        print beforeFree;
+        print afterFree;
+        return;
+    }
+}

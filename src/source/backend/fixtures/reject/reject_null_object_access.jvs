@@ -1,0 +1,11 @@
+public class BackendNullObject {
+    int value;
+}
+
+public class BackendNullObjectFailure {
+    public static func void main(String[] args) {
+        BackendNullObject object = null;
+        print object.value;
+        return;
+    }
+}

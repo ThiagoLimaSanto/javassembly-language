@@ -1,7 +1,0 @@
-public class ArrayNegativeSizeTest {
-    public static func void main(String[] args) {
-        int[] values = new int[neg 1];
-        print values.length;
-        return;
-    }
-}

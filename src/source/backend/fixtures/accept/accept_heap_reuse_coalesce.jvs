@@ -1,0 +1,33 @@
+public class BackendHeapBox {
+    int value;
+}
+
+public class BackendHeapTest {
+    public static func void main(String[] args) {
+        free(null);
+        BackendHeapBox first = new BackendHeapBox();
+        BackendHeapBox alias = first;
+        first.value = 99;
+        free(first);
+
+        BackendHeapBox reused = new BackendHeapBox();
+        print alias.value;
+        free(reused);
+
+        long[] large = new long[10];
+        free(large);
+        int[] left = new int[4];
+        int[] right = new int[2];
+        left[0] = 17;
+        right[0] = 25;
+        print left[0];
+        print right[0];
+        free(left);
+        free(right);
+        long[] merged = new long[6];
+        print merged.length;
+        print merged[0];
+        free(merged);
+        return;
+    }
+}

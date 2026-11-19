@@ -1,0 +1,15 @@
+public class BackendArray2D {
+    public static func void main(String[] args) {
+        int[][] matrix = new int[2][3];
+        matrix[1][2] = 27;
+
+        print matrix.length;
+        print matrix[1].length;
+        print matrix[1][2];
+
+        free(matrix[0]);
+        free(matrix[1]);
+        free(matrix);
+        return;
+    }
+}

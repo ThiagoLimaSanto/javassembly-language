@@ -1,0 +1,36 @@
+public class BackendCell {
+    int value;
+
+    public BackendCell(int value) {
+        this.value = value;
+    }
+}
+
+public class BackendHolder {
+    BackendCell cell;
+
+    public BackendHolder(BackendCell cell) {
+        this.cell = cell;
+    }
+
+    public func int readValue() {
+        return this.cell.value;
+    }
+}
+
+public class BackendObjectArray {
+    public static func void main(String[] args) {
+        BackendCell[] cells = new BackendCell[2];
+        cells[0] = new BackendCell(14);
+        cells[1] = new BackendCell(25);
+        BackendHolder holder = new BackendHolder(cells[0]);
+        print cells[0].value;
+        print cells[1].value;
+        print holder.readValue();
+        free(holder);
+        free(cells[0]);
+        free(cells[1]);
+        free(cells);
+        return;
+    }
+}
