@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 import src.ast.records.AttributeRecord;
 import src.ast.records.ClassRecord;
 import src.ast.records.ProgramRecord;
+import src.exceptions.ObjectLayoutException;
 
 public class ObjectLayout {
 
@@ -55,7 +56,7 @@ public class ObjectLayout {
 
     public ClassLayout calculate(ClassRecord classNode) {
         if (classNode.superClass() != null && !classNode.superClass().equals("Object")) {
-            throw new IllegalArgumentException(
+            throw new ObjectLayoutException(
                     "Para calcular uma classe com herança, use calculate(ProgramRecord).");
         }
         Map<String, ClassRecord> classesByName = Map.of(classNode.name(), classNode);
@@ -81,7 +82,7 @@ public class ObjectLayout {
         if (parentName != null && !parentName.equals("Object")) {
             ClassRecord parent = classesByName.get(parentName);
             if (parent == null) {
-                throw new IllegalArgumentException(
+                throw new ObjectLayoutException(
                         "Classe pai '" + parentName + "' não encontrada ao calcular o layout de '"
                                 + className + "'.");
             }
@@ -111,7 +112,7 @@ public class ObjectLayout {
             }
 
             if (info == null) {
-                throw new IllegalArgumentException(
+                throw new ObjectLayoutException(
                         "Tipo não suportado na classe "
                                 + className + ": " + type);
             }

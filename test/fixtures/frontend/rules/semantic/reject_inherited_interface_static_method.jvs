@@ -1,0 +1,15 @@
+interface ParentStaticMethod {
+    static func int value() {
+        return 1;
+    }
+}
+
+interface ChildStaticMethod extends ParentStaticMethod {
+}
+
+public class SemanticRejectInheritedInterfaceStaticMethod {
+    public static func void main(String[] args) {
+        int value = ChildStaticMethod.value();
+        return;
+    }
+}

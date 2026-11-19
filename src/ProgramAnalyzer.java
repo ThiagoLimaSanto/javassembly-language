@@ -10,6 +10,7 @@ import src.backend.ir.IRGenerator;
 import src.backend.memory.ObjectLayout;
 import src.backend.optimization.IROptimizer;
 import src.exceptions.SemanticException;
+import src.exceptions.OutputException;
 import src.semantic.SemanticAnalyzer;
 import src.semantic.EntryPointValidator;
 
@@ -23,13 +24,17 @@ public class ProgramAnalyzer {
         String baseName = extension < 0 ? fileName : fileName.substring(0, extension);
         Path projectDirectory = sourceFile.toAbsolutePath().normalize().getParent();
         if (projectDirectory == null) {
-            throw new IOException("Não foi possível determinar a pasta do projeto.");
+            throw new OutputException(
+                    "Não foi possível determinar a pasta do projeto.", sourceFile, null);
         }
         Path outputDirectory = projectDirectory.resolve("out");
-        Files.createDirectories(outputDirectory);
         Path asmFile = outputDirectory.resolve(baseName + ".asm");
-
-        Files.writeString(asmFile, asm);
+        try {
+            Files.createDirectories(outputDirectory);
+            Files.writeString(asmFile, asm);
+        } catch (IOException cause) {
+            throw new OutputException("Não foi possível gravar o assembly gerado.", asmFile, cause);
+        }
     }
 
     public void analyze(String source) {

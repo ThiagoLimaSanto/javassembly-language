@@ -50,6 +50,9 @@ import src.backend.memory.FieldLayout;
 import src.backend.memory.StaticFieldSupport;
 import src.backend.memory.VirtualMethodTable;
 import src.lexer.TokenType;
+import src.exceptions.CompilerInvariantException;
+import src.exceptions.UnresolvedCallException;
+import src.exceptions.UnsupportedBackendFeatureException;
 
 public final class IRGenerator {
     private record ResolvedField(Operand receiver, FieldLayout field) {
@@ -787,14 +790,14 @@ public final class IRGenerator {
 
     private void popVariableScope() {
         if (variableScopes.isEmpty()) {
-            throw new IllegalStateException("Pilha de escopos da IR vazia.");
+            throw new CompilerInvariantException("Pilha de escopos da IR vazia.");
         }
         variableScopes.pop();
     }
 
     private Operand declareVariable(String sourceName, Operand.Type type) {
         if (variableScopes.isEmpty()) {
-            throw new IllegalStateException("Declaração de variável sem escopo ativo na IR.");
+            throw new CompilerInvariantException("Declaração de variável sem escopo ativo na IR.");
         }
         String internalName = "v" + nextVariable++;
         Operand variable = Operand.variable(internalName, type);
@@ -1334,9 +1337,8 @@ public final class IRGenerator {
         String targetLabel;
         try {
             targetLabel = resolveCallTarget(call, arguments);
-        } catch (UnsupportedOperationException exception) {
-            if (!exception.getMessage().startsWith("Nenhuma sobrecarga suportada")
-                    || currentFunction == null || currentFunction.isStatic()) {
+        } catch (UnresolvedCallException exception) {
+            if (currentFunction == null || currentFunction.isStatic()) {
                 throw exception;
             }
             if (interfaces.containsKey(currentClassName)) {
@@ -1930,7 +1932,8 @@ public final class IRGenerator {
         if (ambiguous)
             throw unsupported("Chamada ambígua de '" + call.name() + "' na geração de IR.");
         if (best == null)
-            throw unsupported("Nenhuma sobrecarga suportada corresponde à chamada '" + call.name() + "'.");
+            throw new UnresolvedCallException(
+                    "Nenhuma sobrecarga suportada corresponde à chamada '" + call.name() + "'.");
         return best;
     }
 
@@ -2021,7 +2024,7 @@ public final class IRGenerator {
         return "L" + nextLabel++;
     }
 
-    private UnsupportedOperationException unsupported(String message) {
-        return new UnsupportedOperationException(message);
+    private UnsupportedBackendFeatureException unsupported(String message) {
+        return new UnsupportedBackendFeatureException(message);
     }
 }

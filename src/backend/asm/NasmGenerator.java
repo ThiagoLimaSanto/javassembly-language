@@ -13,6 +13,19 @@ import src.backend.ir.Operand;
 import src.backend.memory.VirtualMethodTable;
 import src.backend.memory.StaticFieldSupport;
 import src.semantic.EntryPointValidator;
+import src.exceptions.CompilerInvariantException;
+import src.exceptions.InvalidIRException;
+import src.exceptions.UnsupportedBackendFeatureException;
+import src.exceptions.runtime.AbstractMethodError;
+import src.exceptions.runtime.ArithmeticException;
+import src.exceptions.runtime.IndexOutOfBoundsException;
+import src.exceptions.runtime.InputMismatchException;
+import src.exceptions.runtime.InvalidFreeException;
+import src.exceptions.runtime.InvalidReferenceException;
+import src.exceptions.runtime.NegativeArraySizeException;
+import src.exceptions.runtime.NullPointerException;
+import src.exceptions.runtime.OutOfMemoryError;
+import src.exceptions.runtime.Throwable;
 import src.ast.records.AttributeRecord;
 import src.ast.records.ClassRecord;
 import src.ast.records.ProgramRecord;
@@ -71,7 +84,7 @@ public class NasmGenerator {
 
         String entryFunction = findEntryFunction(program);
         if (entryFunction == null) {
-            throw new IllegalStateException(
+            throw new InvalidIRException(
                     "O programa precisa ter main(String[]) ou main() para gerar um executável.");
         }
         emitEntryPoint(asm, entryFunction);
@@ -101,7 +114,7 @@ public class NasmGenerator {
         }
 
         if (target.isEmpty()) {
-            throw new IllegalArgumentException(
+            throw new InvalidIRException(
                     "Função não encontrada na IR: " + functionName);
         }
 
@@ -117,26 +130,15 @@ public class NasmGenerator {
     private void appendHeader(StringBuilder asm) {
         asm.append("default rel\n");
         asm.append("section .rodata\n");
-        asm.append("__invalid_reference_message: db ")
-                .append(utf8Bytes("Erro de execução: tentativa de acessar um objeto nulo ou já liberado.\n"))
-                .append("\n");
-        asm.append("__invalid_reference_message_length equ $ - __invalid_reference_message - 1\n");
-        asm.append("__array_bounds_message: db ")
-                .append(utf8Bytes("Erro de execução: índice fora dos limites do array.\n"))
-                .append("\n");
-        asm.append("__array_bounds_message_length equ $ - __array_bounds_message - 1\n");
-        asm.append("__array_size_message: db ")
-                .append(utf8Bytes("Erro de execução: tamanho inválido para o array.\n"))
-                .append("\n");
-        asm.append("__array_size_message_length equ $ - __array_size_message - 1\n");
-        asm.append("__invalid_free_message: db ")
-                .append(utf8Bytes("Erro de execução: free recebeu um ponteiro inválido ou já liberado.\n"))
-                .append("\n");
-        asm.append("__invalid_free_message_length equ $ - __invalid_free_message - 1\n");
-        asm.append("__scanner_input_error_message: db ")
-                .append(utf8Bytes("Erro de execução: entrada inválida para Scanner.\n"))
-                .append("\n");
-        asm.append("__scanner_input_error_message_length equ $ - __scanner_input_error_message - 1\n");
+        appendRuntimeMessage(asm, "__null_pointer_message", new NullPointerException());
+        appendRuntimeMessage(asm, "__invalid_reference_message", new InvalidReferenceException());
+        appendRuntimeMessage(asm, "__array_bounds_message", new IndexOutOfBoundsException());
+        appendRuntimeMessage(asm, "__array_size_message", new NegativeArraySizeException());
+        appendRuntimeMessage(asm, "__invalid_free_message", new InvalidFreeException());
+        appendRuntimeMessage(asm, "__scanner_input_error_message", new InputMismatchException());
+        appendRuntimeMessage(asm, "__arithmetic_error_message", new ArithmeticException());
+        appendRuntimeMessage(asm, "__out_of_memory_message", new OutOfMemoryError());
+        appendRuntimeMessage(asm, "__abstract_method_message", new AbstractMethodError());
         if (!stringLabels.isEmpty()) {
             for (Map.Entry<String, String> entry : stringLabels.entrySet()) {
                 asm.append(entry.getValue()).append(": db ")
@@ -164,6 +166,27 @@ public class NasmGenerator {
         asm.append("__scanner_double_digits: resq 1\n");
         asm.append("__scanner_double_fraction_digits: resq 1\n\n");
         asm.append("section .text\n\n");
+    }
+
+    private void appendRuntimeMessage(
+            StringBuilder asm,
+            String label,
+            Throwable exception) {
+        asm.append(label).append(": db ")
+                .append(utf8Bytes(exception.diagnostic())).append('\n')
+                .append(label).append("_length equ $ - ").append(label).append(" - 1\n");
+    }
+
+    private void appendRuntimeExit(StringBuilder asm, String messageLabel) {
+        asm.append("    mov eax, 1\n")
+                .append("    mov edi, 2\n")
+                .append("    lea rsi, [rel ").append(messageLabel).append("]\n")
+                .append("    mov edx, ").append(messageLabel).append("_length\n")
+                .append("    syscall\n")
+                .append("    mov eax, 60\n")
+                .append("    mov edi, 1\n")
+                .append("    syscall\n")
+                .append("    ud2\n");
     }
 
     private void appendStaticStorage(StringBuilder asm) {
@@ -248,7 +271,7 @@ public class NasmGenerator {
                 continue;
             }
             if (++index >= format.length()) {
-                throw new IllegalArgumentException("Especificador de printf incompleto.");
+                throw new InvalidIRException("Especificador de printf incompleto.");
             }
             char specifier = format.charAt(index);
             if (specifier == '%') {
@@ -297,12 +320,12 @@ public class NasmGenerator {
             String label = instruction.destination().value().toString();
             if (label.endsWith(".main__String_array__ret_void")) {
                 if (stringArrayEntry != null) {
-                    throw new IllegalStateException("Mais de uma função main(String[]) foi gerada.");
+                    throw new InvalidIRException("Mais de uma função main(String[]) foi gerada.");
                 }
                 stringArrayEntry = label;
             } else if (label.endsWith(".main__void__ret_void")) {
                 if (noArgumentEntry != null) {
-                    throw new IllegalStateException("Mais de uma função main() sem parâmetros foi gerada.");
+                    throw new InvalidIRException("Mais de uma função main() sem parâmetros foi gerada.");
                 }
                 noArgumentEntry = label;
             }
@@ -392,7 +415,7 @@ public class NasmGenerator {
     private String address(Operand operand) {
         Integer offset = stackOffsets.get(operand);
         if (offset == null) {
-            throw new IllegalArgumentException(
+            throw new InvalidIRException(
                     "Operando sem espaço no stack: " + operand);
         }
         return "[rbp" + offset + "]";
@@ -413,7 +436,7 @@ public class NasmGenerator {
                             "xmm4", "xmm5", "xmm6", "xmm7"
                     };
                     if (nextXmmParameter >= xmmRegisters.length) {
-                        throw new UnsupportedOperationException(
+                        throw new UnsupportedBackendFeatureException(
                                 "Mais de oito parâmetros double ainda não são suportados.");
                     }
                     asm.append("    movsd qword ").append(address(destination))
@@ -423,7 +446,7 @@ public class NasmGenerator {
                             "rdi", "rsi", "rdx", "rcx", "r8", "r9"
                     };
                     if (nextGpParameter >= gpRegisters.length) {
-                        throw new UnsupportedOperationException(
+                        throw new UnsupportedBackendFeatureException(
                                 "Mais de seis parâmetros inteiros/referência ainda não são suportados.");
                     }
                     String register = gpRegisters[nextGpParameter++];
@@ -437,7 +460,7 @@ public class NasmGenerator {
                         asm.append("    mov qword ").append(address(destination))
                                 .append(", ").append(register).append("\n");
                     } else {
-                        throw new UnsupportedOperationException(
+                        throw new UnsupportedBackendFeatureException(
                                 "Tipo de parâmetro ainda não suportado: " + destination.type());
                     }
                 }
@@ -568,7 +591,7 @@ public class NasmGenerator {
                 asm.append("    ret\n");
             }
 
-            default -> throw new UnsupportedOperationException(
+            default -> throw new UnsupportedBackendFeatureException(
                     "Opcode NASM ainda não implementado: "
                             + instruction.opCode());
         }
@@ -625,7 +648,7 @@ public class NasmGenerator {
             }
 
             if (++index >= format.length()) {
-                throw new IllegalArgumentException("Especificador de printf incompleto.");
+                throw new InvalidIRException("Especificador de printf incompleto.");
             }
 
             char specifier = format.charAt(index);
@@ -640,19 +663,19 @@ public class NasmGenerator {
             boolean longModifier = specifier == 'l';
             if (longModifier) {
                 if (++index >= format.length()) {
-                    throw new IllegalArgumentException("Especificador de printf incompleto.");
+                    throw new InvalidIRException("Especificador de printf incompleto.");
                 }
                 specifier = format.charAt(index);
             }
             if (argumentIndex >= arguments.size()) {
-                throw new IllegalArgumentException("Faltou argumento para o formato de printf.");
+                throw new InvalidIRException("Faltou argumento para o formato de printf.");
             }
             emitFormattedArgument(asm, arguments.get(argumentIndex++), specifier, longModifier);
         }
 
         emitLiteralWrite(asm, literal.toString());
         if (argumentIndex != arguments.size()) {
-            throw new IllegalArgumentException("Há argumentos excedentes no formato de printf.");
+            throw new InvalidIRException("Há argumentos excedentes no formato de printf.");
         }
         if (lineBreak) {
             emitLiteralWrite(asm, "\n");
@@ -692,7 +715,7 @@ public class NasmGenerator {
                 asm.append("    mov eax, eax\n");
                 asm.append("    call __print_u64\n");
             }
-            default -> throw new UnsupportedOperationException(
+            default -> throw new UnsupportedBackendFeatureException(
                     "Especificador de printf não suportado: %" + (longModifier ? "l" : "") + specifier);
         }
     }
@@ -703,7 +726,7 @@ public class NasmGenerator {
         }
         String label = stringLabels.get(value);
         if (label == null) {
-            throw new IllegalStateException("Literal não registrado: " + value);
+            throw new CompilerInvariantException("Literal não registrado: " + value);
         }
         int byteLength = value.getBytes(StandardCharsets.UTF_8).length;
         asm.append("    lea rsi, [rel ").append(label).append("]\n");
@@ -818,10 +841,7 @@ public class NasmGenerator {
         asm.append("    ret\n");
 
         asm.append(".heap_alloc_failed:\n");
-        asm.append("    mov edi, 1\n");
-        asm.append("    mov eax, 60\n"); // exit
-        asm.append("    syscall\n");
-        asm.append("    ud2\n");
+        asm.append("    jmp __runtime_out_of_memory\n");
 
         asm.append("__heap_free:\n");
         asm.append("    test rdi, rdi\n");
@@ -872,15 +892,7 @@ public class NasmGenerator {
         asm.append(".heap_free_return:\n");
         asm.append("    ret\n");
         asm.append(".heap_invalid_free:\n");
-        asm.append("    mov eax, 1\n");
-        asm.append("    mov edi, 2\n");
-        asm.append("    lea rsi, [rel __invalid_free_message]\n");
-        asm.append("    mov edx, __invalid_free_message_length\n");
-        asm.append("    syscall\n");
-        asm.append("    mov eax, 60\n");
-        asm.append("    mov edi, 1\n");
-        asm.append("    syscall\n");
-        asm.append("    ud2\n");
+        appendRuntimeExit(asm, "__invalid_free_message");
 
         asm.append("__heap_validate:\n");
         asm.append("    mov r11, rdi\n");
@@ -903,38 +915,26 @@ public class NasmGenerator {
         asm.append("    jne __runtime_invalid_reference\n");
         asm.append("    ret\n");
 
+        asm.append("__runtime_null_pointer:\n");
+        appendRuntimeExit(asm, "__null_pointer_message");
+
         asm.append("__runtime_invalid_reference:\n");
-        asm.append("    mov eax, 1\n");
-        asm.append("    mov edi, 2\n");
-        asm.append("    lea rsi, [rel __invalid_reference_message]\n");
-        asm.append("    mov edx, __invalid_reference_message_length\n");
-        asm.append("    syscall\n");
-        asm.append("    mov eax, 60\n");
-        asm.append("    mov edi, 1\n");
-        asm.append("    syscall\n");
-        asm.append("    ud2\n");
+        appendRuntimeExit(asm, "__invalid_reference_message");
 
         asm.append("__runtime_array_bounds:\n");
-        asm.append("    mov eax, 1\n");
-        asm.append("    mov edi, 2\n");
-        asm.append("    lea rsi, [rel __array_bounds_message]\n");
-        asm.append("    mov edx, __array_bounds_message_length\n");
-        asm.append("    syscall\n");
-        asm.append("    mov eax, 60\n");
-        asm.append("    mov edi, 1\n");
-        asm.append("    syscall\n");
-        asm.append("    ud2\n");
+        appendRuntimeExit(asm, "__array_bounds_message");
 
-        asm.append("__runtime_invalid_array_size:\n");
-        asm.append("    mov eax, 1\n");
-        asm.append("    mov edi, 2\n");
-        asm.append("    lea rsi, [rel __array_size_message]\n");
-        asm.append("    mov edx, __array_size_message_length\n");
-        asm.append("    syscall\n");
-        asm.append("    mov eax, 60\n");
-        asm.append("    mov edi, 1\n");
-        asm.append("    syscall\n");
-        asm.append("    ud2\n");
+        asm.append("__runtime_negative_array_size:\n");
+        appendRuntimeExit(asm, "__array_size_message");
+
+        asm.append("__runtime_arithmetic_error:\n");
+        appendRuntimeExit(asm, "__arithmetic_error_message");
+
+        asm.append("__runtime_out_of_memory:\n");
+        appendRuntimeExit(asm, "__out_of_memory_message");
+
+        asm.append("__runtime_abstract_method:\n");
+        appendRuntimeExit(asm, "__abstract_method_message");
 
         asm.append("__print_u64:\n");
         asm.append("    lea r8, [rel __number_buffer + 32]\n");
@@ -1053,7 +1053,7 @@ public class NasmGenerator {
                 || instruction.right() == null
                 || instruction.right().kind() != Operand.Kind.CONSTANT
                 || !(instruction.right().value() instanceof String className)) {
-            throw new IllegalArgumentException(
+            throw new InvalidIRException(
                     "ALLOC_OBJECT exige destino REF, tamanho e nome da classe.");
         }
 
@@ -1067,7 +1067,7 @@ public class NasmGenerator {
 
     private void emitObjectFree(StringBuilder asm, IRInstruction instruction) {
         if (instruction.left() == null || instruction.left().type() != Operand.Type.REF) {
-            throw new IllegalArgumentException("FREE_OBJECT exige uma referência de objeto.");
+            throw new InvalidIRException("FREE_OBJECT exige uma referência de objeto.");
         }
         int labelId = nextFreeLabel++;
         String doneLabel = ".L_free_done_" + labelId;
@@ -1092,16 +1092,16 @@ public class NasmGenerator {
                 || instruction.right().kind() != Operand.Kind.CONSTANT
                 || !(instruction.right().value() instanceof Integer elementSize)
                 || (elementSize != 1 && elementSize != 4 && elementSize != 8)) {
-            throw new IllegalArgumentException("ALLOC_ARRAY exige destino, tamanho e tipo de elemento válidos.");
+            throw new InvalidIRException("ALLOC_ARRAY exige destino, tamanho e tipo de elemento válidos.");
         }
 
         loadI32(asm, instruction.left(), "eax");
         asm.append("    test eax, eax\n");
-        asm.append("    js __runtime_invalid_array_size\n");
+        asm.append("    js __runtime_negative_array_size\n");
         asm.append("    movsxd rdi, eax\n");
         asm.append("    imul rdi, ").append(elementSize).append("\n");
         asm.append("    add rdi, 8\n"); // espaço para o comprimento
-        asm.append("    jc __runtime_invalid_array_size\n");
+        asm.append("    jc __runtime_out_of_memory\n");
         asm.append("    call __heap_alloc\n");
         loadI32(asm, instruction.left(), "ecx");
         asm.append("    mov qword [rax], rcx\n"); // comprimento no início do array
@@ -1110,7 +1110,7 @@ public class NasmGenerator {
 
     private void emitArrayFree(StringBuilder asm, IRInstruction instruction) {
         if (instruction.left() == null || instruction.left().type() != Operand.Type.REF) {
-            throw new IllegalArgumentException("FREE_ARRAY exige uma referência de array.");
+            throw new InvalidIRException("FREE_ARRAY exige uma referência de array.");
         }
         int labelId = nextFreeLabel++;
         String doneLabel = ".L_array_free_done_" + labelId;
@@ -1128,11 +1128,11 @@ public class NasmGenerator {
 
     private void emitArrayLength(StringBuilder asm, IRInstruction instruction) {
         if (instruction.destination() == null || instruction.left() == null) {
-            throw new IllegalArgumentException("ARRAY_LENGTH exige destino e array.");
+            throw new InvalidIRException("ARRAY_LENGTH exige destino e array.");
         }
         loadI64(asm, instruction.left(), "r11");
         asm.append("    test r11, r11\n");
-        asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    jz __runtime_null_pointer\n");
         asm.append("    mov rdi, r11\n");
         asm.append("    call __heap_validate\n");
         asm.append("    mov eax, dword [r11]\n");
@@ -1143,7 +1143,7 @@ public class NasmGenerator {
         if (instruction.destination() == null
                 || instruction.left() == null
                 || instruction.right() == null) {
-            throw new IllegalArgumentException("LOAD_ARRAY exige destino, array e índice.");
+            throw new InvalidIRException("LOAD_ARRAY exige destino, array e índice.");
         }
         int elementSize = elementSize(instruction.destination().type());
         emitArrayElementAddress(asm, instruction.left(), instruction.right(), elementSize);
@@ -1171,7 +1171,7 @@ public class NasmGenerator {
         if (instruction.left() == null
                 || instruction.right() == null
                 || instruction.arguments().size() != 1) {
-            throw new IllegalArgumentException("STORE_ARRAY exige array, índice e valor.");
+            throw new InvalidIRException("STORE_ARRAY exige array, índice e valor.");
         }
         Operand value = instruction.arguments().get(0);
         int elementSize = elementSize(value.type());
@@ -1206,11 +1206,11 @@ public class NasmGenerator {
 
     private void emitArraySizeCheck(StringBuilder asm, IRInstruction instruction) {
         if (instruction.left() == null || instruction.left().type() != Operand.Type.I32) {
-            throw new IllegalArgumentException("CHECK_ARRAY_SIZE exige um tamanho int.");
+            throw new InvalidIRException("CHECK_ARRAY_SIZE exige um tamanho int.");
         }
         loadI32(asm, instruction.left(), "eax");
         asm.append("    test eax, eax\n");
-        asm.append("    js __runtime_invalid_array_size\n");
+        asm.append("    js __runtime_negative_array_size\n");
     }
 
     private void emitArrayElementAddress(
@@ -1220,7 +1220,7 @@ public class NasmGenerator {
             int elementSize) {
         loadI64(asm, array, "r11");
         asm.append("    test r11, r11\n");
-        asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    jz __runtime_null_pointer\n");
         asm.append("    mov rdi, r11\n");
         asm.append("    call __heap_validate\n");
         loadI32(asm, index, "eax");
@@ -1244,7 +1244,7 @@ public class NasmGenerator {
                 || offsetOperand.kind() != Operand.Kind.CONSTANT
                 || !(offsetOperand.value() instanceof Integer offset)
                 || instruction.arguments().size() != 1) {
-            throw new IllegalArgumentException(
+            throw new InvalidIRException(
                     "STORE_FIELD exige receptor, offset inteiro e um valor.");
         }
 
@@ -1252,7 +1252,7 @@ public class NasmGenerator {
 
         loadI64(asm, receiver, "r11");
         asm.append("    test r11, r11\n");
-        asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    jz __runtime_null_pointer\n");
         asm.append("    mov rdi, r11\n");
         asm.append("    call __heap_validate\n");
 
@@ -1279,7 +1279,7 @@ public class NasmGenerator {
                         .append(fieldAddress)
                         .append(", xmm0\n");
             }
-            default -> throw new UnsupportedOperationException(
+            default -> throw new UnsupportedBackendFeatureException(
                     "Tipo não suportado em STORE_FIELD: " + value.type());
         }
     }
@@ -1287,7 +1287,7 @@ public class NasmGenerator {
     private void emitStaticStore(StringBuilder asm, IRInstruction instruction) {
         String label = staticLabel(instruction.left());
         if (instruction.arguments().size() != 1) {
-            throw new IllegalArgumentException("STORE_STATIC exige exatamente um valor.");
+            throw new InvalidIRException("STORE_STATIC exige exatamente um valor.");
         }
         Operand value = instruction.arguments().get(0);
         switch (value.type()) {
@@ -1307,7 +1307,7 @@ public class NasmGenerator {
                 loadF64(asm, value, "xmm0");
                 asm.append("    movsd qword [rel ").append(label).append("], xmm0\n");
             }
-            default -> throw new UnsupportedOperationException(
+            default -> throw new UnsupportedBackendFeatureException(
                     "Tipo não suportado em STORE_STATIC: " + value.type());
         }
     }
@@ -1332,14 +1332,14 @@ public class NasmGenerator {
                 asm.append("    movsd xmm0, qword [rel ").append(label).append("]\n");
                 storeF64(asm, destination, "xmm0");
             }
-            default -> throw new UnsupportedOperationException(
+            default -> throw new UnsupportedBackendFeatureException(
                     "Tipo não suportado em LOAD_STATIC: " + destination.type());
         }
     }
 
     private String staticLabel(Operand operand) {
         if (operand == null || operand.kind() != Operand.Kind.LABEL) {
-            throw new IllegalArgumentException("A operação static exige um label de armazenamento.");
+            throw new InvalidIRException("A operação static exige um label de armazenamento.");
         }
         return operand.value().toString();
     }
@@ -1352,13 +1352,13 @@ public class NasmGenerator {
                 || offsetOperand == null
                 || offsetOperand.kind() != Operand.Kind.CONSTANT
                 || !(offsetOperand.value() instanceof Integer offset)) {
-            throw new IllegalArgumentException(
+            throw new InvalidIRException(
                     "LOAD_FIELD exige uma referência e um offset inteiro.");
         }
 
         loadI64(asm, base, "rax");
         asm.append("    test rax, rax\n");
-        asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    jz __runtime_null_pointer\n");
         asm.append("    mov rdi, rax\n");
         asm.append("    push rax\n");
         asm.append("    call __heap_validate\n");
@@ -1387,7 +1387,7 @@ public class NasmGenerator {
                         .append("\n");
                 storeF64(asm, instruction.destination(), "xmm0");
             }
-            default -> throw new UnsupportedOperationException(
+            default -> throw new UnsupportedBackendFeatureException(
                     "Tipo não suportado em LOAD_FIELD: "
                             + instruction.destination().type());
         }
@@ -1404,7 +1404,7 @@ public class NasmGenerator {
                 case ADD -> "addsd";
                 case SUB -> "subsd";
                 case MUL -> "mulsd";
-                default -> throw new UnsupportedOperationException(
+                default -> throw new UnsupportedBackendFeatureException(
                         "Operação double não implementada: " + instruction.opCode());
             };
             asm.append("    ").append(floatingOpcode).append(" xmm0, xmm1\n");
@@ -1428,7 +1428,7 @@ public class NasmGenerator {
             boolean remainder) {
         if (instruction.destination().type() == Operand.Type.F64) {
             if (remainder) {
-                throw new UnsupportedOperationException("mod double ainda não é suportado.");
+                throw new UnsupportedBackendFeatureException("mod double ainda não é suportado.");
             }
             loadF64(asm, instruction.left(), "xmm0");
             loadF64(asm, instruction.right(), "xmm1");
@@ -1442,6 +1442,8 @@ public class NasmGenerator {
         if (instruction.destination().type() == Operand.Type.I64) {
             loadI64(asm, instruction.left(), "rax");
             loadI64(asm, instruction.right(), "rcx");
+            asm.append("    test rcx, rcx\n");
+            asm.append("    jz __runtime_arithmetic_error\n");
             asm.append("    cmp rcx, -1\n");
             asm.append("    jne ").append(normal).append("\n");
             asm.append("    mov rdx, -9223372036854775808\n");
@@ -1458,6 +1460,8 @@ public class NasmGenerator {
         } else {
             loadI32(asm, instruction.left(), "eax");
             loadI32(asm, instruction.right(), "ecx");
+            asm.append("    test ecx, ecx\n");
+            asm.append("    jz __runtime_arithmetic_error\n");
             asm.append("    cmp ecx, -1\n");
             asm.append("    jne ").append(normal).append("\n");
             asm.append("    cmp eax, -2147483648\n");
@@ -1497,7 +1501,7 @@ public class NasmGenerator {
                 case GE -> {
                     asm.append("    setae al\n    setnp cl\n    and al, cl\n");
                 }
-                default -> throw new IllegalArgumentException(
+                default -> throw new InvalidIRException(
                         "Não é uma comparação: " + instruction.opCode());
             }
             asm.append("    movzx eax, al\n");
@@ -1523,7 +1527,7 @@ public class NasmGenerator {
             case GE -> "setge";
             case EQ -> "sete";
             case NE -> "setne";
-            default -> throw new IllegalArgumentException(
+            default -> throw new InvalidIRException(
                     "Não é uma comparação: " + instruction.opCode());
         };
 
@@ -1545,13 +1549,13 @@ public class NasmGenerator {
         for (Operand argument : instruction.arguments()) {
             if (argument.type() == Operand.Type.F64) {
                 if (xmmIndex == xmmRegisters.length) {
-                    throw new UnsupportedOperationException(
+                    throw new UnsupportedBackendFeatureException(
                             "Chamadas suportam até oito argumentos double em registradores.");
                 }
                 loadF64(asm, argument, xmmRegisters[xmmIndex++]);
             } else {
                 if (gpIndex == gpRegisters.length) {
-                    throw new UnsupportedOperationException(
+                    throw new UnsupportedBackendFeatureException(
                             "Chamadas suportam até seis argumentos inteiros/referência em registradores.");
                 }
                 String register = gpRegisters[gpIndex++];
@@ -1586,17 +1590,17 @@ public class NasmGenerator {
                 || instruction.right().kind() != Operand.Kind.CONSTANT
                 || !(instruction.right().value() instanceof Integer slot)
                 || slot < 0) {
-            throw new IllegalArgumentException("CALL_VIRTUAL exige receptor e slot válido.");
+            throw new InvalidIRException("CALL_VIRTUAL exige receptor e slot válido.");
         }
 
         loadI64(asm, instruction.left(), "rdi");
         asm.append("    test rdi, rdi\n");
-        asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    jz __runtime_null_pointer\n");
         asm.append("    call __heap_validate\n");
         asm.append("    mov rax, qword [rdi]\n");
         asm.append("    mov r10, qword [rax + ").append(slot * 8).append("]\n");
         asm.append("    test r10, r10\n");
-        asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    jz __runtime_abstract_method\n");
 
         String[] gpRegisters = { "rsi", "rdx", "rcx", "r8", "r9" };
         String[] xmmRegisters = {
@@ -1608,13 +1612,13 @@ public class NasmGenerator {
         for (Operand argument : instruction.arguments()) {
             if (argument.type() == Operand.Type.F64) {
                 if (xmmIndex == xmmRegisters.length) {
-                    throw new UnsupportedOperationException(
+                    throw new UnsupportedBackendFeatureException(
                             "Chamadas virtuais suportam até oito argumentos double.");
                 }
                 loadF64(asm, argument, xmmRegisters[xmmIndex++]);
             } else {
                 if (gpIndex == gpRegisters.length) {
-                    throw new UnsupportedOperationException(
+                    throw new UnsupportedBackendFeatureException(
                             "Chamadas virtuais suportam até cinco argumentos inteiros/referência além de this.");
                 }
                 String register = gpRegisters[gpIndex++];
@@ -1681,7 +1685,7 @@ public class NasmGenerator {
             loadI64(asm, source, "rax");
             storeI64(asm, destination, "rax");
         } else {
-            throw new UnsupportedOperationException(
+            throw new UnsupportedBackendFeatureException(
                     "Atribuição não suportada para o tipo " + destination.type() + ".");
         }
     }
@@ -1706,7 +1710,7 @@ public class NasmGenerator {
         }
         if (source.type() == Operand.Type.I32 || source.type() == Operand.Type.BOOL) {
             if (register32(register) == null) {
-                throw new IllegalArgumentException("Registrador de 64 bits inválido: " + register);
+                throw new InvalidIRException("Registrador de 64 bits inválido: " + register);
             }
             asm.append("    movsxd ").append(register).append(", dword ")
                     .append(address(source)).append("\n");
@@ -1719,7 +1723,7 @@ public class NasmGenerator {
     private void loadF64(StringBuilder asm, Operand source, String register) {
         if (source.kind() == Operand.Kind.CONSTANT) {
             if (!(source.value() instanceof Double value)) {
-                throw new IllegalArgumentException("Constante F64 inválida: " + source.value());
+                throw new InvalidIRException("Constante F64 inválida: " + source.value());
             }
             String bits = Long.toUnsignedString(Double.doubleToRawLongBits(value), 16);
             asm.append("    mov rax, 0x").append(bits).append("\n");

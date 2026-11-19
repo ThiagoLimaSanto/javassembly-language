@@ -48,6 +48,7 @@ import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
 import src.exceptions.DoubleOutOfRangeException;
+import src.exceptions.CompilerInvariantException;
 import src.exceptions.LongOutOfRangeException;
 import src.exceptions.SemanticException;
 import src.exceptions.SyntacticException;
@@ -566,7 +567,7 @@ public class Parser {
                                         tokens.consume(TokenType.STATIC, "Esperado 'static'");
                                         isStatic = true;
                                 }
-                                default -> throw new IllegalStateException("Modificador inesperado");
+                                default -> throw new CompilerInvariantException("Modificador inesperado");
                         }
                 }
 

@@ -1,1 +1,1 @@
-Erro de execução: tamanho inválido para o array.
+NegativeArraySizeException: Tamanho negativo para o array.

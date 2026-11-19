@@ -10,6 +10,7 @@ import src.ast.records.FunctionRecord;
 import src.ast.records.InterfaceRecord;
 import src.ast.records.ProgramRecord;
 import src.lexer.TokenType;
+import src.exceptions.InvalidIRException;
 
 public final class VirtualMethodTable {
     private record InterfaceMethod(String owner, FunctionRecord function) {
@@ -45,7 +46,7 @@ public final class VirtualMethodTable {
     public int slot(FunctionRecord function) {
         Integer slot = slots.get(signature(function));
         if (slot == null) {
-            throw new IllegalArgumentException(
+            throw new InvalidIRException(
                     "Método não possui slot virtual: " + function.name());
         }
         return slot;

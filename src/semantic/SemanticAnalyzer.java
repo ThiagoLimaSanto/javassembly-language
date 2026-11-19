@@ -12,6 +12,7 @@ import src.ast.StatementInterface;
 import src.ast.records.*;
 import src.ast.visitor.ASTVisitor;
 import src.exceptions.SemanticException;
+import src.exceptions.CompilerInvariantException;
 import src.lexer.TokenType;
 
 public class SemanticAnalyzer implements ASTVisitor {
@@ -2706,7 +2707,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             return type;
         }
 
-        throw new IllegalStateException(
+        throw new CompilerInvariantException(
                 "Tipo de expressão não implementado: "
                         + expression.getClass().getSimpleName());
     }
@@ -2915,7 +2916,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     private SemanticType componentType(SemanticType arrayType) {
         if (!arrayType.isArray()) {
-            throw new IllegalArgumentException("Expected an array type");
+            throw new CompilerInvariantException("componentType recebeu um tipo que não é array.");
         }
         return arrayType.arrayDimensions() == 1
                 ? new SemanticType(arrayType.primitiveType(), arrayType.className(), 0)

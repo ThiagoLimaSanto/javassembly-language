@@ -1,0 +1,7 @@
+public class DivisionByZeroTest {
+    public static func void main(String[] args) {
+        int result = div 10, 0;
+        printLn result;
+        return;
+    }
+}

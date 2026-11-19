@@ -1,0 +1,21 @@
+public interface NumberTools {
+    public static func int increment(int value) {
+        return add value, 1;
+    }
+
+    private static func int doubled(int value) {
+        return mul value, 2;
+    }
+
+    public static func int compose(int value) {
+        return doubled(increment(value));
+    }
+}
+
+public class InterfaceStaticMethodsTest {
+    public static func void main(String[] args) {
+        printLn NumberTools.compose(4);
+        printLn NumberTools.increment(16);
+        return;
+    }
+}
