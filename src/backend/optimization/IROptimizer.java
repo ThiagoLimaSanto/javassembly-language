@@ -337,7 +337,9 @@ public class IROptimizer {
             for (IRInstruction instruction : block.instructions) {
                 IRInstruction rewritten = rewriteCopies(instruction, copies);
                 output.add(rewritten);
-                if (rewritten.opCode() == IROpCode.CALL)
+                if (rewritten.opCode() == IROpCode.CALL
+                        || rewritten.opCode() == IROpCode.FREE_OBJECT
+                        || rewritten.opCode() == IROpCode.FREE_ARRAY)
                     copies.clear();
 
                 Operand destination = rewritten.destination();
@@ -346,6 +348,7 @@ public class IROptimizer {
                 removeCopiesFor(destination, copies);
                 if (rewritten.opCode() == IROpCode.ASSIGN
                         && rewritten.left() != null
+                        && destination.type() != Operand.Type.REF
                         && (rewritten.left().kind() == Operand.Kind.VARIABLE
                                 || rewritten.left().kind() == Operand.Kind.TEMPORARY)
                         && !destination.equals(rewritten.left())) {

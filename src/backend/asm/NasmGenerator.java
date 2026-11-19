@@ -102,6 +102,14 @@ public class NasmGenerator {
                 .append(utf8Bytes("Erro de execução: tentativa de acessar um objeto nulo ou já liberado.\n"))
                 .append("\n");
         asm.append("__invalid_reference_message_length equ $ - __invalid_reference_message - 1\n");
+        asm.append("__array_bounds_message: db ")
+                .append(utf8Bytes("Erro de execução: índice fora dos limites do array.\n"))
+                .append("\n");
+        asm.append("__array_bounds_message_length equ $ - __array_bounds_message - 1\n");
+        asm.append("__array_size_message: db ")
+                .append(utf8Bytes("Erro de execução: tamanho inválido para o array.\n"))
+                .append("\n");
+        asm.append("__array_size_message_length equ $ - __array_size_message - 1\n");
         if (!stringLabels.isEmpty()) {
             for (Map.Entry<String, String> entry : stringLabels.entrySet()) {
                 asm.append(entry.getValue()).append(": db ")
@@ -366,6 +374,18 @@ public class NasmGenerator {
             case ALLOC_OBJECT -> emitObjectAllocation(asm, instruction);
 
             case FREE_OBJECT -> emitObjectFree(asm, instruction);
+
+            case ALLOC_ARRAY -> emitArrayAllocation(asm, instruction);
+
+            case LOAD_ARRAY -> emitArrayLoad(asm, instruction);
+
+            case STORE_ARRAY -> emitArrayStore(asm, instruction);
+
+            case ARRAY_LENGTH -> emitArrayLength(asm, instruction);
+
+            case FREE_ARRAY -> emitArrayFree(asm, instruction);
+
+            case CHECK_ARRAY_SIZE -> emitArraySizeCheck(asm, instruction);
 
             case ASSIGN -> {
                 emitAssignment(asm, instruction.destination(), instruction.left());
@@ -640,6 +660,28 @@ public class NasmGenerator {
         asm.append("    syscall\n");
         asm.append("    ud2\n");
 
+        asm.append("__runtime_array_bounds:\n");
+        asm.append("    mov eax, 1\n");
+        asm.append("    mov edi, 2\n");
+        asm.append("    lea rsi, [rel __array_bounds_message]\n");
+        asm.append("    mov edx, __array_bounds_message_length\n");
+        asm.append("    syscall\n");
+        asm.append("    mov eax, 60\n");
+        asm.append("    mov edi, 1\n");
+        asm.append("    syscall\n");
+        asm.append("    ud2\n");
+
+        asm.append("__runtime_invalid_array_size:\n");
+        asm.append("    mov eax, 1\n");
+        asm.append("    mov edi, 2\n");
+        asm.append("    lea rsi, [rel __array_size_message]\n");
+        asm.append("    mov edx, __array_size_message_length\n");
+        asm.append("    syscall\n");
+        asm.append("    mov eax, 60\n");
+        asm.append("    mov edi, 1\n");
+        asm.append("    syscall\n");
+        asm.append("    ud2\n");
+
         asm.append("__print_u64:\n");
         asm.append("    lea r8, [rel __number_buffer + 32]\n");
         asm.append("    mov r9d, 10\n");
@@ -805,6 +847,172 @@ public class NasmGenerator {
             storeI64(asm, instruction.left(), "rax");
         }
         asm.append(doneLabel).append(":\n");
+    }
+
+    private void emitArrayAllocation(StringBuilder asm, IRInstruction instruction) {
+        if (instruction.destination() == null
+                || instruction.destination().type() != Operand.Type.REF
+                || instruction.left() == null
+                || instruction.right() == null
+                || instruction.right().kind() != Operand.Kind.CONSTANT
+                || !(instruction.right().value() instanceof Integer elementSize)
+                || (elementSize != 1 && elementSize != 4 && elementSize != 8)) {
+            throw new IllegalArgumentException("ALLOC_ARRAY exige destino, tamanho e tipo de elemento válidos.");
+        }
+
+        int labelId = nextAllocationLabel++;
+        String successLabel = ".L_array_alloc_ok_" + labelId;
+        loadI32(asm, instruction.left(), "eax");
+        asm.append("    test eax, eax\n");
+        asm.append("    js __runtime_invalid_array_size\n");
+        asm.append("    movsxd rsi, eax\n");
+        asm.append("    imul rsi, ").append(elementSize).append("\n");
+        asm.append("    add rsi, 16\n");
+        asm.append("    jc __runtime_invalid_array_size\n");
+        asm.append("    mov eax, 9\n");
+        asm.append("    xor edi, edi\n");
+        asm.append("    mov edx, 3\n");
+        asm.append("    mov r10d, 34\n");
+        asm.append("    mov r8, -1\n");
+        asm.append("    xor r9d, r9d\n");
+        asm.append("    syscall\n");
+        asm.append("    test rax, rax\n");
+        asm.append("    jns ").append(successLabel).append("\n");
+        asm.append("    mov edi, 1\n");
+        asm.append("    mov eax, 60\n");
+        asm.append("    syscall\n");
+        asm.append(successLabel).append(":\n");
+        asm.append("    mov qword [rax], rsi\n");
+        loadI32(asm, instruction.left(), "ecx");
+        asm.append("    mov qword [rax + 8], rcx\n");
+        asm.append("    add rax, 16\n");
+        storeI64(asm, instruction.destination(), "rax");
+    }
+
+    private void emitArrayFree(StringBuilder asm, IRInstruction instruction) {
+        if (instruction.left() == null || instruction.left().type() != Operand.Type.REF) {
+            throw new IllegalArgumentException("FREE_ARRAY exige uma referência de array.");
+        }
+        int labelId = nextFreeLabel++;
+        String doneLabel = ".L_array_free_done_" + labelId;
+        loadI64(asm, instruction.left(), "rdi");
+        asm.append("    test rdi, rdi\n");
+        asm.append("    jz ").append(doneLabel).append("\n");
+        asm.append("    sub rdi, 16\n");
+        asm.append("    mov rsi, qword [rdi]\n");
+        asm.append("    mov eax, 11\n");
+        asm.append("    syscall\n");
+        if (instruction.left().kind() == Operand.Kind.VARIABLE
+                || instruction.left().kind() == Operand.Kind.TEMPORARY) {
+            asm.append("    xor eax, eax\n");
+            storeI64(asm, instruction.left(), "rax");
+        }
+        asm.append(doneLabel).append(":\n");
+    }
+
+    private void emitArrayLength(StringBuilder asm, IRInstruction instruction) {
+        if (instruction.destination() == null || instruction.left() == null) {
+            throw new IllegalArgumentException("ARRAY_LENGTH exige destino e array.");
+        }
+        loadI64(asm, instruction.left(), "r11");
+        asm.append("    test r11, r11\n");
+        asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    mov eax, dword [r11 - 8]\n");
+        storeI32(asm, instruction.destination(), "eax");
+    }
+
+    private void emitArrayLoad(StringBuilder asm, IRInstruction instruction) {
+        if (instruction.destination() == null
+                || instruction.left() == null
+                || instruction.right() == null) {
+            throw new IllegalArgumentException("LOAD_ARRAY exige destino, array e índice.");
+        }
+        int elementSize = elementSize(instruction.destination().type());
+        emitArrayElementAddress(asm, instruction.left(), instruction.right(), elementSize);
+        switch (instruction.destination().type()) {
+            case I32 -> {
+                asm.append("    mov eax, dword [r11 + r10]\n");
+                storeI32(asm, instruction.destination(), "eax");
+            }
+            case BOOL -> {
+                asm.append("    movzx eax, byte [r11 + r10]\n");
+                storeI32(asm, instruction.destination(), "eax");
+            }
+            case I64, REF -> {
+                asm.append("    mov rax, qword [r11 + r10]\n");
+                storeI64(asm, instruction.destination(), "rax");
+            }
+            case F64 -> {
+                asm.append("    movsd xmm0, qword [r11 + r10]\n");
+                storeF64(asm, instruction.destination(), "xmm0");
+            }
+        }
+    }
+
+    private void emitArrayStore(StringBuilder asm, IRInstruction instruction) {
+        if (instruction.left() == null
+                || instruction.right() == null
+                || instruction.arguments().size() != 1) {
+            throw new IllegalArgumentException("STORE_ARRAY exige array, índice e valor.");
+        }
+        Operand value = instruction.arguments().get(0);
+        int elementSize = elementSize(value.type());
+        emitArrayElementAddress(asm, instruction.left(), instruction.right(), elementSize);
+        switch (value.type()) {
+            case I32 -> {
+                loadI32(asm, value, "edx");
+                asm.append("    mov dword [r11 + r10], edx\n");
+            }
+            case BOOL -> {
+                loadI32(asm, value, "edx");
+                asm.append("    mov byte [r11 + r10], dl\n");
+            }
+            case I64, REF -> {
+                loadI64(asm, value, "rdx");
+                asm.append("    mov qword [r11 + r10], rdx\n");
+            }
+            case F64 -> {
+                loadF64(asm, value, "xmm0");
+                asm.append("    movsd qword [r11 + r10], xmm0\n");
+            }
+        }
+    }
+
+    private int elementSize(Operand.Type type) {
+        return switch (type) {
+            case BOOL -> 1;
+            case I32 -> 4;
+            case I64, F64, REF -> 8;
+        };
+    }
+
+    private void emitArraySizeCheck(StringBuilder asm, IRInstruction instruction) {
+        if (instruction.left() == null || instruction.left().type() != Operand.Type.I32) {
+            throw new IllegalArgumentException("CHECK_ARRAY_SIZE exige um tamanho int.");
+        }
+        loadI32(asm, instruction.left(), "eax");
+        asm.append("    test eax, eax\n");
+        asm.append("    js __runtime_invalid_array_size\n");
+    }
+
+    private void emitArrayElementAddress(
+            StringBuilder asm,
+            Operand array,
+            Operand index,
+            int elementSize) {
+        loadI64(asm, array, "r11");
+        asm.append("    test r11, r11\n");
+        asm.append("    jz __runtime_invalid_reference\n");
+        loadI32(asm, index, "eax");
+        asm.append("    test eax, eax\n");
+        asm.append("    js __runtime_array_bounds\n");
+        asm.append("    movsxd r10, eax\n");
+        asm.append("    cmp r10, qword [r11 - 8]\n");
+        asm.append("    jae __runtime_array_bounds\n");
+        if (elementSize != 1) {
+            asm.append("    imul r10, ").append(elementSize).append("\n");
+        }
+        asm.append("    add r11, 16\n");
     }
 
     private void emitFieldStore(StringBuilder asm, IRInstruction instruction) {

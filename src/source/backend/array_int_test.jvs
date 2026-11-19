@@ -1,0 +1,17 @@
+public class ArrayIntTest {
+    public static func void main(String[] args) {
+        int[] values = new int[3];
+
+        print values.length;
+        print values[0];
+        values[0] = 17;
+        values[1] = 25;
+        values[2] = 42;
+        print values[0];
+        print values[1];
+        print values[2];
+
+        free(values);
+        return;
+    }
+}

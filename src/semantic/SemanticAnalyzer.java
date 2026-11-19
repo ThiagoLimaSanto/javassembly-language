@@ -3210,10 +3210,11 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (type.isNull()) {
             return;
         }
-        if (!type.isClass() || !classes.containsKey(type.className())) {
+        boolean classReference = type.isClass() && classes.containsKey(type.className());
+        if (!type.isArray() && !classReference) {
             throw new SemanticException(
-                    "free exige uma expressão de tipo classe; não é permitido liberar "
-                            + "primitivos, strings ou arrays.",
+                    "free exige uma expressão de tipo classe ou array; não é permitido liberar "
+                            + "primitivos ou strings.",
                     node.line(),
                     node.column());
         }

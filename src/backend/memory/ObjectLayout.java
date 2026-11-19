@@ -100,6 +100,10 @@ public class ObjectLayout {
                 info = new TypeInfo(8, 8);
             }
 
+            if (info == null && (type.endsWith("[]") || type.equals("String"))) {
+                info = new TypeInfo(8, 8);
+            }
+
             if (info == null) {
                 throw new IllegalArgumentException(
                         "Tipo não suportado na classe "

@@ -1,0 +1,17 @@
+public class ArrayBooleanTest {
+    public static func void main(String[] args) {
+        boolean[] values = new boolean[3];
+
+        print values.length;
+        print values[0];
+        values[0] = True;
+        values[1] = False;
+        values[2] = True;
+        print values[0];
+        print values[1];
+        print values[2];
+
+        free(values);
+        return;
+    }
+}

@@ -1,0 +1,7 @@
+public class ArrayNullAccessTest {
+    public static func void main(String[] args) {
+        int[] values = null;
+        print values[0];
+        return;
+    }
+}

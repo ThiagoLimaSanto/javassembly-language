@@ -4,14 +4,15 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 import src.ast.ExpressionInterface;
 import src.ast.StatementInterface;
 import src.ast.records.AssignmentRecord;
+import src.ast.records.ArrayAccessRecord;
+import src.ast.records.ArrayCreationRecord;
+import src.ast.records.ArrayInitializerRecord;
 import src.ast.records.AttributeRecord;
 import src.ast.records.BinaryExpressionRecord;
 import src.ast.records.BlockRecord;
@@ -46,7 +47,7 @@ public final class IRGenerator {
     private final Deque<Map<String, Operand>> variableScopes = new ArrayDeque<>();
     private final Map<String, ClassLayout> classLayouts;
     private final Map<Operand, String> referenceTypesByOperand = new HashMap<>();
-    private final Set<Operand> stringVariables = new HashSet<>();
+    private final Map<Operand, String> sourceTypesByOperand = new HashMap<>();
     private final Map<String, ClassRecord> classes = new HashMap<>();
     private final Map<String, FunctionRecord> functionsByLabel = new HashMap<>();
     private final Map<String, ClassRecord> ownersByLabel = new HashMap<>();
@@ -72,6 +73,7 @@ public final class IRGenerator {
         functionsByLabel.clear();
         ownersByLabel.clear();
         referenceTypesByOperand.clear();
+        sourceTypesByOperand.clear();
 
         if (!ast.interfaces().isEmpty()) {
             throw unsupported("A geração de código ainda não suporta interfaces.");
@@ -116,7 +118,7 @@ public final class IRGenerator {
                 currentFunction = function;
                 variableScopes.clear();
                 referenceTypesByOperand.clear();
-                stringVariables.clear();
+                sourceTypesByOperand.clear();
                 pushVariableScope();
                 ir.add(new IRInstruction(IROpCode.LABEL,
                         Operand.label(functionLabel(classNode, function)), null, null));
@@ -126,9 +128,6 @@ public final class IRGenerator {
                     Operand.Type parameterType = typeOf(parameter.type());
                     Operand parameterOperand = declareVariable(parameter.name(), parameterType);
                     registerReferenceType(parameterOperand, parameter.type());
-                    if (parameter.type().name().equals("String")) {
-                        stringVariables.add(parameterOperand);
-                    }
                     ir.add(new IRInstruction(IROpCode.PARAM,
                             parameterOperand,
                             Operand.constant(index, Operand.Type.I32), null));
@@ -140,7 +139,6 @@ public final class IRGenerator {
                     ir.add(new IRInstruction(IROpCode.RETURN, null, null, null));
                 }
                 variableScopes.clear();
-                stringVariables.clear();
             }
         }
         currentFunction = null;
@@ -173,16 +171,21 @@ public final class IRGenerator {
             Operand.Type type = typeOf(declaration.type());
             Operand destination = declareVariable(declaration.name(), type);
             registerReferenceType(destination, declaration.type());
-            if (declaration.type().name().equals("String")) {
-                stringVariables.add(destination);
-            }
             if (declaration.value() != null) {
-                Operand source = coerce(ir, expression(ir, declaration.value()), type);
+                Operand source;
+                if (declaration.value() instanceof ArrayInitializerRecord initializer) {
+                    source = emitArrayInitializer(ir, declaration.type().name(), initializer);
+                } else {
+                    source = coerce(ir, expression(ir, declaration.value()), type);
+                }
                 ir.add(new IRInstruction(IROpCode.ASSIGN,
                         destination, source, null));
             }
         } else if (statement instanceof ReturnRecord returned) {
-            Operand value = returned.value() == null ? null : expression(ir, returned.value());
+            Operand value = returned.value() == null ? null
+                    : returned.value() instanceof ArrayInitializerRecord initializer
+                            ? emitArrayInitializer(ir, currentFunction.returnType().name(), initializer)
+                            : expression(ir, returned.value());
             if (value != null) {
                 value = coerce(ir, value, typeOf(currentFunction.returnType()));
             }
@@ -232,7 +235,7 @@ public final class IRGenerator {
             Operand value = expression(ir, print.expression());
             if (value.type() != Operand.Type.I32 && value.type() != Operand.Type.I64
                     && value.type() != Operand.Type.F64 && value.type() != Operand.Type.BOOL
-                    && !(value.type() == Operand.Type.REF && isStringExpression(print.expression(), ir))) {
+                    && !(value.type() == Operand.Type.REF && isStringExpression(print.expression(), value))) {
                 throw unsupported("print suporta int, long, double, boolean e String no backend atual.");
             }
             ir.add(new IRInstruction(IROpCode.PRINT, null, value, null));
@@ -257,31 +260,60 @@ public final class IRGenerator {
             Operand object = expression(ir, free.expression());
             boolean nullLiteral = free.expression() instanceof LiteralRecord literal
                     && literal.value() == null;
+            String sourceType = sourceTypesByOperand.get(object);
+            boolean arrayReference = sourceType != null && sourceType.endsWith("[]");
+            boolean classReference = referenceTypesByOperand.containsKey(object);
             if (object.type() != Operand.Type.REF
-                    || (!referenceTypesByOperand.containsKey(object) && !nullLiteral)) {
-                throw unsupported("free exige uma referência a um objeto de classe.");
+                    || (!classReference && !arrayReference && !nullLiteral)) {
+                throw unsupported("free exige uma referência a um objeto ou array.");
             }
-            ir.add(new IRInstruction(IROpCode.FREE_OBJECT, null, object, null));
+            ir.add(new IRInstruction(
+                    arrayReference ? IROpCode.FREE_ARRAY : IROpCode.FREE_OBJECT,
+                    null,
+                    object,
+                    null));
         } else if (statement instanceof AssignmentRecord assignment) {
             if (assignment.target() instanceof VariableRecord variable) {
                 Operand destination = expression(ir, variable);
-                Operand value = coerce(ir, expression(ir, assignment.value()), destination.type());
+                Operand value;
+                if (assignment.value() instanceof ArrayInitializerRecord initializer) {
+                    String expectedArrayType = sourceTypesByOperand.get(destination);
+                    value = emitArrayInitializer(ir, expectedArrayType, initializer);
+                } else {
+                    value = coerce(ir, expression(ir, assignment.value()), destination.type());
+                }
                 ir.add(new IRInstruction(IROpCode.ASSIGN, destination, value, null));
             } else if (assignment.target() instanceof MemberAccessRecord member) {
                 ResolvedField target = resolveField(ir, member);
                 FieldLayout field = target.field();
-                Operand value = coerce(
-                        ir,
-                        expression(ir, assignment.value()),
-                        typeOf(new TypeRecord(field.type())));
+                Operand value = assignment.value() instanceof ArrayInitializerRecord initializer
+                        ? emitArrayInitializer(ir, field.type(), initializer)
+                        : coerce(
+                                ir,
+                                expression(ir, assignment.value()),
+                                typeOf(new TypeRecord(field.type())));
                 ir.add(new IRInstruction(
                         IROpCode.STORE_FIELD,
                         null,
                         target.receiver(),
                         Operand.constant(field.offSet(), Operand.Type.I32),
                         List.of(value)));
+            } else if (assignment.target() instanceof ArrayAccessRecord access) {
+                Operand array = expression(ir, access.array());
+                Operand index = expression(ir, access.index());
+                String elementType = componentTypeName(sourceTypesByOperand.get(array));
+                Operand value = coerce(
+                        ir,
+                        expression(ir, assignment.value()),
+                        typeOf(new TypeRecord(elementType)));
+                ir.add(new IRInstruction(
+                        IROpCode.STORE_ARRAY,
+                        null,
+                        array,
+                        index,
+                        List.of(value)));
             } else {
-                throw unsupported("Atribuições a campos e arrays ainda não são suportadas pelo backend.");
+                throw unsupported("Atribuição ainda não suportada pelo backend.");
             }
         } else if (statement instanceof ExpressionStatementRecord expressionStatement) {
             if (expressionStatement.expression() instanceof CallRecord call) {
@@ -327,6 +359,7 @@ public final class IRGenerator {
 
     private void registerReferenceType(Operand operand, TypeRecord sourceType) {
         String className = sourceType.name();
+        sourceTypesByOperand.put(operand, className);
         if (classes.containsKey(className)) {
             referenceTypesByOperand.put(operand, className);
         }
@@ -357,7 +390,15 @@ public final class IRGenerator {
             return operand;
         }
         if (expression instanceof MemberAccessRecord member) {
-            ResolvedField resolved = resolveField(ir, member);
+            Operand memberReceiver = expression(ir, member.receiver());
+            String receiverType = sourceTypesByOperand.get(memberReceiver);
+            if (member.name().equals("length")
+                    && receiverType != null && receiverType.endsWith("[]")) {
+                Operand result = Operand.temporary("t" + nextTemp++, Operand.Type.I32);
+                ir.add(new IRInstruction(IROpCode.ARRAY_LENGTH, result, memberReceiver, null));
+                return result;
+            }
+            ResolvedField resolved = resolveField(ir, member, memberReceiver);
             FieldLayout field = resolved.field();
 
             Operand.Type fieldType = typeOf(new TypeRecord(field.type()));
@@ -371,6 +412,23 @@ public final class IRGenerator {
 
             registerReferenceType(result, new TypeRecord(field.type()));
             return result;
+        }
+        if (expression instanceof ArrayAccessRecord access) {
+            Operand array = expression(ir, access.array());
+            Operand index = expression(ir, access.index());
+            String elementType = componentTypeName(sourceTypesByOperand.get(array));
+            Operand result = Operand.temporary(
+                    "t" + nextTemp++,
+                    typeOf(new TypeRecord(elementType)));
+            ir.add(new IRInstruction(IROpCode.LOAD_ARRAY, result, array, index));
+            registerReferenceType(result, new TypeRecord(elementType));
+            return result;
+        }
+        if (expression instanceof ArrayCreationRecord creation) {
+            return emitArrayCreation(ir, creation);
+        }
+        if (expression instanceof ArrayInitializerRecord) {
+            throw unsupported("Inicializador de array sem tipo esperado.");
         }
         if (expression instanceof UnaryExpressionRecord unary) {
             if (unary.operator() != TokenType.NEG) {
@@ -479,12 +537,172 @@ public final class IRGenerator {
                     null));
 
             referenceTypesByOperand.put(result, className);
+            sourceTypesByOperand.put(result, className);
             initializeObjectFields(ir, result, classes.get(className));
             return result;
         }
         if (expression instanceof CallRecord call)
             return emitCall(ir, call, true);
         throw unsupported("Expressão ainda não suportada: " + expression.getClass().getSimpleName() + ".");
+    }
+
+    private Operand emitArrayCreation(IRProgram ir, ArrayCreationRecord creation) {
+        String arrayType = creation.type().name();
+        int dimensions = arrayDimensions(arrayType);
+        if (dimensions < 1 || dimensions > 2) {
+            throw unsupported("O backend suporta arrays de até duas dimensões.");
+        }
+        if (creation.initializer() instanceof ArrayInitializerRecord initializer) {
+            return emitArrayInitializer(ir, arrayType, initializer);
+        }
+        if (dimensions == 2 && creation.dimensions().size() == 2) {
+            String elementType = componentTypeName(componentTypeName(arrayType));
+            if (!elementType.equals("int")) {
+                throw unsupported("A criação retangular de arrays multidimensionais suporta int[][] por enquanto.");
+            }
+            Operand rows = expression(ir, creation.dimensions().get(0));
+            Operand columns = expression(ir, creation.dimensions().get(1));
+            ir.add(new IRInstruction(IROpCode.CHECK_ARRAY_SIZE, null, rows, null));
+            ir.add(new IRInstruction(IROpCode.CHECK_ARRAY_SIZE, null, columns, null));
+            return allocateIntArray2D(ir, arrayType, rows, columns);
+        }
+        if (creation.dimensions().size() != 1) {
+            throw unsupported("A criação do array precisa informar exatamente uma dimensão.");
+        }
+        Operand length = expression(ir, creation.dimensions().get(0));
+        return allocateArray(ir, arrayType, length);
+    }
+
+    private Operand emitArrayInitializer(
+            IRProgram ir,
+            String arrayType,
+            ArrayInitializerRecord initializer) {
+        int dimensions = arrayDimensions(arrayType);
+        if (dimensions < 1 || dimensions > 2) {
+            throw unsupported("O backend suporta arrays de até duas dimensões.");
+        }
+        if (dimensions == 2) {
+            String rowType = componentTypeName(arrayType);
+            Operand array = allocateArray(
+                    ir,
+                    arrayType,
+                    Operand.constant(initializer.elements().size(), Operand.Type.I32));
+            for (int index = 0; index < initializer.elements().size(); index++) {
+                ExpressionInterface element = initializer.elements().get(index);
+                Operand row;
+                if (element instanceof ArrayInitializerRecord nested) {
+                    row = emitArrayInitializer(ir, rowType, nested);
+                } else {
+                    row = coerce(ir, expression(ir, element), Operand.Type.REF);
+                }
+                ir.add(new IRInstruction(
+                        IROpCode.STORE_ARRAY,
+                        null,
+                        array,
+                        Operand.constant(index, Operand.Type.I32),
+                        List.of(row)));
+            }
+            return array;
+        }
+        String elementType = componentTypeName(arrayType);
+        Operand array = allocateArray(
+                ir,
+                arrayType,
+                Operand.constant(initializer.elements().size(), Operand.Type.I32));
+        Operand.Type expectedType = typeOf(new TypeRecord(elementType));
+        for (int index = 0; index < initializer.elements().size(); index++) {
+            ExpressionInterface element = initializer.elements().get(index);
+            if (element instanceof ArrayInitializerRecord) {
+                throw unsupported("Inicializadores de arrays multidimensionais ainda não são suportados.");
+            }
+            Operand value = coerce(ir, expression(ir, element), expectedType);
+            ir.add(new IRInstruction(
+                    IROpCode.STORE_ARRAY,
+                    null,
+                    array,
+                    Operand.constant(index, Operand.Type.I32),
+                    List.of(value)));
+        }
+        return array;
+    }
+
+    private Operand allocateIntArray2D(
+            IRProgram ir,
+            String arrayType,
+            Operand rows,
+            Operand columns) {
+        Operand result = allocateArray(ir, arrayType, rows);
+        String testLabel = newLabel();
+        String endLabel = newLabel();
+        Operand index = Operand.temporary("t" + nextTemp++, Operand.Type.I32);
+        ir.add(new IRInstruction(
+                IROpCode.ASSIGN,
+                index,
+                Operand.constant(0, Operand.Type.I32),
+                null));
+        ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(testLabel), null, null));
+        Operand condition = Operand.temporary("t" + nextTemp++, Operand.Type.BOOL);
+        ir.add(new IRInstruction(IROpCode.LT, condition, index, rows));
+        ir.add(new IRInstruction(
+                IROpCode.JUMP_IF_FALSE,
+                Operand.label(endLabel),
+                condition,
+                null));
+
+        Operand row = allocateArray(ir, componentTypeName(arrayType), columns);
+        ir.add(new IRInstruction(
+                IROpCode.STORE_ARRAY,
+                null,
+                result,
+                index,
+                List.of(row)));
+
+        Operand nextIndex = Operand.temporary("t" + nextTemp++, Operand.Type.I32);
+        ir.add(new IRInstruction(
+                IROpCode.ADD,
+                nextIndex,
+                index,
+                Operand.constant(1, Operand.Type.I32)));
+        ir.add(new IRInstruction(IROpCode.ASSIGN, index, nextIndex, null));
+        ir.add(new IRInstruction(IROpCode.JUMP, Operand.label(testLabel), null, null));
+        ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(endLabel), null, null));
+        return result;
+    }
+
+    private Operand allocateArray(IRProgram ir, String arrayType, Operand length) {
+        String elementType = componentTypeName(arrayType);
+        Operand.Type valueType = typeOf(new TypeRecord(elementType));
+        int elementSize = switch (valueType) {
+            case BOOL -> 1;
+            case I32 -> 4;
+            case I64, F64, REF -> 8;
+        };
+        Operand result = Operand.temporary("t" + nextTemp++, Operand.Type.REF);
+        ir.add(new IRInstruction(
+                IROpCode.ALLOC_ARRAY,
+                result,
+                length,
+                Operand.constant(elementSize, Operand.Type.I32)));
+        sourceTypesByOperand.put(result, arrayType);
+        return result;
+    }
+
+    private String componentTypeName(String arrayType) {
+        if (arrayType == null || !arrayType.endsWith("[]")) {
+            throw unsupported("Era esperado um array, mas o tipo não foi identificado.");
+        }
+        return arrayType.substring(0, arrayType.length() - 2);
+    }
+
+    private int arrayDimensions(String typeName) {
+        int dimensions = 0;
+        for (int index = 0; index < typeName.length() - 1; index++) {
+            if (typeName.charAt(index) == '[' && typeName.charAt(index + 1) == ']') {
+                dimensions++;
+                index++;
+            }
+        }
+        return dimensions;
     }
 
     private void initializeObjectFields(
@@ -517,10 +735,12 @@ public final class IRGenerator {
                                 + "." + attribute.name() + ".");
             }
 
-            Operand value = coerce(
-                    ir,
-                    expression(ir, attribute.value()),
-                    typeOf(new TypeRecord(field.type())));
+            Operand value = attribute.value() instanceof ArrayInitializerRecord initializer
+                    ? emitArrayInitializer(ir, field.type(), initializer)
+                    : coerce(
+                            ir,
+                            expression(ir, attribute.value()),
+                            typeOf(new TypeRecord(field.type())));
             ir.add(new IRInstruction(
                     IROpCode.STORE_FIELD,
                     null,
@@ -532,6 +752,13 @@ public final class IRGenerator {
 
     private ResolvedField resolveField(IRProgram ir, MemberAccessRecord member) {
         Operand receiver = expression(ir, member.receiver());
+        return resolveField(ir, member, receiver);
+    }
+
+    private ResolvedField resolveField(
+            IRProgram ir,
+            MemberAccessRecord member,
+            Operand receiver) {
         String receiverClass = referenceTypesByOperand.get(receiver);
         if (receiverClass == null) {
             throw unsupported(
@@ -552,22 +779,11 @@ public final class IRGenerator {
         return new ResolvedField(receiver, field);
     }
 
-    private boolean isStringExpression(ExpressionInterface expression, IRProgram ir) {
+    private boolean isStringExpression(ExpressionInterface expression, Operand value) {
         if (expression instanceof LiteralRecord literal) {
             return literal.value() instanceof String;
         }
-        if (expression instanceof VariableRecord variable) {
-            Operand operand = resolveVariable(variable.name());
-            return operand != null && stringVariables.contains(operand);
-        }
-        if (expression instanceof CallRecord && !ir.instructions().isEmpty()) {
-            IRInstruction last = ir.instructions().get(ir.instructions().size() - 1);
-            if (last.opCode() == IROpCode.CALL && last.left() != null) {
-                FunctionRecord function = functionsByLabel.get(last.left().value().toString());
-                return function != null && function.returnType().name().equals("String");
-            }
-        }
-        return false;
+        return "String".equals(sourceTypesByOperand.get(value));
     }
 
     private Operand emitCall(IRProgram ir, CallRecord call, boolean keepResult) {
@@ -595,6 +811,9 @@ public final class IRGenerator {
                 ? Operand.temporary("t" + nextTemp++, typeOf(target.returnType()))
                 : null;
         ir.add(new IRInstruction(IROpCode.CALL, destination, Operand.label(targetLabel), null, arguments));
+        if (destination != null) {
+            registerReferenceType(destination, target.returnType());
+        }
         return destination;
     }
 

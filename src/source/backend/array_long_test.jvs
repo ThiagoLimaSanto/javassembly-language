@@ -1,0 +1,17 @@
+public class ArrayLongTest {
+    public static func void main(String[] args) {
+        long[] values = new long[3];
+
+        print values.length;
+        print values[0];
+        values[0] = 3000000002L;
+        values[1] = 4000000003L;
+        values[2] = 9223372036854775807L;
+        print values[0];
+        print values[1];
+        print values[2];
+
+        free(values);
+        return;
+    }
+}
