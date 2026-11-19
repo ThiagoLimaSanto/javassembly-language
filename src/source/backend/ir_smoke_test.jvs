@@ -6,22 +6,22 @@ public class IRSmokeTest {
 
     public static func void main(String[] args) {
         int total = sum(2, 3);
-        print total;
+        printf "Resultado da soma: %d\n", total;
 
         if (cmp.gt total, 4) {
-            print total;
+            printf "verdadeiro: %d\n", total;
         } else {
-            print 0;
+            printf "Falso: %d\n", 0;
         }
 
         int counter = 0;
         while (cmp.lt counter, 2) {
-            print counter;
+            printf "While: %d\n", counter;
             counter = add counter, 1;
         }
 
         for (int index = 0; cmp.lt index, 2; index = add index, 1) {
-            print index;
+            printf "For: %d\n", index;
         }
 
         return;

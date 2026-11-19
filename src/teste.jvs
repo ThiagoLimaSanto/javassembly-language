@@ -1,0 +1,11 @@
+class Funcionario extends Pessoa {
+    int idade;
+    static int total;
+    double salario;
+}
+
+class Pessoa {
+    int idade;
+    int altura;
+    long documento;
+}

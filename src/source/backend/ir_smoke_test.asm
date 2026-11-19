@@ -2,10 +2,21 @@ default rel
 extern printf
 section .data
 fmt_i32: db "%d", 10, 0
+fmt_i64: db "%ld", 10, 0
+
+fmt_f64: db "%f", 10, 0
+fmt_string: db "%s", 10, 0
+
+section .rodata
+str_data_0: db 84, 111, 116, 97, 108, 58, 32, 37, 100, 10, 0
+str_data_1: db 118, 101, 114, 100, 97, 100, 101, 105, 114, 111, 58, 32, 37, 100, 10, 0
+str_data_2: db 70, 97, 108, 115, 111, 58, 32, 37, 100, 10, 0
+str_data_3: db 87, 104, 105, 108, 101, 58, 32, 37, 100, 10, 0
+str_data_4: db 70, 111, 114, 58, 32, 37, 100, 10, 0
 
 section .text
 
-IRSmokeTest.sum:
+IRSmokeTest.sum__int__int__ret_int:
     push rbp
     mov rbp, rsp
     sub rsp, 16
@@ -16,27 +27,25 @@ IRSmokeTest.sum:
     add eax, ecx
     mov dword [rbp-12], eax
     mov eax, dword [rbp-12]
-    mov dword [rbp-16], eax
-    mov eax, dword [rbp-16]
     leave
     ret
 
-IRSmokeTest.main:
+IRSmokeTest.main__String_array__ret_void:
     push rbp
     mov rbp, rsp
     sub rsp, 48
     mov qword [rbp-8], rdi
     mov edi, 2
     mov esi, 3
-    call IRSmokeTest.sum
+    call IRSmokeTest.sum__int__int__ret_int
     mov dword [rbp-12], eax
     mov eax, dword [rbp-12]
     mov dword [rbp-16], eax
-    mov esi, dword [rbp-16]
-    lea rdi, [rel fmt_i32]
-    xor eax, eax
+    mov esi, dword [rbp-12]
+    lea rdi, [rel str_data_0]
+    mov eax, 0
     call printf
-    mov eax, dword [rbp-16]
+    mov eax, dword [rbp-12]
     mov ecx, 4
     cmp eax, ecx
     setg al
@@ -46,14 +55,14 @@ IRSmokeTest.main:
     test eax, eax
     jz L0
     mov esi, dword [rbp-16]
-    lea rdi, [rel fmt_i32]
-    xor eax, eax
+    lea rdi, [rel str_data_1]
+    mov eax, 0
     call printf
     jmp L1
 L0:
     mov esi, 0
-    lea rdi, [rel fmt_i32]
-    xor eax, eax
+    lea rdi, [rel str_data_2]
+    mov eax, 0
     call printf
 L1:
     mov eax, 0
@@ -69,8 +78,8 @@ L2:
     test eax, eax
     jz L3
     mov esi, dword [rbp-24]
-    lea rdi, [rel fmt_i32]
-    xor eax, eax
+    lea rdi, [rel str_data_3]
+    mov eax, 0
     call printf
     mov eax, dword [rbp-24]
     mov ecx, 1
@@ -93,8 +102,8 @@ L4:
     test eax, eax
     jz L5
     mov esi, dword [rbp-36]
-    lea rdi, [rel fmt_i32]
-    xor eax, eax
+    lea rdi, [rel str_data_4]
+    mov eax, 0
     call printf
     mov eax, dword [rbp-36]
     mov ecx, 1
@@ -112,7 +121,7 @@ main:
     push rbp
     mov rbp, rsp
     mov rdi, rsi
-    call IRSmokeTest.main
+    call IRSmokeTest.main__String_array__ret_void
     xor eax, eax
     leave
     ret
