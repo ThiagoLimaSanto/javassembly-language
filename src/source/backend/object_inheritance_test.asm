@@ -1,5 +1,7 @@
 default rel
 section .rodata
+__invalid_reference_message: db 69, 114, 114, 111, 32, 100, 101, 32, 101, 120, 101, 99, 117, 195, 167, 195, 163, 111, 58, 32, 116, 101, 110, 116, 97, 116, 105, 118, 97, 32, 100, 101, 32, 97, 99, 101, 115, 115, 97, 114, 32, 117, 109, 32, 111, 98, 106, 101, 116, 111, 32, 110, 117, 108, 111, 32, 111, 117, 32, 106, 195, 161, 32, 108, 105, 98, 101, 114, 97, 100, 111, 46, 10, 0
+__invalid_reference_message_length equ $ - __invalid_reference_message - 1
 str_data_0: db 10, 0
 str_data_1: db 45, 0
 str_data_2: db 46, 0
@@ -7,6 +9,7 @@ str_data_3: db 110, 97, 110, 0
 str_data_4: db 105, 110, 102, 0
 str_data_5: db 111, 118, 101, 114, 102, 108, 111, 119, 0
 str_data_6: db 40, 110, 117, 108, 108, 41, 0
+str_data_7: db 118, 97, 108, 111, 114, 58, 32, 0
 __f64_scale: dq 0x412e848000000000
 __f64_round: dq 0x3fe0000000000000
 
@@ -20,6 +23,7 @@ ObjectInheritanceTest.main__String_array__ret_void:
     mov rbp, rsp
     sub rsp, 48
     mov esi, 24
+    add rsi, 8
     mov eax, 9
     xor edi, edi
     mov edx, 3
@@ -33,18 +37,37 @@ ObjectInheritanceTest.main__String_array__ret_void:
     mov eax, 60
     syscall
 .L_alloc_ok_0:
+    mov qword [rax], rsi
+    add rax, 8
     mov qword [rbp-8], rax
     mov r11, qword [rbp-8]
+    test r11, r11
+    jz __runtime_invalid_reference
     mov edx, 18
     mov dword [r11], edx
     mov r11, qword [rbp-8]
+    test r11, r11
+    jz __runtime_invalid_reference
     mov rdx, 3000000002
     mov qword [r11 + 8], rdx
     mov r11, qword [rbp-8]
+    test r11, r11
+    jz __runtime_invalid_reference
     mov rax, 0x40ab590000000000
     movq xmm0, rax
     movsd qword [r11 + 16], xmm0
+    lea rsi, [rel str_data_7]
+    mov edx, 7
+    call __write_all
+    mov eax, 10
+    movsxd rax, eax
+    call __print_i64
+    lea rsi, [rel str_data_0]
+    mov edx, 1
+    call __write_all
     mov rax, qword [rbp-8]
+    test rax, rax
+    jz __runtime_invalid_reference
     mov eax, dword [rax]
     mov dword [rbp-12], eax
     mov eax, dword [rbp-12]
@@ -54,6 +77,8 @@ ObjectInheritanceTest.main__String_array__ret_void:
     mov edx, 1
     call __write_all
     mov rax, qword [rbp-8]
+    test rax, rax
+    jz __runtime_invalid_reference
     mov rdx, qword [rax + 8]
     mov qword [rbp-24], rdx
     mov rax, qword [rbp-24]
@@ -62,6 +87,8 @@ ObjectInheritanceTest.main__String_array__ret_void:
     mov edx, 1
     call __write_all
     mov rax, qword [rbp-8]
+    test rax, rax
+    jz __runtime_invalid_reference
     movsd xmm0, qword [rax + 16]
     movsd qword [rbp-32], xmm0
     movsd xmm0, qword [rbp-32]
@@ -69,10 +96,24 @@ ObjectInheritanceTest.main__String_array__ret_void:
     lea rsi, [rel str_data_0]
     mov edx, 1
     call __write_all
+    mov rdi, qword [rbp-8]
+    test rdi, rdi
+    jz .L_free_done_0
+    sub rdi, 8
+    mov rsi, qword [rdi]
+    mov eax, 11
+    syscall
+    xor eax, eax
+    mov qword [rbp-8], rax
+.L_free_done_0:
     mov r11, qword [rbp-8]
+    test r11, r11
+    jz __runtime_invalid_reference
     mov rdx, 4000000003
     mov qword [r11 + 8], rdx
     mov rax, qword [rbp-8]
+    test rax, rax
+    jz __runtime_invalid_reference
     mov rdx, qword [rax + 8]
     mov qword [rbp-40], rdx
     mov rax, qword [rbp-40]
@@ -126,6 +167,16 @@ __write_cstr:
 .cstring_ready:
     sub rdx, rsi
     jmp __write_all
+__runtime_invalid_reference:
+    mov eax, 1
+    mov edi, 2
+    lea rsi, [rel __invalid_reference_message]
+    mov edx, __invalid_reference_message_length
+    syscall
+    mov eax, 60
+    mov edi, 1
+    syscall
+    ud2
 __print_u64:
     lea r8, [rel __number_buffer + 32]
     mov r9d, 10

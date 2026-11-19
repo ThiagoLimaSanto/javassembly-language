@@ -21,9 +21,11 @@ public class NasmGenerator {
     private int nextGpParameter;
     private int nextXmmParameter;
     private int nextAllocationLabel;
+    private int nextFreeLabel;
 
     public String generate(IRProgram program) {
         nextAllocationLabel = 0;
+        nextFreeLabel = 0;
         StringBuilder asm = new StringBuilder();
         prepareStringLabels(program.instructions());
         appendHeader(asm);
@@ -96,6 +98,10 @@ public class NasmGenerator {
     private void appendHeader(StringBuilder asm) {
         asm.append("default rel\n");
         asm.append("section .rodata\n");
+        asm.append("__invalid_reference_message: db ")
+                .append(utf8Bytes("Erro de execução: tentativa de acessar um objeto nulo ou já liberado.\n"))
+                .append("\n");
+        asm.append("__invalid_reference_message_length equ $ - __invalid_reference_message - 1\n");
         if (!stringLabels.isEmpty()) {
             for (Map.Entry<String, String> entry : stringLabels.entrySet()) {
                 asm.append(entry.getValue()).append(": db ")
@@ -359,6 +365,8 @@ public class NasmGenerator {
 
             case ALLOC_OBJECT -> emitObjectAllocation(asm, instruction);
 
+            case FREE_OBJECT -> emitObjectFree(asm, instruction);
+
             case ASSIGN -> {
                 emitAssignment(asm, instruction.destination(), instruction.left());
             }
@@ -621,6 +629,17 @@ public class NasmGenerator {
         asm.append("    sub rdx, rsi\n");
         asm.append("    jmp __write_all\n");
 
+        asm.append("__runtime_invalid_reference:\n");
+        asm.append("    mov eax, 1\n");
+        asm.append("    mov edi, 2\n");
+        asm.append("    lea rsi, [rel __invalid_reference_message]\n");
+        asm.append("    mov edx, __invalid_reference_message_length\n");
+        asm.append("    syscall\n");
+        asm.append("    mov eax, 60\n");
+        asm.append("    mov edi, 1\n");
+        asm.append("    syscall\n");
+        asm.append("    ud2\n");
+
         asm.append("__print_u64:\n");
         asm.append("    lea r8, [rel __number_buffer + 32]\n");
         asm.append("    mov r9d, 10\n");
@@ -742,6 +761,8 @@ public class NasmGenerator {
         String successLabel = ".L_alloc_ok_" + labelId;
 
         loadI32(asm, instruction.left(), "esi");
+        // Cada objeto guarda o tamanho completo do mmap em um cabeçalho de 8 bytes.
+        asm.append("    add rsi, 8\n");
 
         asm.append("    mov eax, 9\n"); // mmap
         asm.append("    xor edi, edi\n"); // endereço escolhido pelo kernel
@@ -758,7 +779,32 @@ public class NasmGenerator {
         asm.append("    syscall\n");
         asm.append(successLabel).append(":\n");
 
+        asm.append("    mov qword [rax], rsi\n");
+        asm.append("    add rax, 8\n");
+
         storeI64(asm, instruction.destination(), "rax");
+    }
+
+    private void emitObjectFree(StringBuilder asm, IRInstruction instruction) {
+        if (instruction.left() == null || instruction.left().type() != Operand.Type.REF) {
+            throw new IllegalArgumentException("FREE_OBJECT exige uma referência de objeto.");
+        }
+        int labelId = nextFreeLabel++;
+        String doneLabel = ".L_free_done_" + labelId;
+
+        loadI64(asm, instruction.left(), "rdi");
+        asm.append("    test rdi, rdi\n");
+        asm.append("    jz ").append(doneLabel).append("\n");
+        asm.append("    sub rdi, 8\n");
+        asm.append("    mov rsi, qword [rdi]\n");
+        asm.append("    mov eax, 11\n"); // munmap
+        asm.append("    syscall\n");
+        if (instruction.left().kind() == Operand.Kind.VARIABLE
+                || instruction.left().kind() == Operand.Kind.TEMPORARY) {
+            asm.append("    xor eax, eax\n");
+            storeI64(asm, instruction.left(), "rax");
+        }
+        asm.append(doneLabel).append(":\n");
     }
 
     private void emitFieldStore(StringBuilder asm, IRInstruction instruction) {
@@ -777,6 +823,8 @@ public class NasmGenerator {
         Operand value = instruction.arguments().get(0);
 
         loadI64(asm, receiver, "r11");
+        asm.append("    test r11, r11\n");
+        asm.append("    jz __runtime_invalid_reference\n");
 
         String fieldAddress = offset == 0
                 ? "[r11]"
@@ -819,6 +867,8 @@ public class NasmGenerator {
         }
 
         loadI64(asm, base, "rax");
+        asm.append("    test rax, rax\n");
+        asm.append("    jz __runtime_invalid_reference\n");
 
         String fieldAddress = offset == 0
                 ? "[rax]"

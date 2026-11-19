@@ -3204,6 +3204,21 @@ public class SemanticAnalyzer implements ASTVisitor {
         validatePrintFormat(node, format);
     }
 
+    @Override
+    public void visit(FreeRecord node) {
+        SemanticType type = getExpressionType(node.expression());
+        if (type.isNull()) {
+            return;
+        }
+        if (!type.isClass() || !classes.containsKey(type.className())) {
+            throw new SemanticException(
+                    "free exige uma expressão de tipo classe; não é permitido liberar "
+                            + "primitivos, strings ou arrays.",
+                    node.line(),
+                    node.column());
+        }
+    }
+
     private void validateNotVoid(ExpressionInterface expression, String printKind) {
         SemanticType expressionType = getExpressionType(expression);
         if (!isVoid(expressionType)) {

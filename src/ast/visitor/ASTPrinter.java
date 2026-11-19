@@ -15,6 +15,7 @@ import src.ast.records.ConstructorRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
+import src.ast.records.FreeRecord;
 import src.ast.records.FunctionRecord;
 import src.ast.records.IfRecord;
 import src.ast.records.InterfaceRecord;
@@ -184,6 +185,12 @@ public class ASTPrinter implements ASTVisitor {
         for (ExpressionInterface argument : node.arguments()) {
             visitNamedChild("Argumento", argument);
         }
+    }
+
+    @Override
+    public void visit(FreeRecord node) {
+        printLine("Liberar memória:");
+        visitChild(node.expression());
     }
 
     @Override

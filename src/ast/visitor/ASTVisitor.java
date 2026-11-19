@@ -13,6 +13,7 @@ import src.ast.records.ConstructorRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
+import src.ast.records.FreeRecord;
 import src.ast.records.FunctionRecord;
 import src.ast.records.IfRecord;
 import src.ast.records.InterfaceRecord;
@@ -55,6 +56,8 @@ public interface ASTVisitor {
     void visit(PrintRecord node);
 
     void visit(PrintfRecord node);
+
+    void visit(FreeRecord node);
 
     void visit(WhileRecord node);
 

@@ -20,6 +20,7 @@ import src.ast.records.ClassRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
+import src.ast.records.FreeRecord;
 import src.ast.records.FunctionRecord;
 import src.ast.records.IfRecord;
 import src.ast.records.LiteralRecord;
@@ -252,6 +253,15 @@ public final class IRGenerator {
             }
             ir.add(new IRInstruction(IROpCode.PRINT_FORMAT, null,
                     Operand.constant(format, Operand.Type.REF), null, arguments));
+        } else if (statement instanceof FreeRecord free) {
+            Operand object = expression(ir, free.expression());
+            boolean nullLiteral = free.expression() instanceof LiteralRecord literal
+                    && literal.value() == null;
+            if (object.type() != Operand.Type.REF
+                    || (!referenceTypesByOperand.containsKey(object) && !nullLiteral)) {
+                throw unsupported("free exige uma referência a um objeto de classe.");
+            }
+            ir.add(new IRInstruction(IROpCode.FREE_OBJECT, null, object, null));
         } else if (statement instanceof AssignmentRecord assignment) {
             if (assignment.target() instanceof VariableRecord variable) {
                 Operand destination = expression(ir, variable);

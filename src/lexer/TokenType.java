@@ -46,6 +46,7 @@ public enum TokenType {
     CMP,
     PRINT,
     PRINTF,
+    FREE,
 
     EQ,
     NE,

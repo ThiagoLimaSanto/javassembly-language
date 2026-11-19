@@ -51,6 +51,7 @@ public class Lexer {
             Map.entry("cmp", TokenType.CMP),
             Map.entry("print", TokenType.PRINT),
             Map.entry("printf", TokenType.PRINTF),
+            Map.entry("free", TokenType.FREE),
 
             Map.entry("return", TokenType.RETURN),
             Map.entry("while", TokenType.WHILE),

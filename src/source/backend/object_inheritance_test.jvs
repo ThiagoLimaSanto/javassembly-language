@@ -11,10 +11,14 @@ public class PessoaBase {
 public class ObjectInheritanceTest {
     public static func void main(String[] args) {
         Funcionario funcionario = new Funcionario();
+        int valor = 10;
 
+        printf "valor: %d\n", valor;
         print funcionario.idade;
         print funcionario.documento;
         print funcionario.salario;
+
+        free(funcionario);
 
         funcionario.documento = 4000000003L;
         print funcionario.documento;

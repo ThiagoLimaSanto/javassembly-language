@@ -22,6 +22,7 @@ import src.ast.records.ConstructorRecord;
 import src.ast.records.DeclarationRecord;
 import src.ast.records.ExpressionStatementRecord;
 import src.ast.records.ForRecord;
+import src.ast.records.FreeRecord;
 import src.ast.records.FunctionRecord;
 import src.ast.records.IfRecord;
 import src.ast.records.InterfaceRecord;
@@ -1003,6 +1004,9 @@ public class Parser {
                         case PRINTF ->
                                 printfStatement();
 
+                        case FREE ->
+                                freeStatement();
+
                         case IF ->
                                 ifStatement();
 
@@ -1494,6 +1498,15 @@ public class Parser {
                 }
                 tokens.consume(TokenType.SEMICOLON, "Esperado ';' após printf");
                 return new PrintfRecord(format, arguments, printfToken.getLine(), printfToken.getColumn());
+        }
+
+        private StatementInterface freeStatement() {
+                Token freeToken = tokens.consume(TokenType.FREE, "Esperado 'free'");
+                tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '(' após free");
+                ExpressionInterface expression = expression();
+                tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')' após o valor de free");
+                tokens.consume(TokenType.SEMICOLON, "Esperado ';' após free");
+                return new FreeRecord(expression, freeToken.getLine(), freeToken.getColumn());
         }
 
         private ExpressionInterface expression() {
