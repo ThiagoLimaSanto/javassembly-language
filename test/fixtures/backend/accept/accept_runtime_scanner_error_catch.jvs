@@ -1,0 +1,17 @@
+import jvs.io.Scanner;
+
+class Throwable {}
+
+public class RuntimeScannerErrorCatchTest {
+    public static func void main(String[] args) throws IOException {
+        try {
+            int value = Scanner.readInt();
+            printLn value;
+        } catch (Throwable error) {
+            printLn "caught scanner input error";
+        } finally {
+            printLn "scanner finally";
+        }
+        return;
+    }
+}

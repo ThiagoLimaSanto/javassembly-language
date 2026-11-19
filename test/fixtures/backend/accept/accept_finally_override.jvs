@@ -1,0 +1,33 @@
+class Throwable {}
+class FirstException extends Throwable {}
+class SecondException extends Throwable {}
+
+public class FinallyOverrideTest {
+    public static func void returnFromFinally() {
+        try {
+            throw new FirstException();
+        } finally {
+            return;
+        }
+    }
+
+    public static func void main(String[] args) {
+        try {
+            returnFromFinally();
+            printLn "finally return suppressed exception";
+        } catch (Throwable error) {
+            printLn "unexpected exception";
+        }
+
+        try {
+            try {
+                throw new FirstException();
+            } finally {
+                throw new SecondException();
+            }
+        } catch (SecondException error) {
+            printLn error.getType();
+        }
+        return;
+    }
+}

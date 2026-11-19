@@ -1,0 +1,7 @@
+NegativeArraySizeException
+IndexOutOfBoundsException
+ArithmeticException
+NullPointerException
+InvalidReferenceException
+InvalidFreeException
+InputMismatchException

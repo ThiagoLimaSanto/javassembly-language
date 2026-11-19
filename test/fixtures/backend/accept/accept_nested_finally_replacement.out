@@ -1,0 +1,4 @@
+outer finally after return
+inner finally after replacement throw
+SecondNestedException
+outer finally after replacement throw

@@ -1,0 +1,10 @@
+package compiler.ast.records;
+
+import compiler.ast.ExpressionInterface;
+import compiler.ast.StatementInterface;
+import compiler.ast.visitor.ASTVisitor;
+
+public record ThrowRecord(ExpressionInterface expression, int line, int column)
+        implements StatementInterface {
+    @Override public void accept(ASTVisitor visitor) { visitor.visit(this); }
+}

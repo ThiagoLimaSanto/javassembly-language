@@ -1,0 +1,21 @@
+public class RuntimeSpecificExceptionDetailsTest {
+    public static func void main(String[] args) {
+        int[] values = new int[1];
+        try {
+            print values[2];
+        } catch (IndexOutOfBoundsException error) {
+            printLn error.getType();
+            printLn error.getMessage();
+        } finally {
+            printLn "bounds finally";
+        }
+
+        try {
+            throw null;
+        } catch (RuntimeException error) {
+            printLn error.getType();
+            printLn error.getMessage();
+        }
+        return;
+    }
+}

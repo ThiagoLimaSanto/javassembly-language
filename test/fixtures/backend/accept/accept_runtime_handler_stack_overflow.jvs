@@ -1,0 +1,15 @@
+public class RuntimeHandlerStackOverflowTest {
+    public static func void recurse() {
+        try {
+            recurse();
+        } catch (StackOverflowError error) {
+            printLn error.getType();
+        }
+        return;
+    }
+
+    public static func void main(String[] args) {
+        recurse();
+        return;
+    }
+}

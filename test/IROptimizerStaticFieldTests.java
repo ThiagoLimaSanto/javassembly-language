@@ -2,11 +2,11 @@ package test;
 
 import java.util.List;
 
-import src.backend.ir.IRInstruction;
-import src.backend.ir.IROpCode;
-import src.backend.ir.IRProgram;
-import src.backend.ir.Operand;
-import src.backend.optimization.IROptimizer;
+import compiler.backend.ir.IRInstruction;
+import compiler.backend.ir.IROpCode;
+import compiler.backend.ir.IRProgram;
+import compiler.backend.ir.Operand;
+import compiler.backend.optimization.IROptimizer;
 
 public final class IROptimizerStaticFieldTests {
     private IROptimizerStaticFieldTests() {

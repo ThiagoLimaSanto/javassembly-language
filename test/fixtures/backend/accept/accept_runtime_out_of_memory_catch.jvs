@@ -1,0 +1,14 @@
+public class RuntimeOutOfMemoryCatchTest {
+    public static func void main(String[] args) {
+        try {
+            int[] values = new int[1000000];
+            printLn "allocation unexpectedly succeeded";
+        } catch (OutOfMemoryError error) {
+            printLn error.getType();
+            printLn error.getMessage();
+        } finally {
+            printLn "OOM finally";
+        }
+        return;
+    }
+}

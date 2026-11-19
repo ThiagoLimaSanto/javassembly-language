@@ -1,0 +1,12 @@
+public class DuplicateExceptionCatchTest {
+    public static func void main(String[] args) {
+        try {
+            throw null;
+        } catch (RuntimeException first) {
+            printLn "first";
+        } catch (ArithmeticException duplicate) {
+            printLn "unreachable";
+        }
+        return;
+    }
+}

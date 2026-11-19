@@ -1,0 +1,20 @@
+class CheckedExample extends Exception {}
+
+public class CheckedExceptionDeclarationTest {
+    public static func void fail() throws CheckedExample {
+        throw new CheckedExample();
+    }
+
+    public static func void relay() throws CheckedExample {
+        fail();
+    }
+
+    public static func void main(String[] args) {
+        try {
+            relay();
+        } catch (CheckedExample error) {
+            printLn "checked exception caught";
+        }
+        return;
+    }
+}

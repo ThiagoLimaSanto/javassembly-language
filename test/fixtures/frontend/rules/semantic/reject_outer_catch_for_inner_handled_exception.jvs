@@ -1,0 +1,16 @@
+class InnerHandledCheckedException extends Exception {}
+
+public class OuterCatchForInnerHandledExceptionTest {
+    public static func void main(String[] args) {
+        try {
+            try {
+                throw new InnerHandledCheckedException();
+            } catch (InnerHandledCheckedException inner) {
+                int handled = 1;
+            }
+        } catch (InnerHandledCheckedException outer) {
+            int unreachable = 2;
+        }
+        return;
+    }
+}

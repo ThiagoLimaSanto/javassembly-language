@@ -1,0 +1,10 @@
+public class CatchNonThrowableTest {
+    public static func void main(String[] args) {
+        try {
+            throw null;
+        } catch (String error) {
+            printLn error;
+        }
+        return;
+    }
+}

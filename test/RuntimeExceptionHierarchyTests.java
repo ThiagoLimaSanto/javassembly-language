@@ -1,16 +1,17 @@
 package test;
 
-import src.exceptions.runtime.AbstractMethodError;
-import src.exceptions.runtime.ArithmeticException;
-import src.exceptions.runtime.Error;
-import src.exceptions.runtime.IndexOutOfBoundsException;
-import src.exceptions.runtime.InputMismatchException;
-import src.exceptions.runtime.IncompatibleClassChangeError;
-import src.exceptions.runtime.NoSuchElementException;
-import src.exceptions.runtime.OutOfMemoryError;
-import src.exceptions.runtime.RuntimeException;
-import src.exceptions.runtime.Throwable;
-import src.exceptions.runtime.VirtualMachineError;
+import compiler.exceptions.runtime.AbstractMethodError;
+import compiler.exceptions.runtime.ArithmeticException;
+import compiler.exceptions.runtime.Error;
+import compiler.exceptions.runtime.IncompatibleClassChangeError;
+import compiler.exceptions.runtime.IndexOutOfBoundsException;
+import compiler.exceptions.runtime.InputMismatchException;
+import compiler.exceptions.runtime.NoSuchElementException;
+import compiler.exceptions.runtime.OutOfMemoryError;
+import compiler.exceptions.runtime.RuntimeException;
+import compiler.exceptions.runtime.StackOverflowError;
+import compiler.exceptions.runtime.Throwable;
+import compiler.exceptions.runtime.VirtualMachineError;
 
 public final class RuntimeExceptionHierarchyTests {
     private RuntimeExceptionHierarchyTests() {
@@ -28,6 +29,10 @@ public final class RuntimeExceptionHierarchyTests {
                 || !(new OutOfMemoryError() instanceof Error)) {
             throw new AssertionError("OutOfMemoryError must follow the Error hierarchy.");
         }
+        if (!(new StackOverflowError() instanceof VirtualMachineError)
+                || !(new StackOverflowError() instanceof Error)) {
+            throw new AssertionError("StackOverflowError must follow the Error hierarchy.");
+        }
         if (!(new AbstractMethodError() instanceof IncompatibleClassChangeError)) {
             throw new AssertionError("AbstractMethodError must extend IncompatibleClassChangeError.");
         }
@@ -36,7 +41,7 @@ public final class RuntimeExceptionHierarchyTests {
             throw new AssertionError("Runtime exception diagnostic format changed unexpectedly.");
         }
         if (RuntimeException.class.getSuperclass()
-                != src.exceptions.runtime.Exception.class) {
+                != compiler.exceptions.runtime.Exception.class) {
             throw new AssertionError("The language RuntimeException must use its own Exception base.");
         }
         System.out.println("Runtime exception hierarchy checks passed.");

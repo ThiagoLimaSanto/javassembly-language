@@ -1,0 +1,36 @@
+class Throwable {}
+class FirstNestedException extends Throwable {}
+class SecondNestedException extends Throwable {}
+
+public class NestedFinallyReplacementTest {
+    public static func void returnThroughNestedFinally() {
+        try {
+            try {
+                throw new FirstNestedException();
+            } finally {
+                return;
+            }
+        } finally {
+            printLn "outer finally after return";
+        }
+    }
+
+    public static func void main(String[] args) {
+        returnThroughNestedFinally();
+
+        try {
+            try {
+                throw new FirstNestedException();
+            } catch (FirstNestedException original) {
+                throw new SecondNestedException();
+            } finally {
+                printLn "inner finally after replacement throw";
+            }
+        } catch (SecondNestedException replacement) {
+            printLn replacement.getType();
+        } finally {
+            printLn "outer finally after replacement throw";
+        }
+        return;
+    }
+}

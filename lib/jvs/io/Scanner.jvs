@@ -1,0 +1,16 @@
+package jvs.io;
+
+public class Scanner {
+
+    public static native func int readInt() throws IOException;
+
+    public static native func double readDouble() throws IOException;
+
+    public static native func boolean readBoolean() throws IOException;
+
+    public static native func String readString() throws IOException;
+
+    public static native func String readLine() throws IOException;
+
+    public static native func long readLong() throws IOException;
+}

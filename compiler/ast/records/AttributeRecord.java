@@ -1,0 +1,23 @@
+package compiler.ast.records;
+
+import compiler.ast.ASTNode;
+import compiler.ast.ExpressionInterface;
+import compiler.ast.visitor.ASTVisitor;
+import compiler.lexer.TokenType;
+
+public record AttributeRecord(
+        TokenType visibility,
+        boolean isStatic,
+        boolean isFinal,
+        TypeRecord type,
+        String name,
+        ExpressionInterface value,
+        int line,
+        int column
+    ) implements ASTNode {
+    @Override
+
+    public void accept(ASTVisitor visitor) {
+        visitor.visit(this);
+    }
+}

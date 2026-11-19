@@ -1,0 +1,5 @@
+inner finally after null access
+caught null access in same method
+outer finally after null access
+caught bounds error from called method
+finally after called-method error

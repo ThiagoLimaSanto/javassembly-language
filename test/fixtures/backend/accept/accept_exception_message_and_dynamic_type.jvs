@@ -1,0 +1,20 @@
+class Throwable {
+    String message;
+}
+
+class ParentException extends Throwable {}
+class ChildException extends ParentException {}
+
+public class ExceptionMessageAndDynamicTypeTest {
+    public static func void main(String[] args) {
+        ChildException original = new ChildException();
+        original.message = "user exception message";
+        try {
+            throw original;
+        } catch (ParentException error) {
+            printLn error.getType();
+            printLn error.getMessage();
+        }
+        return;
+    }
+}

@@ -1,0 +1,20 @@
+class CheckedParentException extends Exception {}
+class CheckedChildException extends CheckedParentException {}
+
+class CheckedBase {
+    public func void run() throws CheckedChildException {
+        return;
+    }
+}
+
+class CheckedOverride extends CheckedBase {
+    public func void run() throws CheckedParentException {
+        return;
+    }
+}
+
+public class BroaderCheckedOverrideTest {
+    public static func void main(String[] args) {
+        return;
+    }
+}

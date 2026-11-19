@@ -1,0 +1,13 @@
+class ExactThrownParent extends Exception {}
+class ExactThrownChild extends ExactThrownParent {}
+
+public class CatchSubclassForExactParentThrowTest {
+    public static func void main(String[] args) {
+        try {
+            throw new ExactThrownParent();
+        } catch (ExactThrownChild child) {
+            int unreachable = 1;
+        }
+        return;
+    }
+}

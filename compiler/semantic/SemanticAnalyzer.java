@@ -1,0 +1,4368 @@
+package compiler.semantic;
+
+import java.util.ArrayList;
+import java.util.ArrayDeque;
+import java.util.Deque;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+
+import compiler.ast.ExpressionInterface;
+import compiler.ast.StatementInterface;
+import compiler.ast.records.*;
+import compiler.ast.visitor.ASTVisitor;
+import compiler.exceptions.CompilerInvariantException;
+import compiler.exceptions.SemanticException;
+import compiler.lexer.TokenType;
+
+public class SemanticAnalyzer implements ASTVisitor {
+
+    private record ThrownTypeCandidate(String typeName, boolean mayBeSubtype) {
+    }
+
+    private record DeclaredInterfaceMethod(
+            InterfaceRecord owner,
+            FunctionRecord function) {
+    }
+
+    private VariableTable currentScope = new VariableTable(null);
+
+    private final Map<String, FunctionTable> functionTables = new HashMap<>();
+    private final Map<String, ClassRecord> classes = new HashMap<>();
+    private final Map<String, InterfaceRecord> interfaces = new HashMap<>();
+    private final Map<String, SemanticType> registers = new HashMap<>();
+    private final Map<String, Set<String>> assignableTypes = new HashMap<>();
+    private final Map<String, SemanticType> convertedTypes = new HashMap<>();
+    private final Deque<Set<String>> activeCatchTypes = new ArrayDeque<>();
+    private final Deque<List<ThrownTypeCandidate>> activeTryExceptionTypes = new ArrayDeque<>();
+
+    private String currentClass;
+    private FunctionRecord currentFunction;
+    private AttributeRecord currentAttribute;
+    private VariableTable classScope;
+    private boolean currentConstructor;
+    private boolean currentConstructorDelegatesToThis;
+    private boolean currentConstructorInvocationArguments;
+    private int loopDepth;
+    private Set<String> assignedFinalFields = new HashSet<>();
+    private Set<VariableSymbolRecord> definitelyAssignedVariables = new HashSet<>();
+    private Map<String, String> constructorDelegations = new HashMap<>();
+
+    private final TypeChecker typeChecker = new TypeChecker();
+
+
+    private void enterScope() {
+        currentScope = new VariableTable(currentScope);
+    }
+
+    private void exitScope() {
+        currentScope = currentScope.getParent();
+    }
+
+
+    private SemanticType convertType(TypeRecord type) {
+        return convertType(type.name());
+    }
+
+    private SemanticType convertType(String type) {
+        return convertedTypes.computeIfAbsent(type, this::convertTypeUncached);
+    }
+
+    private SemanticType convertTypeUncached(String type) {
+        int dimensions = 0;
+        String elementType = type;
+        while (elementType.endsWith("[]")) {
+            dimensions++;
+            elementType = elementType.substring(0, elementType.length() - 2);
+        }
+
+        SemanticType baseType = switch (elementType) {
+
+            case "int" ->
+                SemanticType.primitive(TokenType.INT);
+
+            case "long" ->
+                SemanticType.primitive(TokenType.LONG);
+
+            case "double" ->
+                SemanticType.primitive(TokenType.DOUBLE);
+
+            case "String" ->
+                SemanticType.primitive(TokenType.STRING);
+
+            case "boolean" ->
+                SemanticType.primitive(TokenType.BOOLEAN);
+
+            case "void" ->
+                SemanticType.primitive(TokenType.VOID);
+
+            default ->
+                SemanticType.classType(elementType);
+        };
+        return dimensions == 0
+                ? baseType
+                : SemanticType.array(
+                        baseType.primitiveType(),
+                        baseType.className(),
+                        dimensions);
+    }
+
+    private SemanticType convertType(TokenType type) {
+        if (type == TokenType.NULL) {
+            return SemanticType.nullType();
+        }
+        return SemanticType.primitive(type);
+    }
+
+
+    private ClassRecord getCurrentClass() {
+
+        if (currentClass == null) {
+            return null;
+        }
+
+        return classes.get(currentClass);
+    }
+
+
+    private AttributeRecord findAttribute(
+            ClassRecord classRecord,
+            String name) {
+
+        if (classRecord == null) {
+            return null;
+        }
+
+        for (AttributeRecord attribute : classRecord.attributes()) {
+
+            if (attribute.name().equals(name)) {
+                return attribute;
+            }
+        }
+
+        return null;
+    }
+
+    private AttributeRecord findInheritedAttribute(
+            String className,
+            String name) {
+        Set<String> visited = new HashSet<>();
+
+        while (className != null && visited.add(className)) {
+            ClassRecord classNode = classes.get(className);
+
+            if (classNode == null) {
+                return null;
+            }
+
+            AttributeRecord attribute = findAttribute(classNode, name);
+
+            if (attribute != null) {
+                return attribute;
+            }
+
+            className = classNode.superClass();
+        }
+
+        return null;
+    }
+
+    private boolean isStaticContext() {
+        return (currentFunction != null && currentFunction.isStatic())
+                || (currentFunction == null
+                        && currentAttribute != null
+                        && currentAttribute.isStatic());
+    }
+
+    private int visibilityLevel(TokenType visibility) {
+        if (visibility == TokenType.PUBLIC) {
+            return 3;
+        }
+        if (visibility == TokenType.PROTECTED) {
+            return 2;
+        }
+        if (visibility == null) {
+            return 1;
+        }
+        return 0;
+    }
+
+    private String packageName(String qualifiedName) {
+        int separator = qualifiedName.lastIndexOf('.');
+        return separator < 0 ? "" : qualifiedName.substring(0, separator);
+    }
+
+    private boolean samePackage(String firstType, String secondType) {
+        return java.util.Objects.equals(
+                packageName(firstType),
+                packageName(secondType));
+    }
+
+    private boolean isSubclassOf(String className, String expectedSuperClass) {
+        if (className == null) return false;
+        String expectedSimpleName = BuiltinExceptionTypes.simpleName(expectedSuperClass);
+        return getAssignableTypes(className).stream().anyMatch(type ->
+                type.equals(expectedSuperClass)
+                        || BuiltinExceptionTypes.simpleName(type).equals(expectedSimpleName));
+    }
+
+    private Set<String> getAssignableTypes(String className) {
+        Set<String> cachedTypes = assignableTypes.get(className);
+        if (cachedTypes != null) {
+            return cachedTypes;
+        }
+
+        Set<String> compatibleTypes = new HashSet<>();
+        Set<String> visited = new HashSet<>();
+        String currentName = className;
+        while (currentName != null && visited.add(currentName)) {
+            compatibleTypes.add(currentName);
+            ClassRecord currentClassNode = classes.get(currentName);
+            if (currentClassNode == null) {
+                if (BuiltinExceptionTypes.isBuiltin(currentName)) {
+                    String parent = BuiltinExceptionTypes.parentOf(currentName);
+                    if (parent != null) {
+                        currentName = parent;
+                        continue;
+                    }
+                }
+                InterfaceRecord interfaceNode = interfaces.get(currentName);
+                if (interfaceNode != null) {
+                    for (String parentInterface : interfaceNode.superInterfaces()) {
+                        compatibleTypes.addAll(getAssignableTypes(parentInterface));
+                    }
+                }
+                break;
+            }
+            for (String interfaceName : currentClassNode.interfaces()) {
+                compatibleTypes.addAll(getAssignableTypes(interfaceName));
+            }
+            currentName = currentClassNode.superClass();
+        }
+        compatibleTypes.add("Object");
+
+        Set<String> immutableTypes = Set.copyOf(compatibleTypes);
+        assignableTypes.put(className, immutableTypes);
+        return immutableTypes;
+    }
+
+    private boolean isTypeAccessible(
+            TokenType visibility,
+            String declaringType,
+            String accessingType) {
+        return visibility == TokenType.PUBLIC
+                || samePackage(declaringType, accessingType);
+    }
+
+    private List<InterfaceRecord> interfaceHierarchy(String interfaceName) {
+        List<InterfaceRecord> result = new ArrayList<>();
+        Set<String> visited = new HashSet<>();
+        collectInterfaceHierarchy(interfaceName, visited, result);
+        return result;
+    }
+
+    private void collectInterfaceHierarchy(
+            String interfaceName,
+            Set<String> visited,
+            List<InterfaceRecord> result) {
+        if (!visited.add(interfaceName)) {
+            return;
+        }
+        InterfaceRecord node = interfaces.get(interfaceName);
+        if (node == null) {
+            return;
+        }
+        result.add(node);
+        for (String parent : node.superInterfaces()) {
+            collectInterfaceHierarchy(parent, visited, result);
+        }
+    }
+
+    private List<FunctionRecord> inheritedInterfaceMethods(String interfaceName) {
+        List<DeclaredInterfaceMethod> declarations = new ArrayList<>();
+        for (InterfaceRecord node : interfaceHierarchy(interfaceName)) {
+            for (FunctionRecord function : node.functions()) {
+                if (function.visibility() != TokenType.PRIVATE && !function.isStatic()) {
+                    declarations.add(new DeclaredInterfaceMethod(node, function));
+                }
+            }
+        }
+        return mostSpecificInterfaceDeclarations(declarations);
+    }
+
+    private List<FunctionRecord> implementedInterfaceMethods(String className) {
+        List<DeclaredInterfaceMethod> declarations = new ArrayList<>();
+        Set<String> visitedClasses = new HashSet<>();
+        String currentName = className;
+        while (currentName != null && visitedClasses.add(currentName)) {
+            ClassRecord classNode = classes.get(currentName);
+            if (classNode == null) {
+                break;
+            }
+            for (String interfaceName : classNode.interfaces()) {
+                for (InterfaceRecord owner : interfaceHierarchy(interfaceName)) {
+                    for (FunctionRecord function : owner.functions()) {
+                        if (function.visibility() != TokenType.PRIVATE && !function.isStatic()) {
+                            declarations.add(new DeclaredInterfaceMethod(owner, function));
+                        }
+                    }
+                }
+            }
+            currentName = classNode.superClass();
+        }
+        return mostSpecificInterfaceDeclarations(declarations);
+    }
+
+    private List<FunctionRecord> objectMethods(int line, int column) {
+        return List.of(
+                builtinMethod(TokenType.PUBLIC, false, "boolean", "equals", List.of("Object"), line, column),
+                builtinMethod(TokenType.PUBLIC, false, "int", "hashCode", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, false, "String", "toString", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "Class", "getClass", List.of(), line, column),
+                builtinMethod(TokenType.PROTECTED, false, "Object", "clone", List.of(), line, column),
+                builtinMethod(TokenType.PROTECTED, false, "void", "finalize", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "void", "notify", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "void", "notifyAll", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "void", "wait", List.of(), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "void", "wait", List.of("long"), line, column),
+                builtinMethod(TokenType.PUBLIC, true, "void", "wait", List.of("long", "int"), line, column));
+    }
+
+    private FunctionRecord builtinMethod(
+            TokenType visibility,
+            boolean isFinal,
+            String returnType,
+            String name,
+            List<String> parameterTypes,
+            int line,
+            int column) {
+        List<ParameterRecord> parameters = new ArrayList<>();
+        for (int index = 0; index < parameterTypes.size(); index++) {
+            parameters.add(new ParameterRecord(
+                    new TypeRecord(parameterTypes.get(index)),
+                    "arg" + index,
+                    line,
+                    column));
+        }
+        return new FunctionRecord(
+                visibility,
+                false,
+                isFinal,
+                new TypeRecord(returnType),
+                name,
+                parameters,
+                null,
+                false,
+                false,
+                line,
+                column);
+    }
+
+    private List<FunctionRecord> mostSpecificInterfaceDeclarations(
+            List<DeclaredInterfaceMethod> declarations) {
+        List<DeclaredInterfaceMethod> effective = new ArrayList<>();
+        for (DeclaredInterfaceMethod candidate : declarations) {
+            boolean overriddenByChild = false;
+            for (DeclaredInterfaceMethod other : declarations) {
+                if (candidate == other
+                        || !methodSignature(candidate.function()).equals(methodSignature(other.function()))) {
+                    continue;
+                }
+                if (!candidate.owner().name().equals(other.owner().name())
+                        && interfaceExtends(other.owner().name(), candidate.owner().name())) {
+                    overriddenByChild = true;
+                    break;
+                }
+            }
+            if (!overriddenByChild && effective.stream().noneMatch(existing ->
+                    existing.owner().name().equals(candidate.owner().name())
+                            && methodSignature(existing.function()).equals(
+                                    methodSignature(candidate.function())))) {
+                effective.add(candidate);
+            }
+        }
+        return effective.stream().map(DeclaredInterfaceMethod::function).toList();
+    }
+
+    private List<FunctionRecord> coalesceEquivalentMethods(List<FunctionRecord> methods) {
+        Map<String, FunctionRecord> selected = new HashMap<>();
+        for (FunctionRecord method : methods) {
+            String signature = methodSignature(method);
+            FunctionRecord previous = selected.get(signature);
+            if (previous == null
+                    || isValidReturnSubstitution(
+                            convertType(previous.returnType()),
+                            convertType(method.returnType()))) {
+                selected.put(signature, method);
+            }
+        }
+        return new ArrayList<>(selected.values());
+    }
+
+    private boolean interfaceExtends(String child, String parent) {
+        return !child.equals(parent)
+                && interfaceHierarchy(child).stream()
+                        .anyMatch(node -> node.name().equals(parent));
+    }
+
+    private void validateInterfaceInheritance(InterfaceRecord interfaceNode) {
+        Set<String> directParents = new HashSet<>();
+        for (String parentName : interfaceNode.superInterfaces()) {
+            if (!directParents.add(parentName)) {
+                throw new SemanticException(
+                        "A interface '" + parentName + "' foi estendida mais de uma vez.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+            if (interfaceNode.name().equals(parentName)) {
+                throw new SemanticException(
+                        "Uma interface não pode estender a si mesma.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+            if (!interfaces.containsKey(parentName)) {
+                throw new SemanticException(
+                        "Interface pai '" + parentName + "' não declarada.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+            if (!isTypeAccessible(
+                    interfaces.get(parentName).visibility(),
+                    parentName,
+                    interfaceNode.name())) {
+                throw new SemanticException(
+                        "A interface pai '" + parentName + "' não é acessível neste pacote.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+            if (interfaceExtends(parentName, interfaceNode.name())) {
+                throw new SemanticException(
+                        "Herança circular detectada envolvendo a interface '"
+                                + interfaceNode.name() + "'.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+        }
+
+        for (FunctionRecord method : interfaceNode.functions()) {
+            if (method.visibility() == TokenType.PRIVATE || method.isStatic()) {
+                continue;
+            }
+            for (String parentName : interfaceNode.superInterfaces()) {
+                for (InterfaceRecord parent : interfaceHierarchy(parentName)) {
+                    for (FunctionRecord inherited : parent.functions()) {
+                        if (inherited.visibility() == TokenType.PRIVATE
+                                || inherited.isStatic()
+                                || !sameSignature(method, inherited)) {
+                            continue;
+                        }
+                        if (!isValidReturnSubstitution(
+                                convertType(inherited.returnType()),
+                                convertType(method.returnType()))) {
+                            throw new SemanticException(
+                                    "Tipo de retorno incompatível ao redefinir '"
+                                            + method.name() + "' herdado de '"
+                                            + parent.name() + "'.",
+                                    method.line(),
+                                    method.column());
+                        }
+                    }
+                }
+            }
+            if (!method.isDefault()) {
+                continue;
+            }
+            for (FunctionRecord objectMethod : objectMethods(method.line(), method.column())) {
+                if (objectMethod.visibility() == TokenType.PUBLIC
+                        && sameSignature(method, objectMethod)) {
+                    throw new SemanticException(
+                            "Um método default não pode substituir o método público '"
+                                    + objectMethod.name() + "' de Object.",
+                            method.line(),
+                            method.column());
+                }
+            }
+        }
+
+        List<FunctionRecord> inherited = inheritedInterfaceMethods(interfaceNode.name());
+        Map<String, List<FunctionRecord>> signatures = new HashMap<>();
+        for (FunctionRecord method : inherited) {
+            signatures.computeIfAbsent(methodSignature(method), ignored -> new ArrayList<>())
+                    .add(method);
+        }
+        for (List<FunctionRecord> sameSignature : signatures.values()) {
+            long defaultCount = sameSignature.stream().filter(FunctionRecord::isDefault).count();
+            if (defaultCount > 1) {
+                throw new SemanticException(
+                        "A interface '" + interfaceNode.name()
+                                + "' herda métodos default conflitantes; redeclare a assinatura.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+            FunctionRecord compatibleReturn = sameSignature.stream()
+                    .filter(candidate -> sameSignature.stream().allMatch(other ->
+                            isValidReturnSubstitution(
+                                    convertType(other.returnType()),
+                                    convertType(candidate.returnType()))))
+                    .findFirst()
+                    .orElse(null);
+            if (compatibleReturn == null) {
+                throw new SemanticException(
+                        "A interface '" + interfaceNode.name()
+                                + "' herda métodos com retornos incompatíveis para '"
+                                + sameSignature.get(0).name() + "'.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+        }
+    }
+
+    private boolean isMemberAccessibleFromCurrentClass(
+            TokenType visibility,
+            String declaringClass) {
+        if (visibility == TokenType.PUBLIC) {
+            return true;
+        }
+        if (currentClass == null || declaringClass == null) {
+            return false;
+        }
+        if (visibility == TokenType.PRIVATE) {
+            return currentClass.equals(declaringClass);
+        }
+        if (samePackage(currentClass, declaringClass)) {
+            return true;
+        }
+        return visibility == TokenType.PROTECTED
+                && isSubclassOf(currentClass, declaringClass);
+    }
+
+    private void assignFinalField(
+            AttributeRecord attribute,
+            int line,
+            int column) {
+        if (!attribute.isFinal()) {
+            return;
+        }
+
+        ClassRecord declaringClass = findDeclaringClass(currentClass, attribute.name());
+        if (!currentConstructor
+                || currentConstructorDelegatesToThis
+                || attribute.isStatic()
+                || attribute.value() != null
+                || declaringClass == null
+                || !declaringClass.name().equals(currentClass)) {
+            throw new SemanticException(
+                    "Não é permitido modificar o atributo final '"
+                            + attribute.name() + "'.",
+                    line,
+                    column);
+        }
+
+        if (loopDepth > 0) {
+            throw new SemanticException(
+                    "Um atributo final não pode ser inicializado dentro de um laço.",
+                    line,
+                    column);
+        }
+
+        if (!assignedFinalFields.add(attribute.name())) {
+            throw new SemanticException(
+                    "O atributo final '" + attribute.name()
+                            + "' só pode ser inicializado uma vez.",
+                    line,
+                    column);
+        }
+    }
+
+    private ConstructorRecord resolveConstructor(NewObjectRecord creation) {
+        SemanticType type = convertType(creation.type());
+        if (!type.isClass()) {
+            throw new SemanticException(
+                    "Só é possível instanciar uma classe concreta.",
+                    creation.line(),
+                    creation.column());
+        }
+
+        if (type.className().equals("Object")) {
+            if (!creation.arguments().isEmpty()) {
+                throw new SemanticException(
+                        "O construtor de 'Object' não recebe argumentos.",
+                        creation.line(),
+                        creation.column());
+            }
+            return null;
+        }
+
+        ClassRecord classNode = classes.get(type.className());
+        if (classNode == null) {
+            if (interfaces.containsKey(type.className())) {
+                throw new SemanticException(
+                        "Não é possível instanciar uma interface.",
+                        creation.line(),
+                        creation.column());
+            }
+            throw new SemanticException(
+                    "Classe '" + type.className() + "' não declarada.",
+                    creation.line(),
+                    creation.column());
+        }
+
+        validateTypeExists(creation.type(), false, creation.line(), creation.column());
+        if (classNode.isAbstract()) {
+            throw new SemanticException(
+                    "Não é possível instanciar a classe abstract '"
+                            + classNode.name() + "'.",
+                    creation.line(),
+                    creation.column());
+        }
+
+        List<SemanticType> argumentTypes = new ArrayList<>(creation.arguments().size());
+        for (ExpressionInterface argument : creation.arguments()) {
+            argumentTypes.add(getExpressionType(argument));
+        }
+
+        if (classNode.constructors().isEmpty()) {
+            if (!argumentTypes.isEmpty()) {
+                throw new SemanticException(
+                        noSuitableConstructorMessage(classNode, argumentTypes),
+                        creation.line(),
+                        creation.column());
+            }
+            return null;
+        }
+
+        List<ConstructorRecord> candidates = new ArrayList<>();
+        for (ConstructorRecord constructor : classNode.constructors()) {
+            if (parametersAccept(constructor.parameters(), argumentTypes)) {
+                candidates.add(constructor);
+            }
+        }
+
+        if (!candidates.isEmpty()) {
+            ConstructorRecord bestMatch = mostSpecificConstructor(candidates);
+            if (bestMatch == null) {
+                throw new SemanticException(
+                        "Chamada ambígua entre construtores de '"
+                                + classNode.name() + "'.",
+                        creation.line(),
+                        creation.column());
+            }
+            validateMemberVisibility(
+                    bestMatch.visibility(),
+                    classNode.name(),
+                    classNode.name(),
+                    classNode.name(),
+                    creation.line(),
+                    creation.column());
+            return bestMatch;
+        }
+
+        throw new SemanticException(
+                noSuitableConstructorMessage(classNode, argumentTypes),
+                creation.line(),
+                creation.column());
+    }
+
+    private String noSuitableConstructorMessage(
+            ClassRecord classNode,
+            List<SemanticType> argumentTypes) {
+        StringBuilder message = new StringBuilder("Nenhum construtor adequado encontrado para '")
+                .append(classNode.name())
+                .append(formatTypes(argumentTypes))
+                .append("'. Construtores disponíveis: ");
+
+        if (classNode.constructors().isEmpty()) {
+            return message.append(classNode.name()).append("().").toString();
+        }
+
+        for (int index = 0; index < classNode.constructors().size(); index++) {
+            if (index > 0) {
+                message.append(", ");
+            }
+            ConstructorRecord constructor = classNode.constructors().get(index);
+            List<String> parameterTypes = new ArrayList<>();
+            for (ParameterRecord parameter : constructor.parameters()) {
+                parameterTypes.add(parameter.type().name());
+            }
+            message.append(classNode.name())
+                    .append('(')
+                    .append(String.join(", ", parameterTypes))
+                    .append(')');
+        }
+        return message.append('.').toString();
+    }
+
+    private String formatTypes(List<SemanticType> types) {
+        List<String> names = new ArrayList<>();
+        for (SemanticType type : types) {
+            if (type == null) {
+                names.add("desconhecido");
+            } else if (type.isArray()) {
+                String elementType = type.className() != null
+                        ? type.className()
+                        : switch (type.primitiveType()) {
+                            case INT -> "int";
+                            case LONG -> "long";
+                            case DOUBLE -> "double";
+                            case STRING -> "String";
+                            case BOOLEAN -> "boolean";
+                            default -> type.primitiveType().name().toLowerCase();
+                        };
+                names.add(elementType + "[]".repeat(type.arrayDimensions()));
+            } else if (type.isClass()) {
+                names.add(type.className());
+            } else {
+                names.add(switch (type.primitiveType()) {
+                    case INT -> "int";
+                    case LONG -> "long";
+                    case DOUBLE -> "double";
+                    case STRING -> "String";
+                    case BOOLEAN -> "boolean";
+                    case VOID -> "void";
+                    default -> type.primitiveType().name().toLowerCase();
+                });
+            }
+        }
+        return "(" + String.join(", ", names) + ")";
+    }
+
+    private String constructorSignature(ConstructorRecord constructor) {
+        StringBuilder signature = new StringBuilder("(");
+        for (ParameterRecord parameter : constructor.parameters()) {
+            signature.append(parameter.type().name()).append(';');
+        }
+        return signature.append(')').toString();
+    }
+
+    private FunctionRecord findConcreteImplementation(
+            String className,
+            FunctionRecord abstractFunction) {
+        Set<String> visited = new HashSet<>();
+        while (className != null && visited.add(className)) {
+            ClassRecord classNode = classes.get(className);
+            if (classNode == null) {
+                return null;
+            }
+            for (FunctionRecord method : classNode.functions()) {
+                if (sameSignature(method, abstractFunction)) {
+                    return method.isAbstract() ? null : method;
+                }
+            }
+            className = classNode.superClass();
+        }
+        return null;
+    }
+
+    private void validateAbstractMethods(ClassRecord classNode) {
+        if (classNode.isAbstract()) {
+            return;
+        }
+
+        Set<String> visited = new HashSet<>();
+        String current = classNode.name();
+        while (current != null && visited.add(current)) {
+            ClassRecord currentNode = classes.get(current);
+            if (currentNode == null) {
+                break;
+            }
+            for (FunctionRecord function : currentNode.functions()) {
+                if (function.isAbstract()
+                        && findConcreteImplementation(classNode.name(), function) == null) {
+                    throw new SemanticException(
+                            "A classe concreta '" + classNode.name()
+                                    + "' precisa implementar o método abstract '"
+                                    + function.name() + "'.",
+                            classNode.line(),
+                            classNode.column());
+                }
+            }
+            current = currentNode.superClass();
+        }
+    }
+
+    private boolean canCompleteNormally(BlockRecord block) {
+        for (StatementInterface statement : block.commands()) {
+            if (!canCompleteNormally(statement)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean canCompleteNormally(StatementInterface statement) {
+        if (statement instanceof ReturnRecord) {
+            return false;
+        }
+        if (statement instanceof ThrowRecord) {
+            return false;
+        }
+        if (statement instanceof TryRecord tryStatement) {
+            boolean tryCanComplete = canCompleteNormally(tryStatement.tryBlock());
+            boolean catchCanComplete = tryStatement.catches().stream()
+                    .anyMatch(handler -> canCompleteNormally(handler.block()));
+            boolean finallyCanComplete = tryStatement.finallyBlock() == null
+                    || canCompleteNormally(tryStatement.finallyBlock());
+            return finallyCanComplete && (tryCanComplete || catchCanComplete);
+        }
+        if (statement instanceof BlockRecord block) {
+            return canCompleteNormally(block);
+        }
+        if (statement instanceof IfRecord conditional) {
+            if (conditional.elseBranch() == null) {
+                return isAlwaysTrue(conditional.condition())
+                        ? canCompleteNormally(conditional.thenBranch())
+                        : true;
+            }
+            if (isAlwaysTrue(conditional.condition())) {
+                return canCompleteNormally(conditional.thenBranch());
+            }
+            if (isAlwaysFalse(conditional.condition())) {
+                return canCompleteNormally(conditional.elseBranch());
+            }
+            return canCompleteNormally(conditional.thenBranch())
+                    || canCompleteNormally(conditional.elseBranch());
+        }
+        if (statement instanceof WhileRecord loop) {
+            return !isAlwaysTrue(loop.expression());
+        }
+        if (statement instanceof ForRecord loop) {
+            return loop.condition() != null && !isAlwaysTrue(loop.condition());
+        }
+        return true;
+    }
+
+    private boolean isAlwaysTrue(ExpressionInterface expression) {
+        return expression instanceof LiteralRecord literal
+                && Boolean.TRUE.equals(literal.value());
+    }
+
+    private boolean isAlwaysFalse(ExpressionInterface expression) {
+        return expression instanceof LiteralRecord literal
+                && Boolean.FALSE.equals(literal.value());
+    }
+
+    private void validateLoopBodyReachable(
+            ExpressionInterface condition,
+            int line,
+            int column) {
+        if (isAlwaysFalse(condition)) {
+            throw new SemanticException(
+                    "O corpo do laço é inalcançável.",
+                    line,
+                    column);
+        }
+    }
+
+    private <T> Set<T> mergeBranchState(
+            ExpressionInterface condition,
+            Set<T> before,
+            Set<T> thenState,
+            boolean thenCompletesNormally,
+            Set<T> elseState,
+            boolean elseCompletesNormally) {
+        if (isAlwaysTrue(condition)) {
+            return new HashSet<>(thenState);
+        }
+        if (isAlwaysFalse(condition)) {
+            return new HashSet<>(elseState);
+        }
+        if (thenCompletesNormally && !elseCompletesNormally) {
+            return new HashSet<>(thenState);
+        }
+        if (!thenCompletesNormally && elseCompletesNormally) {
+            return new HashSet<>(elseState);
+        }
+        if (!thenCompletesNormally) {
+            return new HashSet<>(before);
+        }
+
+        Set<T> merged = new HashSet<>(thenState);
+        merged.retainAll(elseState);
+        return merged;
+    }
+
+    private void validateFieldAccess(
+            AttributeRecord attribute,
+            int line,
+            int column) {
+        if (currentConstructorInvocationArguments && !attribute.isStatic()) {
+            throw new SemanticException(
+                    "Um membro de instância não pode ser acessado nos argumentos "
+                            + "de this(...) ou super(...).",
+                    line,
+                    column);
+        }
+        if (isStaticContext() && !attribute.isStatic()) {
+            throw new SemanticException(
+                    "Um membro de instância não pode ser acessado de um contexto estático.",
+                    line,
+                    column);
+        }
+    }
+
+    private VariableSymbolRecord resolveVariable(
+            String name,
+            int line,
+            int column) {
+        return resolveVariable(name, line, column, List.of());
+    }
+
+    private VariableSymbolRecord resolveVariable(
+            String name,
+            int line,
+            int column,
+            List<String> staticImports) {
+        VariableSymbolRecord local = findLocalVariable(name);
+        if (local != null) {
+            if (!definitelyAssignedVariables.contains(local)) {
+                throw new SemanticException(
+                        "A variável '" + name
+                                + "' pode não ter sido inicializada.",
+                        line,
+                        column);
+            }
+            return local;
+        }
+
+        validateFieldInitializerReference(name, line, column);
+
+        AttributeRecord attribute = findInheritedAttribute(currentClass, name);
+
+        if (attribute != null) {
+            ClassRecord declaringClass = findDeclaringClass(currentClass, name);
+
+            validateMemberVisibility(
+                    attribute.visibility(),
+                    declaringClass == null ? null : declaringClass.name(),
+                    name,
+                    line,
+                    column);
+
+            validateFieldAccess(attribute, line, column);
+
+            return new VariableSymbolRecord(
+                    attribute.name(),
+                    convertType(attribute.type()),
+                    attribute.line(),
+                    attribute.column());
+        }
+
+        AttributeRecord importedAttribute = resolveStaticImportedAttribute(staticImports, name, line, column);
+        if (importedAttribute != null) {
+            return new VariableSymbolRecord(importedAttribute.name(),
+                    convertType(importedAttribute.type()), importedAttribute.line(), importedAttribute.column());
+        }
+
+        throw new SemanticException(
+                "Variável ou atributo '" + name + "' não definido.",
+                line,
+                column);
+    }
+
+    private AttributeRecord resolveStaticImportedAttribute(
+            List<String> imports, String name, int line, int column) {
+        List<AttributeRecord> matches = new ArrayList<>();
+        for (String imported : imports) {
+            if (!imported.startsWith("static:")) continue;
+            String target = imported.substring("static:".length());
+            boolean onDemand = target.endsWith(".*");
+            String owner = onDemand ? target.substring(0, target.length() - 2)
+                    : target.substring(0, target.lastIndexOf('.'));
+            String member = onDemand ? name : target.substring(target.lastIndexOf('.') + 1);
+            if (!member.equals(name)) continue;
+            ClassRecord ownerClass = classes.get(owner);
+            if (ownerClass != null) {
+                for (AttributeRecord attribute : ownerClass.attributes()) {
+                    if (attribute.name().equals(name) && attribute.isStatic()) matches.add(attribute);
+                }
+            }
+        }
+        if (matches.size() > 1) {
+            throw new SemanticException("A referência ao membro static '" + name + "' é ambígua.", line, column);
+        }
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private VariableSymbolRecord findLocalVariable(String name) {
+        VariableTable scope = currentScope;
+        while (scope != null && scope != classScope) {
+            VariableSymbolRecord local = scope.resolveCurrent(name);
+            if (local != null) {
+                return local;
+            }
+            scope = scope.getParent();
+        }
+        return null;
+    }
+
+    private void validateFieldInitializerReference(
+            String name,
+            int line,
+            int column) {
+        if (currentAttribute == null) {
+            return;
+        }
+
+        ClassRecord classRecord = getCurrentClass();
+        if (classRecord == null) {
+            return;
+        }
+
+        int currentAttributeIndex = -1;
+        int referencedAttributeIndex = -1;
+        for (int index = 0; index < classRecord.attributes().size(); index++) {
+            AttributeRecord attribute = classRecord.attributes().get(index);
+            if (attribute == currentAttribute) {
+                currentAttributeIndex = index;
+            }
+            if (attribute.name().equals(name)) {
+                referencedAttributeIndex = index;
+            }
+        }
+
+        if (currentAttributeIndex >= 0
+                && referencedAttributeIndex >= currentAttributeIndex) {
+            throw new SemanticException(
+                    "O atributo '" + name
+                            + "' não pode ser referenciado antes de sua declaração.",
+                    line,
+                    column);
+        }
+    }
+
+    private boolean resolvesToLocalVariable(String name) {
+        return findLocalVariable(name) != null;
+    }
+
+    private ClassRecord findDeclaringClass(String className, String name) {
+        Set<String> visited = new HashSet<>();
+
+        while (className != null && visited.add(className)) {
+            ClassRecord classNode = classes.get(className);
+
+            if (classNode == null) {
+                return null;
+            }
+
+            if (findAttribute(classNode, name) != null) {
+                return classNode;
+            }
+
+            className = classNode.superClass();
+        }
+
+        return null;
+    }
+
+    private AttributeRecord resolveObjectAttribute(MemberAccessRecord access) {
+        SemanticType receiverType = getExpressionType(access.receiver());
+
+        if (receiverType == null || !receiverType.isClass()) {
+            throw new SemanticException(
+                    "Acesso a atributo exige um objeto de classe.",
+                    access.line(),
+                    access.column());
+        }
+
+        AttributeRecord attribute = findInheritedAttribute(
+                receiverType.className(),
+                access.name());
+
+        if (attribute == null) {
+            throw new SemanticException(
+                    "A classe '" + receiverType.className()
+                            + "' não possui o atributo '" + access.name() + "'.",
+                    access.line(),
+                    access.column());
+        }
+
+        ClassRecord declaringClass = findDeclaringClass(
+                receiverType.className(),
+                access.name());
+        validateMemberVisibility(
+                attribute.visibility(),
+                declaringClass == null ? null : declaringClass.name(),
+                access.name(),
+                receiverType.className(),
+                access.line(),
+                access.column());
+
+        return attribute;
+    }
+
+    private FunctionRecord resolveObjectMethod(MemberCallRecord call) {
+        ClassRecord staticReceiver = resolveStaticClassReceiver(call);
+        if (staticReceiver != null) {
+            return resolveStaticClassMethod(staticReceiver, call);
+        }
+        InterfaceRecord staticInterface = resolveStaticInterfaceReceiver(call.receiver());
+        if (staticInterface != null) {
+            return resolveStaticInterfaceMethod(staticInterface, call);
+        }
+
+        SemanticType receiverType = getExpressionType(call.receiver());
+
+        if (receiverType == null || !receiverType.isClass()) {
+            throw new SemanticException(
+                    "Chamada de método exige um objeto de classe.",
+                    call.line(),
+                    call.column());
+        }
+
+        List<SemanticType> argumentTypes = getArgumentTypes(
+                call.arguments(), call.line(), call.column());
+
+        InterfaceRecord interfaceNode = interfaces.get(receiverType.className());
+
+        if (interfaceNode != null) {
+            List<FunctionRecord> candidates = new ArrayList<>();
+            for (FunctionRecord function : inheritedInterfaceMethods(interfaceNode.name())) {
+                if (matchesCall(function, call.name(), argumentTypes)) {
+                    candidates.add(function);
+                }
+            }
+            Set<String> interfaceSignatures = new HashSet<>();
+            for (FunctionRecord candidate : candidates) {
+                interfaceSignatures.add(methodSignature(candidate));
+            }
+            for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+                if (function.visibility() == TokenType.PUBLIC
+                        && !interfaceSignatures.contains(methodSignature(function))
+                        && matchesCall(function, call.name(), argumentTypes)) {
+                    candidates.add(function);
+                }
+            }
+            candidates = coalesceEquivalentMethods(candidates);
+            FunctionRecord bestMatch = mostSpecificMethod(candidates);
+            if (bestMatch != null) {
+                return bestMatch;
+            }
+            if (candidates.size() > 1) {
+                throw new SemanticException(
+                        "Chamada ambígua do método '" + call.name() + "'.",
+                        call.line(),
+                        call.column());
+            }
+
+            throw new SemanticException(
+                    "Método '" + call.name() + "' não encontrado na interface '"
+                            + receiverType.className() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        String className = receiverType.className();
+        boolean methodNameFound = false;
+        boolean matchingArityFound = false;
+        List<FunctionRecord> candidates = new ArrayList<>();
+        Set<String> shadowedSignatures = new HashSet<>();
+        Set<String> visited = new HashSet<>();
+
+        while (className != null && visited.add(className)) {
+            ClassRecord classNode = classes.get(className);
+
+            if (classNode == null) {
+                break;
+            }
+
+            for (FunctionRecord function : classNode.functions()) {
+                if (!function.name().equals(call.name())
+                        || !shadowedSignatures.add(methodSignature(function))
+                        || (function.visibility() == TokenType.PRIVATE
+                                && !classNode.name().equals(currentClass))) {
+                    continue;
+                }
+
+                methodNameFound = true;
+
+                if (function.parameters().size() != argumentTypes.size()) {
+                    continue;
+                }
+                matchingArityFound = true;
+
+                if (matchesCall(function, call.name(), argumentTypes)) {
+                    candidates.add(function);
+                }
+            }
+
+            className = classNode.superClass();
+        }
+
+        for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+            if (shadowedSignatures.add(methodSignature(function))
+                    && matchesCall(function, call.name(), argumentTypes)) {
+                methodNameFound = true;
+                matchingArityFound = true;
+                candidates.add(function);
+            }
+        }
+
+        Set<String> classSignatures = new HashSet<>();
+        for (FunctionRecord candidate : candidates) {
+            classSignatures.add(methodSignature(candidate));
+        }
+        for (FunctionRecord function : implementedInterfaceMethods(receiverType.className())) {
+            if (function.name().equals(call.name())
+                    && !classSignatures.contains(methodSignature(function))
+                    && matchesCall(function, call.name(), argumentTypes)) {
+                candidates.add(function);
+            }
+        }
+
+        candidates = coalesceEquivalentMethods(candidates);
+        FunctionRecord bestMatch = mostSpecificMethod(candidates);
+        if (bestMatch != null) {
+            ClassRecord declaringClass = findDeclaringClassForMethod(
+                    receiverType.className(),
+                    bestMatch);
+            validateMemberVisibility(
+                    bestMatch.visibility(),
+                    declaringClass == null ? "Object" : declaringClass.name(),
+                    call.name(),
+                    receiverType.className(),
+                    call.line(),
+                    call.column());
+            return bestMatch;
+        }
+        if (!candidates.isEmpty()) {
+            throw new SemanticException(
+                    "Chamada ambígua do método '" + call.name() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        if (!methodNameFound && argumentTypes.isEmpty()
+                && isThrowableType(receiverType.className())
+                && (call.name().equals("getMessage") || call.name().equals("getType"))) {
+            return new FunctionRecord(
+                    TokenType.PUBLIC,
+                    false,
+                    true,
+                    new TypeRecord("String"),
+                    call.name(),
+                    List.of(),
+                    null,
+                    call.line(),
+                    call.column());
+        }
+
+        if (!methodNameFound) {
+            throw new SemanticException(
+                    "Método '" + call.name() + "' não encontrado ou inacessível na classe '"
+                            + receiverType.className() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        if (!matchingArityFound) {
+            throw new SemanticException(
+                    "Quantidade de argumentos incompatível para o método '"
+                            + call.name() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        throw new SemanticException(
+                "Tipos dos argumentos incompatíveis na chamada do método '"
+                        + call.name() + "'; tipos recebidos: " + formatTypes(argumentTypes) + ".",
+                call.line(),
+                call.column());
+    }
+
+    private ClassRecord resolveStaticClassReceiver(MemberCallRecord call) {
+        return resolveStaticClassReceiver(call.receiver());
+    }
+
+    private ClassRecord resolveStaticClassReceiver(ExpressionInterface receiver) {
+        if (!(receiver instanceof VariableRecord variable)
+                || findLocalVariable(variable.name()) != null
+                || findInheritedAttribute(currentClass, variable.name()) != null) {
+            return null;
+        }
+
+        List<ClassRecord> matches = classes.values().stream()
+                .filter(classNode -> simpleName(classNode.name()).equals(variable.name()))
+                .toList();
+        if (matches.size() > 1) {
+            throw new SemanticException(
+                    "O nome de classe '" + variable.name()
+                            + "' é ambíguo; use o nome qualificado.",
+                    variable.line(),
+                    variable.column());
+        }
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private InterfaceRecord resolveStaticInterfaceReceiver(ExpressionInterface receiver) {
+        if (!(receiver instanceof VariableRecord variable)
+                || findLocalVariable(variable.name()) != null
+                || findInheritedAttribute(currentClass, variable.name()) != null
+                || resolveStaticClassReceiver(receiver) != null) {
+            return null;
+        }
+        List<InterfaceRecord> matches = interfaces.values().stream()
+                .filter(interfaceNode -> simpleName(interfaceNode.name()).equals(variable.name()))
+                .toList();
+        if (matches.size() > 1) {
+            throw new SemanticException(
+                    "O nome da interface '" + variable.name()
+                            + "' é ambíguo; use o nome qualificado.",
+                    variable.line(), variable.column());
+        }
+        return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private FunctionRecord resolveStaticInterfaceMethod(
+            InterfaceRecord receiverInterface,
+            MemberCallRecord call) {
+        List<SemanticType> argumentTypes = getArgumentTypes(
+                call.arguments(), call.line(), call.column());
+        List<FunctionRecord> candidates = new ArrayList<>();
+        boolean methodFound = false;
+        boolean instanceMethodFound = false;
+        for (FunctionRecord function : receiverInterface.functions()) {
+            if (!function.name().equals(call.name())) continue;
+            methodFound = true;
+            if (!function.isStatic()) {
+                instanceMethodFound = true;
+                continue;
+            }
+            if (function.visibility() == TokenType.PRIVATE
+                    && !java.util.Objects.equals(currentClass, receiverInterface.name())) {
+                continue;
+            }
+            if (matchesCall(function, call.name(), argumentTypes)) {
+                candidates.add(function);
+            }
+        }
+        FunctionRecord bestMatch = mostSpecificMethod(candidates);
+        if (bestMatch != null) return bestMatch;
+        if (candidates.size() > 1) {
+            throw new SemanticException(
+                    "Chamada ambígua do método static '" + call.name() + "'.",
+                    call.line(), call.column());
+        }
+        if (instanceMethodFound) {
+            throw new SemanticException(
+                    "O método de instância '" + call.name()
+                            + "' não pode ser chamado pela interface.",
+                    call.line(), call.column());
+        }
+        throw new SemanticException(
+                methodFound
+                        ? "Nenhum método static '" + call.name() + "' aceita os argumentos informados."
+                        : "Método static '" + call.name() + "' não declarado na interface '"
+                                + receiverInterface.name() + "'.",
+                call.line(), call.column());
+    }
+
+    private AttributeRecord resolveStaticClassAttribute(
+            ClassRecord receiverClass,
+            MemberAccessRecord access) {
+        ClassRecord owner = receiverClass;
+        Set<String> visited = new HashSet<>();
+        while (owner != null && visited.add(owner.name())) {
+            for (AttributeRecord attribute : owner.attributes()) {
+                if (!attribute.name().equals(access.name())) continue;
+                if (!attribute.isStatic()) {
+                    throw new SemanticException(
+                            "O atributo de instância '" + access.name()
+                                    + "' não pode ser acessado pela classe.",
+                            access.line(), access.column());
+                }
+                validateMemberVisibility(
+                        attribute.visibility(), owner.name(), access.name(), receiverClass.name(),
+                        access.line(), access.column());
+                return attribute;
+            }
+            owner = owner.superClass() == null ? null : classes.get(owner.superClass());
+        }
+        throw new SemanticException(
+                "A classe '" + receiverClass.name() + "' não possui o atributo static '"
+                        + access.name() + "'.",
+                access.line(), access.column());
+    }
+
+    private FunctionRecord resolveStaticClassMethod(
+            ClassRecord receiverClass,
+            MemberCallRecord call) {
+        List<SemanticType> argumentTypes = getArgumentTypes(
+                call.arguments(), call.line(), call.column());
+        List<FunctionRecord> staticCandidates = new ArrayList<>();
+        boolean instanceMethodFound = false;
+        Set<String> shadowedSignatures = new HashSet<>();
+        Set<String> visited = new HashSet<>();
+        ClassRecord owner = receiverClass;
+
+        while (owner != null && visited.add(owner.name())) {
+            for (FunctionRecord function : owner.functions()) {
+                if (!function.name().equals(call.name())
+                        || !shadowedSignatures.add(methodSignature(function))) {
+                    continue;
+                }
+                if (!function.isStatic()) {
+                    instanceMethodFound = true;
+                } else if (isMemberAccessibleFromCurrentClass(function.visibility(), owner.name())
+                        && matchesCall(function, call.name(), argumentTypes)) {
+                    staticCandidates.add(function);
+                }
+            }
+            owner = owner.superClass() == null ? null : classes.get(owner.superClass());
+        }
+
+        FunctionRecord bestMatch = mostSpecificMethod(staticCandidates);
+        if (bestMatch != null) {
+            ClassRecord declaringClass = findDeclaringClassForMethod(receiverClass.name(), bestMatch);
+            validateMemberVisibility(
+                    bestMatch.visibility(),
+                    declaringClass == null ? receiverClass.name() : declaringClass.name(),
+                    call.name(),
+                    receiverClass.name(),
+                    call.line(),
+                    call.column());
+            return bestMatch;
+        }
+        if (instanceMethodFound) {
+            throw new SemanticException(
+                    "O método '" + call.name()
+                            + "' é de instância e não pode ser chamado pela classe.",
+                    call.line(),
+                    call.column());
+        }
+        throw new SemanticException(
+                "Método static '" + call.name() + "' não encontrado na classe '"
+                        + receiverClass.name() + "' para os argumentos informados.",
+                call.line(),
+                call.column());
+    }
+
+    private String simpleName(String qualifiedName) {
+        int separator = qualifiedName.lastIndexOf('.');
+        return separator < 0 ? qualifiedName : qualifiedName.substring(separator + 1);
+    }
+
+    private ClassRecord findDeclaringClassForMethod(
+            String className,
+            FunctionRecord method) {
+        Set<String> visited = new HashSet<>();
+        while (className != null && visited.add(className)) {
+            ClassRecord classNode = classes.get(className);
+            if (classNode == null) {
+                return null;
+            }
+            for (FunctionRecord candidate : classNode.functions()) {
+                if (sameSignature(candidate, method)) {
+                    return classNode;
+                }
+            }
+            className = classNode.superClass();
+        }
+        return null;
+    }
+
+    private boolean matchesCall(
+            FunctionRecord function,
+            String name,
+            List<SemanticType> argumentTypes) {
+        return function.name().equals(name)
+                && parametersAccept(function.parameters(), argumentTypes);
+    }
+
+    private boolean parametersAccept(
+            List<ParameterRecord> parameters,
+            List<SemanticType> argumentTypes) {
+        if (parameters.size() != argumentTypes.size()) {
+            return false;
+        }
+
+        for (int i = 0; i < argumentTypes.size(); i++) {
+            SemanticType expected = convertType(parameters.get(i).type());
+            if (!isAssignable(expected, argumentTypes.get(i))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private List<SemanticType> getArgumentTypes(
+            List<ExpressionInterface> arguments,
+            int line,
+            int column) {
+        List<SemanticType> argumentTypes = new ArrayList<>(arguments.size());
+        for (ExpressionInterface argument : arguments) {
+            SemanticType argumentType = getExpressionType(argument);
+            if (argumentType == null) {
+                throw new SemanticException(
+                        "Não foi possível determinar o tipo de um argumento.",
+                        line,
+                        column);
+            }
+            argumentTypes.add(argumentType);
+        }
+        return argumentTypes;
+    }
+
+    private FunctionRecord mostSpecificMethod(List<FunctionRecord> candidates) {
+        FunctionRecord best = null;
+        for (FunctionRecord candidate : candidates) {
+            boolean moreSpecificThanAll = true;
+            for (FunctionRecord other : candidates) {
+                if (candidate != other && !isMoreSpecific(candidate, other)) {
+                    moreSpecificThanAll = false;
+                    break;
+                }
+            }
+            if (moreSpecificThanAll) {
+                if (best != null) {
+                    return null;
+                }
+                best = candidate;
+            }
+        }
+
+        return best;
+    }
+
+    private boolean isMoreSpecific(
+            FunctionRecord candidate,
+            FunctionRecord other) {
+        boolean strict = false;
+        for (int index = 0; index < candidate.parameters().size(); index++) {
+            SemanticType candidateType = convertType(
+                    candidate.parameters().get(index).type());
+            SemanticType otherType = convertType(
+                    other.parameters().get(index).type());
+            if (!isAssignable(otherType, candidateType)) {
+                return false;
+            }
+            strict |= !candidateType.equals(otherType);
+        }
+        return strict;
+    }
+
+    private void validateMemberVisibility(
+            TokenType visibility,
+            String declaringClass,
+            String memberName,
+            String receiverClass,
+            int line,
+            int column) {
+        if (visibility == TokenType.PRIVATE
+                && !java.util.Objects.equals(currentClass, declaringClass)) {
+            throw new SemanticException(
+                    "O membro privado '" + memberName
+                            + "' não é acessível nesta classe.",
+                    line,
+                    column);
+        }
+
+        if (visibility == null
+                && currentClass != null
+                && declaringClass != null
+                && !samePackage(currentClass, declaringClass)) {
+            throw new SemanticException(
+                    "O membro '" + memberName
+                            + "' não é acessível fora do pacote.",
+                    line,
+                    column);
+        }
+
+        if (visibility == TokenType.PROTECTED
+                && currentClass != null
+                && declaringClass != null
+                && !samePackage(currentClass, declaringClass)) {
+            boolean subclassAccess = isSubclassOf(currentClass, declaringClass);
+            boolean validReceiver = receiverClass == null
+                    || isSubclassOf(receiverClass, currentClass);
+            if (!subclassAccess || !validReceiver) {
+                throw new SemanticException(
+                        "O membro protected '" + memberName
+                                + "' só pode ser acessado no pacote ou por uma subclasse.",
+                        line,
+                        column);
+            }
+        }
+    }
+
+    private void validateMemberVisibility(
+            TokenType visibility,
+            String declaringClass,
+            String memberName,
+            int line,
+            int column) {
+        validateMemberVisibility(
+                visibility,
+                declaringClass,
+                memberName,
+                null,
+                line,
+                column);
+    }
+
+    private void validateTypeExists(
+            TypeRecord type,
+            boolean allowVoid,
+            int line,
+            int column) {
+        SemanticType semanticType = convertType(type);
+
+        if (semanticType.isArray() && semanticType.arrayDimensions() > 255) {
+            throw new SemanticException(
+                    "Um array não pode ter mais de 255 dimensões.",
+                    line,
+                    column);
+        }
+
+        if (semanticType.isNull()) {
+            throw new SemanticException(
+                    "'null' é um valor, não um tipo declarado.",
+                    line,
+                    column);
+        }
+
+        if (semanticType.isPrimitive()) {
+            if (semanticType.primitiveType() == TokenType.VOID && !allowVoid) {
+                throw new SemanticException(
+                        "O tipo void não pode ser usado aqui.",
+                        line,
+                        column);
+            }
+            return;
+        }
+
+        if (semanticType.isArray()) {
+            if (semanticType.primitiveType() == TokenType.VOID) {
+                throw new SemanticException(
+                        "Arrays não podem ter elementos do tipo void.",
+                        line,
+                        column);
+            }
+            if (semanticType.className() == null) {
+                return;
+            }
+            if (semanticType.className().equals("Object")) {
+                return;
+            }
+        }
+
+        if (semanticType.isClass() && semanticType.className().equals("Object")) {
+            return;
+        }
+        if (semanticType.isClass() && semanticType.className().equals("Class")) {
+            return;
+        }
+
+        ClassRecord classType = classes.get(semanticType.className());
+        InterfaceRecord interfaceType = interfaces.get(semanticType.className());
+        if (classType == null && interfaceType == null) {
+            if (semanticType.isClass()
+                    && BuiltinExceptionTypes.isBuiltin(semanticType.className())) {
+                return;
+            }
+            throw new SemanticException(
+                    "Tipo '" + semanticType.className() + "' não declarado.",
+                    line,
+                    column);
+        }
+
+        TokenType visibility = classType != null
+                ? classType.visibility()
+                : interfaceType.visibility();
+        if (currentClass != null
+                && !isTypeAccessible(
+                        visibility,
+                        semanticType.className(),
+                        currentClass)) {
+            throw new SemanticException(
+                    "O tipo '" + semanticType.className()
+                            + "' não é público e pertence a outro pacote.",
+                    line,
+                    column);
+        }
+    }
+
+
+    private void validateThisContext(int line, int column) {
+
+        if (currentConstructorInvocationArguments) {
+            throw new SemanticException(
+                    "'this' não pode ser utilizado nos argumentos de this(...) ou super(...).",
+                    line,
+                    column);
+        }
+
+        if (currentClass == null) {
+            throw new SemanticException(
+                    "'this' só pode ser utilizado dentro de uma classe.",
+                    line,
+                    column);
+        }
+
+        if (isStaticContext()) {
+            throw new SemanticException(
+                    "'this' não pode ser utilizado em métodos estáticos.",
+                    line,
+                    column);
+        }
+    }
+
+
+    private FunctionRecord resolveFunctionCall(CallRecord call) {
+
+        if (currentClass == null) {
+            throw new SemanticException(
+                    "Chamada de função fora de uma classe.",
+                    call.line(),
+                    call.column());
+        }
+
+        List<SemanticType> argumentTypes = getArgumentTypes(
+                call.arguments(), call.line(), call.column());
+
+        String className = currentClass;
+        boolean functionFound = false;
+        boolean sameParameterCount = false;
+        List<FunctionRecord> candidates = new ArrayList<>();
+        Set<String> shadowedSignatures = new HashSet<>();
+        Set<String> visited = new HashSet<>();
+
+        while (className != null && visited.add(className)) {
+
+            ClassRecord classNode = classes.get(className);
+
+            if (classNode == null) {
+                break;
+            }
+
+            for (FunctionRecord function : classNode.functions()) {
+                if (!function.name().equals(call.name())
+                        || !shadowedSignatures.add(methodSignature(function))) {
+                    continue;
+                }
+
+                if (!isMemberAccessibleFromCurrentClass(
+                        function.visibility(),
+                        classNode.name())) {
+                    continue;
+                }
+
+                functionFound = true;
+
+                if (function.parameters().size() != argumentTypes.size()) {
+                    continue;
+                }
+
+                sameParameterCount = true;
+                if (matchesCall(function, call.name(), argumentTypes)) {
+                    candidates.add(function);
+                }
+            }
+
+            className = classNode.superClass();
+        }
+
+        Set<String> declaredSignatures = new HashSet<>();
+        for (FunctionRecord candidate : candidates) {
+            declaredSignatures.add(methodSignature(candidate));
+        }
+        for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+            if (interfaces.containsKey(currentClass)
+                    && function.visibility() != TokenType.PUBLIC) {
+                continue;
+            }
+            if (function.name().equals(call.name())
+                    && !declaredSignatures.contains(methodSignature(function))
+                    && matchesCall(function, call.name(), argumentTypes)) {
+                candidates.add(function);
+                functionFound = true;
+                sameParameterCount = true;
+            }
+        }
+
+        InterfaceRecord currentInterface = interfaces.get(currentClass);
+        if (currentInterface != null) {
+            for (InterfaceRecord owner : interfaceHierarchy(currentInterface.name())) {
+                for (FunctionRecord function : owner.functions()) {
+                    if (!function.name().equals(call.name())
+                            || ((function.visibility() == TokenType.PRIVATE || function.isStatic())
+                                    && !owner.name().equals(currentInterface.name()))) {
+                        continue;
+                    }
+                    functionFound = true;
+                    if (function.parameters().size() != argumentTypes.size()) {
+                        continue;
+                    }
+                    sameParameterCount = true;
+                    if (matchesCall(function, call.name(), argumentTypes)) {
+                        candidates.add(function);
+                    }
+                }
+            }
+        }
+
+        if (candidates.isEmpty()) {
+            for (String imported : call.staticImports()) {
+                if (!imported.startsWith("static:")) continue;
+                String target = imported.substring("static:".length());
+                boolean onDemand = target.endsWith(".*");
+                String owner = onDemand ? target.substring(0, target.length() - 2)
+                        : target.substring(0, target.lastIndexOf('.'));
+                String member = onDemand ? call.name() : target.substring(target.lastIndexOf('.') + 1);
+                if (!member.equals(call.name())) continue;
+                ClassRecord ownerClass = classes.get(owner);
+                List<FunctionRecord> ownerMethods = ownerClass != null ? ownerClass.functions()
+                        : interfaces.containsKey(owner) ? interfaces.get(owner).functions() : List.of();
+                for (FunctionRecord function : ownerMethods) {
+                    if (function.name().equals(call.name()) && function.isStatic()) {
+                        functionFound = true;
+                        if (function.parameters().size() == argumentTypes.size()) {
+                            sameParameterCount = true;
+                            if (matchesCall(function, call.name(), argumentTypes)) candidates.add(function);
+                        }
+                    }
+                }
+            }
+        }
+
+        candidates = coalesceEquivalentMethods(candidates);
+        FunctionRecord bestMatch = mostSpecificMethod(candidates);
+        if (bestMatch != null) {
+            if ((isStaticContext() || currentConstructorInvocationArguments)
+                    && !bestMatch.isStatic()) {
+                throw new SemanticException(
+                        currentConstructorInvocationArguments
+                                ? "Um método de instância não pode ser chamado nos argumentos "
+                                        + "de this(...) ou super(...)."
+                                : "Um método de instância não pode ser chamado de um contexto estático.",
+                        call.line(),
+                        call.column());
+            }
+            return bestMatch;
+        }
+        if (!candidates.isEmpty()) {
+            throw new SemanticException(
+                    "Chamada ambígua da função '" + call.name() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        if (!functionFound) {
+            throw new SemanticException(
+                    "Função '" + call.name() + "' não declarada.",
+                    call.line(),
+                    call.column());
+        }
+
+        if (!sameParameterCount) {
+            throw new SemanticException(
+                    "Quantidade de parâmetros incompatível na chamada da função '"
+                            + call.name() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        throw new SemanticException(
+                "Tipos dos argumentos incompatíveis na chamada da função '"
+                        + call.name() + "'; tipos recebidos: " + formatTypes(argumentTypes) + ".",
+                call.line(),
+                call.column());
+    }
+
+    private AttributeRecord resolveSuperAttribute(SuperAttributeRecord access) {
+        validateThisContext(access.line(), access.column());
+
+        ClassRecord classNode = getCurrentClass();
+        String superClass = classNode == null ? null : classNode.superClass();
+
+        if (superClass == null) {
+            throw new SemanticException(
+                    "'super' só pode ser utilizado em uma classe com classe pai.",
+                    access.line(),
+                    access.column());
+        }
+
+        Set<String> visited = new HashSet<>();
+
+        while (superClass != null && visited.add(superClass)) {
+            ClassRecord parent = classes.get(superClass);
+
+            if (parent == null) {
+                break;
+            }
+
+            AttributeRecord attribute = findAttribute(parent, access.name());
+
+            if (attribute != null) {
+                if (!isMemberAccessibleFromCurrentClass(
+                        attribute.visibility(),
+                        parent.name())) {
+                    throw new SemanticException(
+                            "O atributo '" + access.name()
+                                    + "' não é acessível na classe pai.",
+                            access.line(),
+                            access.column());
+                }
+
+                return attribute;
+            }
+
+            superClass = parent.superClass();
+        }
+
+        throw new SemanticException(
+                "Atributo '" + access.name()
+                + "' não declarado na hierarquia da classe pai.",
+                access.line(),
+                access.column());
+    }
+
+    private FunctionRecord resolveSuperCall(SuperCallRecord call) {
+        validateThisContext(call.line(), call.column());
+
+        ClassRecord classNode = getCurrentClass();
+        String superClass = classNode == null ? null : classNode.superClass();
+
+        if (superClass == null) {
+            throw new SemanticException(
+                    "'super' só pode ser utilizado em uma classe com classe pai.",
+                    call.line(),
+                    call.column());
+        }
+
+        List<SemanticType> argumentTypes = getArgumentTypes(
+                call.arguments(), call.line(), call.column());
+
+        boolean methodFound = false;
+        boolean sameParameterCount = false;
+        List<FunctionRecord> candidates = new ArrayList<>();
+        Set<String> shadowedSignatures = new HashSet<>();
+        Set<String> visited = new HashSet<>();
+
+        while (superClass != null && visited.add(superClass)) {
+            ClassRecord parent = classes.get(superClass);
+
+            if (parent == null) {
+                break;
+            }
+
+            for (FunctionRecord function : parent.functions()) {
+                if (!function.name().equals(call.name())
+                        || !shadowedSignatures.add(methodSignature(function))
+                        || !isMemberAccessibleFromCurrentClass(
+                                function.visibility(),
+                                parent.name())) {
+                    continue;
+                }
+
+                methodFound = true;
+
+                if (function.parameters().size() != argumentTypes.size()) {
+                    continue;
+                }
+
+                sameParameterCount = true;
+                if (matchesCall(function, call.name(), argumentTypes)) {
+                    candidates.add(function);
+                }
+            }
+
+            superClass = parent.superClass();
+        }
+
+        for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+            if (function.name().equals(call.name())
+                    && isMemberAccessibleFromCurrentClass(function.visibility(), "Object")
+                    && matchesCall(function, call.name(), argumentTypes)) {
+                candidates.add(function);
+                methodFound = true;
+                sameParameterCount = true;
+            }
+        }
+
+        FunctionRecord bestMatch = mostSpecificMethod(candidates);
+        if (bestMatch != null) {
+            ClassRecord declaringClass = findDeclaringClassForMethod(
+                    getCurrentClass().superClass(),
+                    bestMatch);
+            validateMemberVisibility(
+                    bestMatch.visibility(),
+                    declaringClass == null ? "Object" : declaringClass.name(),
+                    call.name(),
+                    call.line(),
+                    call.column());
+            return bestMatch;
+        }
+        if (!candidates.isEmpty()) {
+            throw new SemanticException(
+                    "Chamada ambígua do método '" + call.name() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        if (!methodFound) {
+            throw new SemanticException(
+                    "Método '" + call.name()
+                    + "' não declarado ou inacessível na classe pai.",
+                    call.line(),
+                    call.column());
+        }
+
+        if (!sameParameterCount) {
+            throw new SemanticException(
+                    "Quantidade de parâmetros incompatível na chamada de '"
+                    + call.name() + "'.",
+                    call.line(),
+                    call.column());
+        }
+
+        throw new SemanticException(
+                "Tipos dos argumentos incompatíveis na chamada de '"
+                + call.name() + "'.",
+                call.line(),
+                call.column());
+    }
+
+
+    private FunctionRecord findInheritedMethod(
+            String superClass,
+            FunctionRecord function) {
+
+        Set<String> visited = new HashSet<>();
+
+        while (superClass != null && visited.add(superClass)) {
+
+            ClassRecord parent = classes.get(superClass);
+
+            if (parent == null) {
+                return null;
+            }
+
+            for (FunctionRecord parentFunction : parent.functions()) {
+
+                if (parentFunction.visibility() == TokenType.PRIVATE
+                        || (parentFunction.visibility() == null
+                                && !samePackage(currentClass, parent.name()))) {
+                    continue;
+                }
+
+                if (sameSignature(parentFunction, function)) {
+                    return parentFunction;
+                }
+            }
+
+            superClass = parent.superClass();
+        }
+
+        for (FunctionRecord objectMethod : objectMethods(function.line(), function.column())) {
+            if (sameSignature(objectMethod, function)) {
+                return objectMethod;
+            }
+        }
+
+        return null;
+    }
+
+    private void validateClassInheritance(ClassRecord classNode) {
+
+        Set<String> visited = new HashSet<>();
+
+        ClassRecord current = classNode;
+
+        while (current != null) {
+
+            if (!visited.add(current.name())) {
+                throw new SemanticException(
+                        "Herança circular detectada envolvendo a classe '"
+                                + current.name() + "'.",
+                        current.line(),
+                        current.column());
+            }
+
+            if (current.superClass() == null) {
+                break;
+            }
+
+            ClassRecord parent = classes.get(current.superClass());
+
+            if (parent == null) {
+                if (current.superClass().equals("Object")) {
+                    break;
+                }
+                if (BuiltinExceptionTypes.isBuiltin(current.superClass())) {
+                    break;
+                }
+                if (interfaces.containsKey(current.superClass())) {
+                    throw new SemanticException(
+                            "Uma interface não pode ser usada como classe pai.",
+                            current.line(),
+                            current.column());
+                }
+
+                throw new SemanticException(
+                        "Classe pai '" + current.superClass()
+                                + "' não declarada.",
+                        current.line(),
+                        current.column());
+            }
+
+            if (!isTypeAccessible(
+                    parent.visibility(),
+                    parent.name(),
+                    classNode.name())) {
+                throw new SemanticException(
+                        "A classe pai '" + parent.name()
+                                + "' não é acessível neste pacote.",
+                        current.line(),
+                        current.column());
+            }
+
+            if (parent.isFinal()) {
+                throw new SemanticException(
+                        "A classe final '" + parent.name() + "' não pode ser estendida.",
+                        current.line(),
+                        current.column());
+            }
+
+            current = parent;
+        }
+
+        if (classNode.superClass() != null
+                && !classNode.superClass().equals("Object")
+                && !BuiltinExceptionTypes.isBuiltin(classNode.superClass())
+                && classNode.constructors().isEmpty()) {
+            validateImplicitSuperConstructor(
+                    classNode,
+                    classes.get(classNode.superClass()));
+        }
+    }
+
+    private ConstructorRecord resolveConstructorInvocation(
+            ClassRecord targetClass,
+            List<ExpressionInterface> arguments,
+            int line,
+            int column) {
+        List<SemanticType> argumentTypes = new ArrayList<>(arguments.size());
+        for (ExpressionInterface argument : arguments) {
+            argumentTypes.add(getExpressionType(argument));
+        }
+
+        if (targetClass == null) {
+            if (argumentTypes.isEmpty()) {
+                return null;
+            }
+            throw new SemanticException(
+                    "O construtor de 'Object' não recebe argumentos.",
+                    line,
+                    column);
+        }
+
+        if (targetClass.constructors().isEmpty()) {
+            if (argumentTypes.isEmpty()) {
+                return null;
+            }
+            throw new SemanticException(
+                    "O construtor implícito de '" + targetClass.name()
+                            + "' não recebe argumentos.",
+                    line,
+                    column);
+        }
+
+        List<ConstructorRecord> candidates = new ArrayList<>();
+
+        for (ConstructorRecord constructor : targetClass.constructors()) {
+            if (parametersAccept(constructor.parameters(), argumentTypes)) {
+                candidates.add(constructor);
+            }
+        }
+
+        if (!candidates.isEmpty()) {
+            ConstructorRecord bestMatch = mostSpecificConstructor(candidates);
+            if (bestMatch != null) {
+                return bestMatch;
+            }
+            throw new SemanticException(
+                    "Invocação ambígua de construtor para '" + targetClass.name() + "'.",
+                    line,
+                    column);
+        }
+        throw new SemanticException(
+                noSuitableConstructorMessage(targetClass, argumentTypes),
+                line,
+                column);
+    }
+
+    private ConstructorRecord mostSpecificConstructor(
+            List<ConstructorRecord> candidates) {
+        ConstructorRecord best = null;
+        for (ConstructorRecord candidate : candidates) {
+            boolean moreSpecificThanAll = true;
+            for (ConstructorRecord other : candidates) {
+                if (candidate != other && !isMoreSpecific(candidate, other)) {
+                    moreSpecificThanAll = false;
+                    break;
+                }
+            }
+            if (moreSpecificThanAll) {
+                if (best != null) {
+                    return null;
+                }
+                best = candidate;
+            }
+        }
+        return best;
+    }
+
+    private boolean isMoreSpecific(
+            ConstructorRecord candidate,
+            ConstructorRecord other) {
+        boolean strict = false;
+        for (int index = 0; index < candidate.parameters().size(); index++) {
+            SemanticType candidateType = convertType(
+                    candidate.parameters().get(index).type());
+            SemanticType otherType = convertType(
+                    other.parameters().get(index).type());
+            if (!isAssignable(otherType, candidateType)) {
+                return false;
+            }
+            strict |= !candidateType.equals(otherType);
+        }
+        return strict;
+    }
+
+    private boolean isConstructorAccessible(
+            ConstructorRecord constructor,
+            ClassRecord declaringClass,
+            boolean superInvocation) {
+        if (constructor.visibility() == TokenType.PUBLIC) {
+            return true;
+        }
+        if (constructor.visibility() == TokenType.PRIVATE) {
+            return !superInvocation && currentClass.equals(declaringClass.name());
+        }
+        if (samePackage(currentClass, declaringClass.name())) {
+            return true;
+        }
+        return constructor.visibility() == TokenType.PROTECTED
+                && isSubclassOf(currentClass, declaringClass.name());
+    }
+
+    private ConstructorRecord validateConstructorInvocation(ConstructorRecord constructor) {
+        ConstructorInvocationRecord invocation = constructor.invocation();
+        ClassRecord currentClassNode = getCurrentClass();
+
+        if (invocation == null) {
+            if (currentClassNode.superClass() != null) {
+                ClassRecord parent = classes.get(currentClassNode.superClass());
+                ConstructorRecord parentConstructor = resolveConstructorInvocation(
+                        parent,
+                        List.of(),
+                        constructor.line(),
+                        constructor.column());
+                if (parentConstructor != null
+                        && !isConstructorAccessible(parentConstructor, parent, true)) {
+                    throw new SemanticException(
+                            "O construtor super() de '" + parent.name() + "' não é acessível.",
+                            constructor.line(),
+                            constructor.column());
+                }
+            }
+            return null;
+        }
+
+        ClassRecord targetClass;
+        if (invocation.delegatesToThis()) {
+            targetClass = currentClassNode;
+        } else {
+            if (currentClassNode.superClass() == null) {
+                throw new SemanticException(
+                        "super(...) só pode ser usado em uma classe com classe pai.",
+                        invocation.line(),
+                        invocation.column());
+            }
+            targetClass = classes.get(currentClassNode.superClass());
+        }
+
+        ConstructorRecord targetConstructor;
+        currentConstructorInvocationArguments = true;
+        try {
+            targetConstructor = resolveConstructorInvocation(
+                    targetClass,
+                    invocation.arguments(),
+                    invocation.line(),
+                    invocation.column());
+        } finally {
+            currentConstructorInvocationArguments = false;
+        }
+        if (targetConstructor != null
+                && !isConstructorAccessible(
+                        targetConstructor,
+                        targetClass,
+                        !invocation.delegatesToThis())) {
+            throw new SemanticException(
+                    "O construtor de '" + targetClass.name() + "' não é acessível.",
+                    invocation.line(),
+                    invocation.column());
+        }
+        return invocation.delegatesToThis() ? targetConstructor : null;
+    }
+
+    private void validateConstructorDelegationCycles(ClassRecord classNode) {
+        for (ConstructorRecord constructor : classNode.constructors()) {
+            Set<String> visited = new HashSet<>();
+            String current = constructorSignature(constructor);
+            while (current != null) {
+                if (!visited.add(current)) {
+                    throw new SemanticException(
+                            "Ciclo de chamadas entre construtores da classe '"
+                                    + classNode.name() + "'.",
+                            constructor.line(),
+                            constructor.column());
+                }
+                current = constructorDelegations.get(current);
+            }
+        }
+    }
+
+    private void validateImplicitSuperConstructor(
+            ClassRecord child,
+            ClassRecord parent) {
+        if (parent.constructors().isEmpty()
+                || hasAccessibleNoArgumentConstructor(parent, child)) {
+            return;
+        }
+
+        throw new SemanticException(
+                "A classe '" + child.name()
+                        + "' precisa de um super() acessível em '"
+                        + parent.name() + "' para o construtor implícito.",
+                child.line(),
+                child.column());
+    }
+
+    private boolean hasAccessibleNoArgumentConstructor(
+            ClassRecord parent,
+            ClassRecord child) {
+        for (ConstructorRecord constructor : parent.constructors()) {
+            if (!constructor.parameters().isEmpty()) {
+                continue;
+            }
+            if (constructor.visibility() == TokenType.PUBLIC
+                    || (constructor.visibility() == TokenType.PROTECTED
+                            && (samePackage(child.name(), parent.name())
+                                    || isSubclassOf(child.name(), parent.name())))
+                    || (constructor.visibility() == null
+                            && samePackage(child.name(), parent.name()))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void validateImplementedInterfaces(ClassRecord classNode) {
+
+        Set<String> implemented = new HashSet<>();
+        ClassRecord current = classNode;
+
+        while (current != null) {
+            Set<String> declaredOnClass = new HashSet<>();
+
+            for (String interfaceName : current.interfaces()) {
+                if (!declaredOnClass.add(interfaceName)) {
+                    throw new SemanticException(
+                            "Interface '" + interfaceName
+                                    + "' implementada mais de uma vez.",
+                            current.line(),
+                            current.column());
+                }
+
+                if (!implemented.add(interfaceName)) {
+                    continue;
+                }
+
+                InterfaceRecord interfaceNode = interfaces.get(interfaceName);
+
+                if (interfaceNode == null) {
+                    throw new SemanticException(
+                            "'" + interfaceName + "' não é uma interface declarada.",
+                            current.line(),
+                            current.column());
+                }
+
+                if (!isTypeAccessible(
+                        interfaceNode.visibility(),
+                        interfaceNode.name(),
+                        classNode.name())) {
+                    throw new SemanticException(
+                            "A interface '" + interfaceName
+                                    + "' não é acessível neste pacote.",
+                            current.line(),
+                            current.column());
+                }
+
+                for (InterfaceRecord inheritedInterface : interfaceHierarchy(interfaceName)) {
+                    if (!isTypeAccessible(
+                            inheritedInterface.visibility(),
+                            inheritedInterface.name(),
+                            classNode.name())) {
+                        throw new SemanticException(
+                                "A interface pai '" + inheritedInterface.name()
+                                        + "' não é acessível neste pacote.",
+                                current.line(),
+                                current.column());
+                    }
+                }
+
+                for (FunctionRecord requirement : inheritedInterfaceMethods(interfaceName)) {
+                    FunctionRecord implementation = findClassMethod(
+                            classNode.name(),
+                            requirement);
+
+                    if (implementation == null) {
+                        List<FunctionRecord> defaults = implementedInterfaceMethods(classNode.name())
+                                .stream()
+                                .filter(method -> methodSignature(method)
+                                        .equals(methodSignature(requirement)))
+                                .filter(FunctionRecord::isDefault)
+                                .toList();
+                        if (defaults.size() == 1) {
+                            continue;
+                        }
+                        if (defaults.size() > 1) {
+                            throw new SemanticException(
+                                    "A classe '" + classNode.name()
+                                            + "' herda implementações default conflitantes para '"
+                                            + requirement.name() + "'; declare uma implementação explícita.",
+                                    classNode.line(),
+                                    classNode.column());
+                        }
+                        if (classNode.isAbstract()) {
+                            continue;
+                        }
+                        throw new SemanticException(
+                                "A classe '" + classNode.name()
+                                        + "' não implementa o método '"
+                                        + requirement.name() + "'.",
+                                classNode.line(),
+                                classNode.column());
+                    }
+
+                    if (implementation.visibility() != TokenType.PUBLIC
+                            || implementation.isStatic()) {
+                        throw new SemanticException(
+                                "O método '" + requirement.name()
+                                        + "' deve ser público e de instância para implementar a interface.",
+                                implementation.line(),
+                                implementation.column());
+                    }
+                    validateNarrowerThrows(
+                            implementation,
+                            requirement,
+                            implementation.line(),
+                            implementation.column());
+
+                    SemanticType expectedReturn = convertType(
+                            requirement.returnType());
+                    SemanticType actualReturn = convertType(
+                            implementation.returnType());
+
+                    if (!isValidReturnSubstitution(expectedReturn, actualReturn)) {
+                        throw new SemanticException(
+                                "Tipo de retorno incompatível na implementação do método '"
+                                        + requirement.name() + "'.",
+                                implementation.line(),
+                                implementation.column());
+                    }
+
+                    if (implementation.isAbstract() && !classNode.isAbstract()) {
+                        throw new SemanticException(
+                                "A classe concreta '" + classNode.name()
+                                        + "' não implementa o método '"
+                                        + requirement.name() + "'.",
+                                implementation.line(),
+                                implementation.column());
+                    }
+                }
+            }
+
+            current = current.superClass() == null
+                    ? null
+                    : classes.get(current.superClass());
+        }
+    }
+
+    private FunctionRecord findClassMethod(
+            String className,
+            FunctionRecord signature) {
+        Set<String> visited = new HashSet<>();
+
+        while (className != null && visited.add(className)) {
+            ClassRecord classNode = classes.get(className);
+
+            if (classNode == null) {
+                return null;
+            }
+
+            for (FunctionRecord function : classNode.functions()) {
+                if (sameSignature(function, signature)) {
+                    return function;
+                }
+            }
+
+            className = classNode.superClass();
+        }
+
+        return null;
+    }
+
+
+    private void validateOverride(
+            ClassRecord classNode,
+            FunctionRecord function) {
+
+        FunctionRecord inherited = findInheritedMethod(
+                classNode.superClass(),
+                function);
+
+        if (inherited == null) {
+            return;
+        }
+
+        if (inherited.isFinal()) {
+            throw new SemanticException(
+                    "O método '" + function.name()
+                            + "' não pode ser sobrescrito porque é final.",
+                    function.line(),
+                    function.column());
+        }
+
+        if (!isValidReturnSubstitution(
+                convertType(inherited.returnType()),
+                convertType(function.returnType()))) {
+            throw new SemanticException(
+                    "Tipo de retorno incompatível na sobrescrita do método '"
+                            + function.name() + "'.",
+                    function.line(),
+                    function.column());
+        }
+
+        if (visibilityLevel(function.visibility())
+                < visibilityLevel(inherited.visibility())) {
+
+            throw new SemanticException(
+                    "O método '" + function.name()
+                            + "' não pode reduzir sua visibilidade.",
+                    function.line(),
+                    function.column());
+        }
+
+        if (inherited.isStatic() != function.isStatic()) {
+            throw new SemanticException(
+                    "O método '" + function.name()
+                            + "' deve manter o modificador static da classe pai.",
+                    function.line(),
+                    function.column());
+        }
+
+        validateNarrowerThrows(function, inherited, function.line(), function.column());
+    }
+
+    private void validateNarrowerThrows(
+            FunctionRecord implementation,
+            FunctionRecord inherited,
+            int line,
+            int column) {
+        for (TypeRecord declared : implementation.thrownExceptions()) {
+            if (!isCheckedException(declared.name())) continue;
+            boolean allowed = inherited.thrownExceptions().stream()
+                    .map(TypeRecord::name)
+                    .anyMatch(parentType -> isSubclassOf(declared.name(), parentType));
+            if (!allowed) {
+                throw new SemanticException(
+                        "Uma sobrescrita ou implementação não pode ampliar as exceções verificadas declaradas.",
+                        line, column);
+            }
+        }
+    }
+
+    private boolean sameSignature(
+            FunctionRecord first,
+            FunctionRecord second) {
+
+        if (!first.name().equals(second.name())) {
+            return false;
+        }
+
+        if (first.parameters().size() != second.parameters().size()) {
+            return false;
+        }
+
+        for (int i = 0; i < first.parameters().size(); i++) {
+
+            TypeRecord firstType = first.parameters().get(i).type();
+            TypeRecord secondType = second.parameters().get(i).type();
+
+            if (!firstType.name().equals(secondType.name())) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+
+    private SemanticType getExpressionType(ExpressionInterface expression) {
+
+        if (expression instanceof LiteralRecord literal) {
+            return convertType(literal.getType());
+        }
+
+        if (expression instanceof CallRecord call) {
+            FunctionRecord function = resolveFunctionCall(call);
+            validateCalledExceptions(function, call.line(), call.column());
+            return convertType(function.returnType());
+        }
+
+        if (expression instanceof VariableRecord variable) {
+            VariableSymbolRecord symbol = resolveVariable(
+                    variable.name(),
+                    variable.line(),
+                    variable.column(), variable.staticImports());
+            return symbol.type();
+        }
+
+        if (expression instanceof MemberAccessRecord access) {
+            ClassRecord staticReceiver = resolveStaticClassReceiver(access.receiver());
+            if (staticReceiver != null) {
+                return convertType(resolveStaticClassAttribute(staticReceiver, access).type());
+            }
+            SemanticType receiverType = getExpressionType(access.receiver());
+            if (receiverType.isArray() && access.name().equals("length")) {
+                return SemanticType.primitive(TokenType.INT);
+            }
+            return convertType(resolveObjectAttribute(access).type());
+        }
+
+        if (expression instanceof ArrayAccessRecord access) {
+            SemanticType arrayType = getExpressionType(access.array());
+            if (!arrayType.isArray()) {
+                throw new SemanticException(
+                        "A indexação exige uma expressão do tipo array.",
+                        access.line(),
+                        access.column());
+            }
+            SemanticType indexType = getExpressionType(access.index());
+            if (indexType.primitiveType() != TokenType.INT || indexType.isArray()) {
+                throw new SemanticException(
+                        "O índice de um array deve ser do tipo int.",
+                        access.line(),
+                        access.column());
+            }
+            return componentType(arrayType);
+        }
+
+        if (expression instanceof ArrayCreationRecord creation) {
+            SemanticType arrayType = convertType(creation.type());
+            validateTypeExists(creation.type(), false, creation.line(), creation.column());
+            for (ExpressionInterface dimension : creation.dimensions()) {
+                SemanticType dimensionType = getExpressionType(dimension);
+                if (dimensionType.primitiveType() != TokenType.INT
+                        || dimensionType.isArray()) {
+                    throw new SemanticException(
+                            "O tamanho de uma dimensão de array deve ser do tipo int.",
+                            creation.line(),
+                            creation.column());
+                }
+            }
+            if (creation.initializer() != null) {
+                validateExpressionAssignable(
+                        arrayType,
+                        creation.initializer(),
+                        creation.line(),
+                        creation.column());
+            }
+            return arrayType;
+        }
+
+        if (expression instanceof ArrayInitializerRecord initializer) {
+            throw new SemanticException(
+                    "Um inicializador de array precisa de um tipo de array declarado.",
+                    initializer.line(),
+                    initializer.column());
+        }
+
+        if (expression instanceof MemberCallRecord call) {
+            FunctionRecord function = resolveObjectMethod(call);
+            validateCalledExceptions(function, call.line(), call.column());
+            return convertType(function.returnType());
+        }
+
+        if (expression instanceof NewObjectRecord creation) {
+            ConstructorRecord constructor = resolveConstructor(creation);
+            if (constructor != null) {
+                validateCalledExceptions(constructor.thrownExceptions(), creation.line(), creation.column());
+            }
+            return convertType(creation.type());
+        }
+
+        if (expression instanceof ThisRecord record) {
+            validateThisContext(record.line(), record.column());
+            return SemanticType.classType(currentClass);
+        }
+
+        if (expression instanceof ThisAttributeRecord attributeExpression) {
+            validateThisContext(
+                    attributeExpression.line(),
+                    attributeExpression.column());
+
+            AttributeRecord attribute = findInheritedAttribute(
+                    currentClass,
+                    attributeExpression.name());
+
+            if (attribute == null) {
+                throw new SemanticException(
+                        "Atributo '" + attributeExpression.name()
+                                + "' não declarado na classe '"
+                                + currentClass + "'.",
+                        attributeExpression.line(),
+                        attributeExpression.column());
+            }
+
+            ClassRecord declaringClass = findDeclaringClass(
+                    currentClass,
+                    attributeExpression.name());
+
+            validateMemberVisibility(
+                    attribute.visibility(),
+                    declaringClass == null ? null : declaringClass.name(),
+                    attribute.name(),
+                    attributeExpression.line(),
+                    attributeExpression.column());
+
+            return convertType(attribute.type());
+        }
+
+        if (expression instanceof ThisCallRecord call) {
+            validateThisContext(call.line(), call.column());
+            FunctionRecord function = resolveFunctionCall(
+                    new CallRecord(
+                            call.name(),
+                            call.arguments(),
+                            call.line(),
+                            call.column()));
+            validateCalledExceptions(function, call.line(), call.column());
+            return convertType(function.returnType());
+        }
+
+        if (expression instanceof SuperAttributeRecord attributeExpression) {
+            return convertType(
+                    resolveSuperAttribute(attributeExpression).type());
+        }
+
+        if (expression instanceof SuperCallRecord call) {
+            FunctionRecord function = resolveSuperCall(call);
+            validateCalledExceptions(function, call.line(), call.column());
+            return convertType(function.returnType());
+        }
+
+        if (expression instanceof BinaryExpressionRecord operation) {
+            return validateOperation(operation);
+        }
+
+        if (expression instanceof UnaryExpressionRecord operation) {
+            return validateUnaryOperation(operation);
+        }
+
+        if (expression instanceof RegisterRecord) {
+            RegisterRecord register = (RegisterRecord) expression;
+            validateRegisterName(register);
+
+            SemanticType type = registers.get(register.name());
+
+            if (type == null) {
+                throw new SemanticException(
+                        "Registrador '" + register.name()
+                                + "' não foi declarado globalmente.",
+                        register.line(),
+                        register.column());
+            }
+
+            return type;
+        }
+
+        throw new CompilerInvariantException(
+                "Tipo de expressão não implementado: "
+                        + expression.getClass().getSimpleName());
+    }
+
+
+    private SemanticType validateOperation(BinaryExpressionRecord operation) {
+
+        SemanticType left = getExpressionType(operation.left());
+        SemanticType right = getExpressionType(operation.right());
+
+        if (left == null || right == null) {
+            throw new SemanticException(
+                    "Não foi possível determinar o tipo dos operandos.",
+                    operation.line(),
+                    operation.column());
+        }
+
+        if (isVoid(left) || isVoid(right)) {
+            throw new SemanticException(
+                    "Uma expressão void não pode ser usada como operando.",
+                    operation.line(),
+                    operation.column());
+        }
+
+        TokenType operator = operation.operator();
+
+        switch (operator) {
+
+            case ADD:
+            case SUB:
+            case MUL:
+            case DIV:
+
+                if (!isNumeric(left) || !isNumeric(right)) {
+                    throw new SemanticException(
+                            "Operação aritmética exige operandos numéricos.",
+                            operation.line(),
+                            operation.column());
+                }
+
+                return promotedNumericType(left, right);
+
+            case MOD:
+                if (!left.isPrimitive()
+                        || !right.isPrimitive()
+                        || !isInteger(left)
+                        || !isInteger(right)) {
+                    throw new SemanticException(
+                            "O operador 'mod' exige operandos int ou long.",
+                            operation.line(),
+                            operation.column());
+                }
+
+                return promotedNumericType(left, right);
+
+            case AND:
+            case OR:
+                if (!isBoolean(left) || !isBoolean(right)) {
+                    throw new SemanticException(
+                            "O operador '" + operator.name().toLowerCase()
+                                    + "' exige operandos booleanos.",
+                            operation.line(),
+                            operation.column());
+                }
+
+                return SemanticType.primitive(TokenType.BOOLEAN);
+
+            case EQ:
+            case NE:
+
+                if (!areCompatible(left, right)) {
+                    throw new SemanticException(
+                            "Comparação exige operandos de tipos compatíveis.",
+                            operation.line(),
+                            operation.column());
+                }
+
+                return SemanticType.primitive(TokenType.BOOLEAN);
+
+            case LT:
+            case GT:
+            case LE:
+            case GE:
+
+                if (!isNumeric(left) || !isNumeric(right)) {
+                    throw new SemanticException(
+                            "Comparação exige operandos numéricos.",
+                            operation.line(),
+                            operation.column());
+                }
+
+                return SemanticType.primitive(TokenType.BOOLEAN);
+
+            default:
+
+                throw new SemanticException(
+                        "Operador não suportado na análise semântica: "
+                                + operator,
+                        operation.line(),
+                        operation.column());
+        }
+    }
+
+    private SemanticType validateUnaryOperation(UnaryExpressionRecord operation) {
+        SemanticType operandType = getExpressionType(operation.operand());
+
+        if (operation.operator() != TokenType.NEG
+                || !operandType.isPrimitive()
+                || !isNumeric(operandType)) {
+            throw new SemanticException(
+                    "O operador 'neg' exige um operando numérico (int, long ou double).",
+                    operation.line(),
+                    operation.column());
+        }
+
+        return operandType;
+    }
+
+    private SemanticType promotedNumericType(SemanticType first, SemanticType second) {
+        if (first.primitiveType() == TokenType.DOUBLE
+                || second.primitiveType() == TokenType.DOUBLE) {
+            return SemanticType.primitive(TokenType.DOUBLE);
+        }
+        if (first.primitiveType() == TokenType.LONG
+                || second.primitiveType() == TokenType.LONG) {
+            return SemanticType.primitive(TokenType.LONG);
+        }
+        return SemanticType.primitive(TokenType.INT);
+    }
+
+    private boolean isInteger(SemanticType type) {
+        return type.primitiveType() == TokenType.INT
+                || type.primitiveType() == TokenType.LONG;
+    }
+
+    private boolean isNumeric(SemanticType type) {
+
+        if (type == null || !type.isPrimitive()) {
+            return false;
+        }
+
+        return type.primitiveType() == TokenType.INT
+                || type.primitiveType() == TokenType.LONG
+                || type.primitiveType() == TokenType.DOUBLE;
+    }
+
+    private boolean isBoolean(SemanticType type) {
+        return type != null
+                && type.isPrimitive()
+                && type.primitiveType() == TokenType.BOOLEAN;
+    }
+
+    private boolean isVoid(SemanticType type) {
+        return type.isPrimitive()
+                && type.primitiveType() == TokenType.VOID;
+    }
+
+    private void validateRegisterAssignment(
+            SemanticType expected,
+            SemanticType received,
+            int line,
+            int column) {
+        validateAssignableType(expected, received, line, column);
+    }
+
+    private boolean areCompatible(
+            SemanticType first,
+            SemanticType second) {
+
+        if (first.equals(second)) {
+            return true;
+        }
+
+        if (first.isNull()) {
+            return isReferenceType(second);
+        }
+        if (second.isNull()) {
+            return isReferenceType(first);
+        }
+
+        if ((first.isClass() && second.isClass())
+                || (first.isArray() && second.isArray())) {
+            return isAssignable(first, second) || isAssignable(second, first);
+        }
+
+        return isNumeric(first) && isNumeric(second);
+    }
+
+    private boolean isValidReturnSubstitution(
+            SemanticType expected,
+            SemanticType actual) {
+        if (expected.equals(actual)) {
+            return true;
+        }
+        return isReferenceType(expected)
+                && isReferenceType(actual)
+                && isAssignable(expected, actual);
+    }
+
+    private boolean isReferenceType(SemanticType type) {
+        return type.isArray()
+                || type.isClass()
+                || (type.isPrimitive()
+                        && type.primitiveType() == TokenType.STRING);
+    }
+
+    private SemanticType componentType(SemanticType arrayType) {
+        if (!arrayType.isArray()) {
+            throw new CompilerInvariantException("componentType recebeu um tipo que não é array.");
+        }
+        return arrayType.arrayDimensions() == 1
+                ? new SemanticType(arrayType.primitiveType(), arrayType.className(), 0)
+                : SemanticType.array(
+                        arrayType.primitiveType(),
+                        arrayType.className(),
+                        arrayType.arrayDimensions() - 1);
+    }
+
+    private void validateExpressionAssignable(
+            SemanticType expected,
+            ExpressionInterface expression,
+            int line,
+            int column) {
+        if (expression instanceof ArrayInitializerRecord initializer) {
+            if (!expected.isArray()) {
+                throw new SemanticException(
+                        "Um inicializador de array só pode ser atribuído a um array.",
+                        initializer.line(),
+                        initializer.column());
+            }
+            SemanticType component = componentType(expected);
+            for (ExpressionInterface element : initializer.elements()) {
+                validateExpressionAssignable(
+                        component,
+                        element,
+                        element instanceof ArrayInitializerRecord nested
+                                ? nested.line() : line,
+                        element instanceof ArrayInitializerRecord nested
+                                ? nested.column() : column);
+            }
+            return;
+        }
+        SemanticType received = getExpressionType(expression);
+        validateAssignableType(expected, received, line, column);
+    }
+
+    private boolean isAssignable(
+            SemanticType expected,
+            SemanticType received) {
+        if (received.isNull()) {
+            return isReferenceType(expected);
+        }
+
+        if (expected.equals(received)) {
+            return true;
+        }
+
+        if (expected.isClass()
+                && expected.className().equals("Object")
+                && (received.isClass()
+                        || received.isArray()
+                        || (received.isPrimitive()
+                                && received.primitiveType() == TokenType.STRING))) {
+            return true;
+        }
+
+        if (received.isArray()) {
+            if (!expected.isArray()) {
+                return false;
+            }
+            SemanticType expectedComponent = componentType(expected);
+            SemanticType receivedComponent = componentType(received);
+            if (!expectedComponent.isArray()
+                    && !receivedComponent.isArray()
+                    && isNonReferencePrimitive(expectedComponent)
+                    && isNonReferencePrimitive(receivedComponent)) {
+                return expectedComponent.equals(receivedComponent);
+            }
+            return isAssignable(expectedComponent, receivedComponent);
+        }
+
+        if (expected.isArray()) {
+            return false;
+        }
+
+        if (expected.isPrimitive() && received.isPrimitive()) {
+            return switch (expected.primitiveType()) {
+                case LONG -> received.primitiveType() == TokenType.INT;
+                case DOUBLE -> received.primitiveType() == TokenType.INT
+                        || received.primitiveType() == TokenType.LONG;
+                default -> false;
+            };
+        }
+
+        if (!expected.isClass() || !received.isClass()) {
+            return false;
+        }
+
+        return isSubclassOf(received.className(), expected.className());
+    }
+
+    private boolean isNonReferencePrimitive(SemanticType type) {
+        return type.isPrimitive()
+                && type.primitiveType() != TokenType.STRING;
+    }
+
+    private void validateAssignableType(
+            SemanticType expected,
+            SemanticType received,
+            int line,
+            int column) {
+        if (!isAssignable(expected, received)) {
+            typeChecker.validateType(expected, received, line, column);
+        }
+    }
+
+
+    @Override
+    public void visit(ProgramRecord node) {
+
+        activeCatchTypes.clear();
+        activeTryExceptionTypes.clear();
+
+        for (InterfaceRecord interfaceNode : node.interfaces()) {
+
+            if (interfaceNode.name().equals("Object")) {
+                throw new SemanticException(
+                        "'Object' é um tipo predefinido e não pode ser redeclarado.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+
+            if (interfaces.containsKey(interfaceNode.name())) {
+                throw new SemanticException(
+                        "Interface '" + interfaceNode.name()
+                                + "' já declarada.",
+                        interfaceNode.line(),
+                        interfaceNode.column());
+            }
+
+            interfaces.put(interfaceNode.name(), interfaceNode);
+        }
+
+        for (ClassRecord classNode : node.classes()) {
+
+            if (classNode.name().equals("Object")) {
+                throw new SemanticException(
+                        "'Object' é um tipo predefinido e não pode ser redeclarado.",
+                        classNode.line(),
+                        classNode.column());
+            }
+
+            if (classes.containsKey(classNode.name())) {
+                throw new SemanticException(
+                        "Classe '" + classNode.name()
+                                + "' já declarada.",
+                        classNode.line(),
+                        classNode.column());
+            }
+
+            classes.put(classNode.name(), classNode);
+        }
+
+        for (RegisterDeclarationRecord register : node.registers()) {
+            register.accept(this);
+        }
+
+        for (InterfaceRecord interfaceNode : node.interfaces()) {
+            validateInterfaceInheritance(interfaceNode);
+        }
+
+        for (ClassRecord classNode : node.classes()) {
+
+            if (interfaces.containsKey(classNode.name())) {
+                throw new SemanticException(
+                        "Já existe uma interface com o nome '"
+                                + classNode.name() + "'.",
+                        classNode.line(),
+                        classNode.column());
+            }
+        }
+
+        for (ClassRecord classNode : node.classes()) {
+
+            validateClassInheritance(classNode);
+            validateImplementedInterfaces(classNode);
+            validateAbstractMethods(classNode);
+        }
+
+        for (InterfaceRecord interfaceNode : node.interfaces()) {
+            interfaceNode.accept(this);
+        }
+
+        for (ClassRecord classNode : node.classes()) {
+            classNode.accept(this);
+        }
+    }
+
+
+    @Override
+    public void visit(ClassRecord node) {
+
+        enterScope();
+
+        String previousClass = currentClass;
+        VariableTable previousClassScope = classScope;
+        currentClass = node.name();
+        classScope = currentScope;
+
+        FunctionTable functionTable = new FunctionTable();
+
+        functionTables.put(currentClass, functionTable);
+        Map<String, String> previousConstructorDelegations = constructorDelegations;
+        constructorDelegations = new HashMap<>();
+
+        try {
+
+            Set<String> constructorSignatures = new HashSet<>();
+            for (ConstructorRecord constructor : node.constructors()) {
+                if (!constructorSignatures.add(constructorSignature(constructor))) {
+                    throw new SemanticException(
+                            "Construtor com os mesmos tipos de parâmetros já declarado.",
+                            constructor.line(),
+                            constructor.column());
+                }
+            }
+
+            for (FunctionRecord function : node.functions()) {
+                if (function.isAbstract() && !node.isAbstract()) {
+                    throw new SemanticException(
+                            "A classe '" + node.name()
+                                    + "' precisa ser abstract para declarar método abstract.",
+                            function.line(),
+                            function.column());
+                }
+                if (function.isAbstract()
+                        && (function.isStatic() || function.isFinal()
+                                || function.visibility() == TokenType.PRIVATE)) {
+                    throw new SemanticException(
+                            "Método abstract não pode ser private, static ou final.",
+                            function.line(),
+                            function.column());
+                }
+                if (function.isNative()
+                        && (!function.isStatic() || function.isAbstract() || function.block() != null)) {
+                    throw new SemanticException(
+                            "Método native precisa ser static, não abstract e não pode ter corpo.",
+                            function.line(),
+                            function.column());
+                }
+                validateOverride(node, function);
+
+                functionTable.define(function);
+            }
+
+            for (AttributeRecord attribute : node.attributes()) {
+                attribute.accept(this);
+            }
+
+            for (FunctionRecord function : node.functions()) {
+                function.accept(this);
+            }
+
+            for (ConstructorRecord constructor : node.constructors()) {
+                constructor.accept(this);
+            }
+            validateConstructorDelegationCycles(node);
+
+        } finally {
+
+            exitScope();
+            currentClass = previousClass;
+            classScope = previousClassScope;
+            constructorDelegations = previousConstructorDelegations;
+        }
+    }
+
+
+    @Override
+    public void visit(FunctionRecord node) {
+
+        validateTypeExists(
+                node.returnType(),
+                true,
+                node.line(),
+                node.column());
+
+        validateDeclaredExceptions(node.thrownExceptions(), node.line(), node.column());
+
+        FunctionRecord previousFunction = currentFunction;
+        Set<VariableSymbolRecord> previousAssignedVariables =
+                definitelyAssignedVariables;
+
+        currentFunction = node;
+        definitelyAssignedVariables = new HashSet<>();
+
+        enterScope();
+
+        try {
+
+            for (ParameterRecord parameter : node.parameters()) {
+                parameter.accept(this);
+            }
+
+            if (node.isNative()) {
+                if (!node.isStatic() || node.isAbstract() || node.block() != null) {
+                    throw new SemanticException(
+                            "Método native precisa ser static, não abstract e não pode ter corpo.",
+                            node.line(),
+                            node.column());
+                }
+                return;
+            }
+
+            if (node.block() != null) {
+                node.block().accept(this);
+
+                SemanticType returnType = convertType(node.returnType());
+                if (!node.isAbstract()
+                        && !(returnType.isPrimitive()
+                                && returnType.primitiveType() == TokenType.VOID)
+                        && canCompleteNormally(node.block())) {
+                    throw new SemanticException(
+                            "A função '" + node.name()
+                                    + "' precisa retornar um valor em todos os caminhos.",
+                            node.line(),
+                            node.column());
+                }
+            }
+
+        } finally {
+
+            exitScope();
+            currentFunction = previousFunction;
+            definitelyAssignedVariables = previousAssignedVariables;
+        }
+    }
+
+    @Override
+    public void visit(ConstructorRecord node) {
+        FunctionRecord previousFunction = currentFunction;
+        boolean previousConstructor = currentConstructor;
+        boolean previousDelegation = currentConstructorDelegatesToThis;
+        boolean previousInvocationArguments = currentConstructorInvocationArguments;
+        Set<String> previousAssignedFinalFields = assignedFinalFields;
+        Set<VariableSymbolRecord> previousAssignedVariables =
+                definitelyAssignedVariables;
+        currentConstructor = true;
+        currentConstructorInvocationArguments = false;
+        currentConstructorDelegatesToThis = node.invocation() != null
+                && node.invocation().delegatesToThis();
+        assignedFinalFields = new HashSet<>();
+        definitelyAssignedVariables = new HashSet<>();
+        currentFunction = new FunctionRecord(
+                node.visibility(),
+                false,
+                false,
+                new TypeRecord("void"),
+                currentClass,
+                node.parameters(),
+                node.thrownExceptions(),
+                node.block(),
+                node.line(),
+                node.column());
+
+        validateDeclaredExceptions(node.thrownExceptions(), node.line(), node.column());
+
+        enterScope();
+        try {
+            for (ParameterRecord parameter : node.parameters()) {
+                parameter.accept(this);
+            }
+            ConstructorRecord delegatedConstructor = validateConstructorInvocation(node);
+            if (delegatedConstructor != null) {
+                validateCalledExceptions(
+                        delegatedConstructor.thrownExceptions(), node.line(), node.column());
+                constructorDelegations.put(
+                        constructorSignature(node),
+                        constructorSignature(delegatedConstructor));
+            }
+            node.block().accept(this);
+            if ((node.invocation() == null
+                    || !node.invocation().delegatesToThis())
+                    && canCompleteNormally(node.block())) {
+                validateFinalFieldsInitialized(node.line(), node.column());
+            }
+        } finally {
+            exitScope();
+            currentFunction = previousFunction;
+            currentConstructor = previousConstructor;
+            currentConstructorDelegatesToThis = previousDelegation;
+            currentConstructorInvocationArguments = previousInvocationArguments;
+            assignedFinalFields = previousAssignedFinalFields;
+            definitelyAssignedVariables = previousAssignedVariables;
+        }
+    }
+
+    private void validateFinalFieldsInitialized(int line, int column) {
+        for (AttributeRecord attribute : getCurrentClass().attributes()) {
+            if (attribute.isFinal()
+                    && attribute.value() == null
+                    && !assignedFinalFields.contains(attribute.name())) {
+                throw new SemanticException(
+                        "O atributo final '" + attribute.name()
+                                + "' precisa ser inicializado em todo construtor.",
+                        line,
+                        column);
+            }
+        }
+    }
+
+
+    @Override
+    public void visit(BlockRecord node) {
+
+        enterScope();
+
+        try {
+            boolean reachable = true;
+            for (StatementInterface statement : node.commands()) {
+                if (!reachable) {
+                    throw new SemanticException(
+                            "Código inalcançável.",
+                            statement.line(),
+                            statement.column());
+                }
+                statement.accept(this);
+                reachable = canCompleteNormally(statement);
+            }
+
+        } finally {
+            exitScope();
+        }
+    }
+
+
+    @Override
+    public void visit(AttributeRecord node) {
+
+        validateTypeExists(
+                node.type(),
+                false,
+                node.line(),
+                node.column());
+
+        if (node.isStatic() && node.isFinal() && node.value() == null) {
+            throw new SemanticException(
+                    "O atributo static final '" + node.name()
+                            + "' precisa ser inicializado na declaração.",
+                    node.line(),
+                    node.column());
+        }
+
+        if (node.isFinal()
+                && node.value() == null
+                && getCurrentClass().constructors().isEmpty()) {
+            throw new SemanticException(
+                    "O atributo final '" + node.name()
+                            + "' deve ser inicializado na declaração ou em um construtor explícito.",
+                    node.line(),
+                    node.column());
+        }
+
+        SemanticType declaredType = convertType(node.type());
+
+        VariableSymbolRecord symbol = new VariableSymbolRecord(
+                node.name(),
+                declaredType,
+                node.line(),
+                node.column());
+
+        currentScope.define(symbol);
+
+        AttributeRecord previousAttribute = currentAttribute;
+        currentAttribute = node;
+
+        try {
+            if (node.value() != null) {
+                validateExpressionAssignable(
+                        declaredType,
+                        node.value(),
+                        node.line(),
+                        node.column());
+            }
+        } finally {
+            currentAttribute = previousAttribute;
+        }
+    }
+
+
+    @Override
+    public void visit(PrintRecord node) {
+        validateNotVoid(node.expression(), node.lineBreak() ? "printLn" : "print");
+        recordPossibleCheckedException("IOException", true);
+    }
+
+    @Override
+    public void visit(PrintfRecord node) {
+        validateNotVoid(node.format(), node.lineBreak() ? "printfLn" : "printf");
+        if (!(node.format() instanceof LiteralRecord literal)
+                || !(literal.value() instanceof String format)) {
+            throw new SemanticException(
+                    "O primeiro argumento do printf deve ser um literal de texto.",
+                    node.line(),
+                    node.column());
+        }
+        validatePrintFormat(node, format);
+        recordPossibleCheckedException("IOException", true);
+    }
+
+    private void recordPossibleCheckedException(String exceptionType, boolean mayBeSubtype) {
+        if (!activeTryExceptionTypes.isEmpty()) {
+            activeTryExceptionTypes.peek().add(new ThrownTypeCandidate(exceptionType, mayBeSubtype));
+        }
+    }
+
+    @Override
+    public void visit(FreeRecord node) {
+        SemanticType type = getExpressionType(node.expression());
+        if (type.isNull()) {
+            return;
+        }
+        boolean classReference = type.isClass() && classes.containsKey(type.className());
+        if (!type.isArray() && !classReference) {
+            throw new SemanticException(
+                    "free exige uma expressão de tipo classe ou array; não é permitido liberar "
+                            + "primitivos ou strings.",
+                    node.line(),
+                    node.column());
+        }
+    }
+
+    private void validateNotVoid(ExpressionInterface expression, String printKind) {
+        SemanticType expressionType = getExpressionType(expression);
+        if (!isVoid(expressionType)) {
+            return;
+        }
+        int line = currentFunction == null ? 1 : currentFunction.line();
+        int column = currentFunction == null ? 1 : currentFunction.column();
+        if (expression instanceof CallRecord call) {
+            line = call.line();
+            column = call.column();
+        } else if (expression instanceof MemberCallRecord call) {
+            line = call.line();
+            column = call.column();
+        } else if (expression instanceof ThisCallRecord call) {
+            line = call.line();
+            column = call.column();
+        } else if (expression instanceof SuperCallRecord call) {
+            line = call.line();
+            column = call.column();
+        }
+        throw new SemanticException(
+                "A expressão do " + printKind + " não pode ser void.",
+                line,
+                column);
+    }
+
+    private void validatePrintFormat(PrintfRecord node, String format) {
+        List<TokenType> expectedTypes = new ArrayList<>();
+        for (int index = 0; index < format.length(); index++) {
+            if (format.charAt(index) != '%') {
+                continue;
+            }
+            if (++index >= format.length()) {
+                throw invalidPrintFormat(node, "especificador '%' incompleto");
+            }
+            char specifier = format.charAt(index);
+            if (specifier == '%') {
+                continue;
+            }
+            if (specifier == 'l') {
+                if (++index >= format.length()) {
+                    throw invalidPrintFormat(node, "especificador '%' incompleto");
+                }
+                char lengthSpecifier = format.charAt(index);
+                if (lengthSpecifier == 'd' || lengthSpecifier == 'i') {
+                    expectedTypes.add(TokenType.LONG);
+                } else if (lengthSpecifier == 'f') {
+                    expectedTypes.add(TokenType.DOUBLE);
+                } else {
+                    throw invalidPrintFormat(node,
+                            "use %ld ou %li para long e %lf para double");
+                }
+                continue;
+            }
+            TokenType expected = switch (specifier) {
+                case 'd', 'i', 'u' -> TokenType.INT;
+                case 'f' -> TokenType.DOUBLE;
+                case 's' -> TokenType.STRING;
+                case 'b' -> TokenType.BOOLEAN;
+                default -> null;
+            };
+            if (expected == null) {
+                throw invalidPrintFormat(node, "especificador não suportado: %" + specifier);
+            }
+            expectedTypes.add(expected);
+        }
+
+        if (expectedTypes.size() != node.arguments().size()) {
+            throw invalidPrintFormat(node,
+                    "o formato possui " + expectedTypes.size() + " especificador(es), mas foram fornecidos "
+                            + node.arguments().size() + " argumento(s)");
+        }
+
+        for (int index = 0; index < expectedTypes.size(); index++) {
+            SemanticType actual = getExpressionType(node.arguments().get(index));
+            TokenType expected = expectedTypes.get(index);
+            if (isVoid(actual) || !actual.isPrimitive() || actual.primitiveType() != expected) {
+                throw invalidPrintFormat(node,
+                        "o argumento " + (index + 1) + " deve ser do tipo " + formatTypeName(expected));
+            }
+        }
+    }
+
+    private SemanticException invalidPrintFormat(PrintfRecord node, String reason) {
+        return new SemanticException("Formato inválido em printf: " + reason + ".",
+                node.line(), node.column());
+    }
+
+    private String formatTypeName(TokenType type) {
+        return switch (type) {
+            case INT -> "int (%d, %i ou %u)";
+            case LONG -> "long (%ld ou %li)";
+            case DOUBLE -> "double (%f ou %lf)";
+            case STRING -> "String (%s)";
+            case BOOLEAN -> "boolean (%b)";
+            default -> type.name().toLowerCase();
+        };
+    }
+
+
+    @Override
+    public void visit(WhileRecord node) {
+        SemanticType conditionType = getExpressionType(node.expression());
+
+        if (!isBoolean(conditionType)) {
+
+            throw new SemanticException(
+                    "A condição do while deve ser do tipo boolean.",
+                    node.line(),
+                    node.column());
+        }
+
+        validateLoopBodyReachable(
+                node.expression(),
+                node.line(),
+                node.column());
+
+        loopDepth++;
+        Set<VariableSymbolRecord> assignedBeforeLoop = definitelyAssignedVariables;
+        definitelyAssignedVariables = new HashSet<>(assignedBeforeLoop);
+        try {
+            node.block().accept(this);
+        } finally {
+            definitelyAssignedVariables = assignedBeforeLoop;
+            loopDepth--;
+        }
+    }
+
+    @Override
+    public void visit(IfRecord node) {
+        SemanticType conditionType = getExpressionType(node.condition());
+        if (!isBoolean(conditionType)) {
+            throw new SemanticException(
+                    "A condição do if deve ser do tipo boolean.",
+                    node.line(),
+                    node.column());
+        }
+
+        Set<VariableSymbolRecord> assignedBeforeBranches =
+                new HashSet<>(definitelyAssignedVariables);
+        Set<String> finalFieldsBeforeBranches = new HashSet<>(assignedFinalFields);
+
+        definitelyAssignedVariables = new HashSet<>(assignedBeforeBranches);
+        assignedFinalFields = new HashSet<>(finalFieldsBeforeBranches);
+        node.thenBranch().accept(this);
+        Set<VariableSymbolRecord> assignedAfterThen =
+                new HashSet<>(definitelyAssignedVariables);
+        Set<String> finalFieldsAfterThen = new HashSet<>(assignedFinalFields);
+        boolean thenCompletesNormally = canCompleteNormally(node.thenBranch());
+
+        if (node.elseBranch() == null) {
+            definitelyAssignedVariables = mergeBranchState(
+                    node.condition(),
+                    assignedBeforeBranches,
+                    assignedAfterThen,
+                    thenCompletesNormally,
+                    assignedBeforeBranches,
+                    true);
+            assignedFinalFields = mergeBranchState(
+                    node.condition(),
+                    finalFieldsBeforeBranches,
+                    finalFieldsAfterThen,
+                    thenCompletesNormally,
+                    finalFieldsBeforeBranches,
+                    true);
+            return;
+        }
+
+        definitelyAssignedVariables = new HashSet<>(assignedBeforeBranches);
+        assignedFinalFields = new HashSet<>(finalFieldsBeforeBranches);
+        node.elseBranch().accept(this);
+        Set<VariableSymbolRecord> assignedAfterElse =
+                new HashSet<>(definitelyAssignedVariables);
+        Set<String> finalFieldsAfterElse = new HashSet<>(assignedFinalFields);
+        boolean elseCompletesNormally = canCompleteNormally(node.elseBranch());
+
+        definitelyAssignedVariables = mergeBranchState(
+                node.condition(),
+                assignedBeforeBranches,
+                assignedAfterThen,
+                thenCompletesNormally,
+                assignedAfterElse,
+                elseCompletesNormally);
+        assignedFinalFields = mergeBranchState(
+                node.condition(),
+                finalFieldsBeforeBranches,
+                finalFieldsAfterThen,
+                thenCompletesNormally,
+                finalFieldsAfterElse,
+                elseCompletesNormally);
+    }
+
+    @Override
+    public void visit(ForRecord node) {
+        enterScope();
+
+        try {
+            if (node.initializer() != null) {
+                node.initializer().accept(this);
+            }
+
+            if (node.condition() != null) {
+                SemanticType conditionType = getExpressionType(node.condition());
+                if (!isBoolean(conditionType)) {
+                    throw new SemanticException(
+                            "A condição do for deve ser do tipo boolean.",
+                            node.line(),
+                            node.column());
+                }
+            }
+
+            validateLoopBodyReachable(
+                    node.condition(),
+                    node.line(),
+                    node.column());
+
+            Set<VariableSymbolRecord> assignedBeforeLoop = definitelyAssignedVariables;
+            definitelyAssignedVariables = new HashSet<>(assignedBeforeLoop);
+            loopDepth++;
+            try {
+                node.block().accept(this);
+                Set<VariableSymbolRecord> assignedAfterBody =
+                        new HashSet<>(definitelyAssignedVariables);
+                definitelyAssignedVariables = isAlwaysFalse(node.condition())
+                        ? assignedBeforeLoop
+                        : assignedAfterBody;
+                if (node.update() != null) {
+                    node.update().accept(this);
+                }
+            } finally {
+                definitelyAssignedVariables = assignedBeforeLoop;
+                loopDepth--;
+            }
+        } finally {
+            exitScope();
+        }
+    }
+
+    @Override
+    public void visit(BinaryExpressionRecord node) {
+        getExpressionType(node);
+    }
+
+    @Override
+    public void visit(UnaryExpressionRecord node) {
+        getExpressionType(node);
+    }
+
+
+    @Override
+    public void visit(VariableRecord node) {
+        getExpressionType(node);
+    }
+
+
+    @Override
+    public void visit(DeclarationRecord node) {
+
+        validateTypeExists(
+                node.type(),
+                false,
+                node.line(),
+                node.column());
+
+        if (resolvesToLocalVariable(node.name())) {
+            throw new SemanticException(
+                    "Variável '" + node.name()
+                            + "' já declarada neste método.",
+                    node.line(),
+                    node.column());
+        }
+
+        SemanticType declaredType = convertType(node.type());
+
+        VariableSymbolRecord symbol = new VariableSymbolRecord(
+                node.name(),
+                declaredType,
+                node.line(),
+                node.column());
+
+        currentScope.define(symbol);
+
+        if (node.value() != null) {
+            validateExpressionAssignable(
+                    declaredType,
+                    node.value(),
+                    node.line(),
+                    node.column());
+            definitelyAssignedVariables.add(symbol);
+        }
+    }
+
+
+    @Override
+    public void visit(LiteralRecord node) {
+    }
+
+    @Override
+    public void visit(MemberAccessRecord node) {
+        getExpressionType(node);
+    }
+
+    @Override
+    public void visit(MemberCallRecord node) {
+        getExpressionType(node);
+    }
+
+    @Override
+    public void visit(NewObjectRecord node) {
+        getExpressionType(node);
+    }
+
+    @Override
+    public void visit(ArrayAccessRecord node) {
+        getExpressionType(node);
+    }
+
+    @Override
+    public void visit(ArrayCreationRecord node) {
+        getExpressionType(node);
+    }
+
+    @Override
+    public void visit(ArrayInitializerRecord node) {
+        getExpressionType(node);
+    }
+
+
+    @Override
+    public void visit(RegisterRecord node) {
+        getExpressionType(node);
+    }
+
+    private void validateRegisterName(RegisterRecord register) {
+        String name = register.name();
+        if (name.length() != 2
+                || name.charAt(0) != 'R'
+                || name.charAt(1) < '0'
+                || name.charAt(1) > '9') {
+            throw new SemanticException(
+                    "Registrador '" + name
+                            + "' inválido. Utilize R0 até R9.",
+                    register.line(),
+                    register.column());
+        }
+    }
+
+    @Override
+    public void visit(RegisterDeclarationRecord node) {
+        RegisterRecord register = node.register();
+        validateRegisterName(register);
+
+        if (registers.containsKey(register.name())) {
+            throw new SemanticException(
+                    "O registrador '" + register.name()
+                            + "' já foi declarado globalmente.",
+                    register.line(),
+                    register.column());
+        }
+
+        SemanticType inferredType = getExpressionType(node.value());
+        if (inferredType.isNull()) {
+            throw new SemanticException(
+                    "Não é possível inferir o tipo do registrador a partir de 'null'.",
+                    register.line(),
+                    register.column());
+        }
+        registers.put(register.name(), inferredType);
+    }
+
+
+    @Override
+    public void visit(ParameterRecord node) {
+        validateTypeExists(
+                node.type(),
+                false,
+                node.line(),
+                node.column());
+
+        SemanticType parameterType = convertType(node.type());
+
+        VariableSymbolRecord symbol = new VariableSymbolRecord(
+                node.name(),
+                parameterType,
+                node.line(),
+                node.column());
+
+        currentScope.define(symbol);
+        definitelyAssignedVariables.add(symbol);
+    }
+
+
+    @Override
+    public void visit(ReturnRecord node) {
+
+        if (currentFunction == null) {
+            throw new SemanticException(
+                    "Comando return fora de uma função.",
+                    node.line(),
+                    node.column());
+        }
+
+        if (currentConstructor && !currentConstructorDelegatesToThis) {
+            validateFinalFieldsInitialized(node.line(), node.column());
+        }
+
+        SemanticType expectedType = convertType(
+                currentFunction.returnType());
+
+        if (expectedType.primitiveType() == TokenType.VOID) {
+
+            if (node.value() != null) {
+                throw new SemanticException(
+                        "Função void não pode retornar um valor.",
+                        node.line(),
+                        node.column());
+            }
+
+            return;
+        }
+
+        if (node.value() == null) {
+            throw new SemanticException(
+                    "Função deve retornar um valor do tipo "
+                            + currentFunction.returnType().name() + ".",
+                    node.line(),
+                    node.column());
+        }
+        if (node.value() instanceof ArrayInitializerRecord initializer) {
+            throw new SemanticException(
+                    "Um inicializador de array direto só pode ser usado em uma declaração.",
+                    initializer.line(),
+                    initializer.column());
+        }
+
+        validateExpressionAssignable(
+                expectedType,
+                node.value(),
+                node.line(),
+                node.column());
+    }
+
+    @Override
+    public void visit(ThrowRecord node) {
+        SemanticType thrown = getExpressionType(node.expression());
+        if (thrown.isNull()) {
+            return;
+        }
+        if (!thrown.isClass() || !hasThrowableAncestor(thrown.className())) {
+            throw new SemanticException("throw exige um objeto cuja classe estenda Throwable.",
+                    node.line(), node.column());
+        }
+        requireCheckedExceptionHandled(thrown.className(), node.line(), node.column(),
+                !(node.expression() instanceof NewObjectRecord));
+    }
+
+    @Override
+    public void visit(TryRecord node) {
+        Set<VariableSymbolRecord> assignedBefore = new HashSet<>(definitelyAssignedVariables);
+        Set<String> fieldsBefore = new HashSet<>(assignedFinalFields);
+        Set<String> handledTypes = new HashSet<>();
+        for (CatchRecord handler : node.catches()) {
+            validateTypeExists(handler.type(), false, handler.line(), handler.column());
+            SemanticType catchType = convertType(handler.type());
+            if (!catchType.isClass() || !hasThrowableAncestor(catchType.className())) {
+                throw new SemanticException("O tipo do catch deve estender Throwable.",
+                        handler.line(), handler.column());
+            }
+            handledTypes.add(catchType.className());
+        }
+        activeCatchTypes.push(handledTypes);
+        List<ThrownTypeCandidate> tryExceptionTypes = new ArrayList<>();
+        activeTryExceptionTypes.push(tryExceptionTypes);
+        try {
+            node.tryBlock().accept(this);
+        } finally {
+            activeTryExceptionTypes.pop();
+            activeCatchTypes.pop();
+        }
+        List<Set<VariableSymbolRecord>> branchAssignments = new ArrayList<>();
+        branchAssignments.add(new HashSet<>(definitelyAssignedVariables));
+        List<Set<String>> branchFields = new ArrayList<>();
+        branchFields.add(new HashSet<>(assignedFinalFields));
+        Set<String> earlierCatchTypes = new HashSet<>();
+        for (CatchRecord handler : node.catches()) {
+            validateTypeExists(handler.type(), false, handler.line(), handler.column());
+            SemanticType catchType = convertType(handler.type());
+            if (!catchType.isClass() || !hasThrowableAncestor(catchType.className())) {
+                throw new SemanticException("O tipo do catch deve estender Throwable.",
+                        handler.line(), handler.column());
+            }
+            if (earlierCatchTypes.stream().anyMatch(previous ->
+                    isSubclassOf(catchType.className(), previous))) {
+                throw new SemanticException("Este catch é inalcançável porque uma exceção mais geral já foi capturada.",
+                        handler.line(), handler.column());
+            }
+            if (isCheckedException(catchType.className())
+                    && tryExceptionTypes.stream().noneMatch(thrown ->
+                            canCandidateReachCatch(thrown, catchType.className()))) {
+                throw new SemanticException(
+                        "Este catch é inalcançável: o bloco try não pode lançar '"
+                                + catchType.className() + "'.",
+                        handler.line(), handler.column());
+            }
+            earlierCatchTypes.add(catchType.className());
+            definitelyAssignedVariables = new HashSet<>(assignedBefore);
+            assignedFinalFields = new HashSet<>(fieldsBefore);
+            enterScope();
+            try {
+                VariableSymbolRecord variable = new VariableSymbolRecord(handler.name(), catchType,
+                        handler.line(), handler.column());
+                currentScope.define(variable);
+                definitelyAssignedVariables.add(variable);
+                handler.block().accept(this);
+            } finally {
+                exitScope();
+            }
+            branchAssignments.add(new HashSet<>(definitelyAssignedVariables));
+            branchFields.add(new HashSet<>(assignedFinalFields));
+        }
+        definitelyAssignedVariables = branchAssignments.get(0);
+        assignedFinalFields = branchFields.get(0);
+        for (int i = 1; i < branchAssignments.size(); i++) {
+            definitelyAssignedVariables.retainAll(branchAssignments.get(i));
+            assignedFinalFields.retainAll(branchFields.get(i));
+        }
+        if (node.finallyBlock() != null) {
+            node.finallyBlock().accept(this);
+        }
+        if (!activeTryExceptionTypes.isEmpty()) {
+            List<ThrownTypeCandidate> enclosingTry = activeTryExceptionTypes.peek();
+            for (ThrownTypeCandidate thrown : tryExceptionTypes) {
+                boolean caughtHere = node.catches().stream().anyMatch(handler ->
+                        canCandidateReachCatch(thrown, handler.type().name()));
+                if (!caughtHere) enclosingTry.add(thrown);
+            }
+        }
+    }
+
+    private boolean canCandidateReachCatch(ThrownTypeCandidate thrown, String catchType) {
+        if (isSubclassOf(thrown.typeName(), catchType)) return true;
+        return thrown.mayBeSubtype() && isSubclassOf(catchType, thrown.typeName());
+    }
+
+    private boolean hasThrowableAncestor(String className) {
+        return isSubclassOf(className, "Throwable");
+    }
+
+    private boolean isThrowableType(String className) {
+        return hasThrowableAncestor(className);
+    }
+
+    private boolean isCheckedException(String className) {
+        return isSubclassOf(className, "Exception")
+                && !isSubclassOf(className, "RuntimeException");
+    }
+
+    private boolean isHandledByCurrentCatch(String exceptionType) {
+        for (Set<String> catchTypes : activeCatchTypes) {
+            if (catchTypes.stream().anyMatch(type -> isSubclassOf(exceptionType, type))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void requireCheckedExceptionHandled(String exceptionType, int line, int column) {
+        requireCheckedExceptionHandled(exceptionType, line, column, true);
+    }
+
+    private void requireCheckedExceptionHandled(
+            String exceptionType, int line, int column, boolean mayBeSubtype) {
+        if (isCheckedException(exceptionType) && !activeTryExceptionTypes.isEmpty()) {
+            recordPossibleCheckedException(exceptionType, mayBeSubtype);
+        }
+        boolean declared = currentFunction != null && currentFunction.thrownExceptions().stream()
+                .map(TypeRecord::name)
+                .anyMatch(type -> isSubclassOf(exceptionType, type));
+        if (isCheckedException(exceptionType) && !declared
+                && !isHandledByCurrentCatch(exceptionType)) {
+            throw new SemanticException(
+                    "A exceção verificada '" + exceptionType
+                            + "' precisa ser capturada ou declarada com throws.",
+                    line,
+                    column);
+        }
+    }
+
+    private void validateCalledExceptions(FunctionRecord function, int line, int column) {
+        validateCalledExceptions(function.thrownExceptions(), line, column);
+    }
+
+    private void validateCalledExceptions(List<TypeRecord> thrownExceptions, int line, int column) {
+        for (TypeRecord thrown : thrownExceptions) {
+            requireCheckedExceptionHandled(thrown.name(), line, column);
+        }
+    }
+
+    private void validateDeclaredExceptions(List<TypeRecord> exceptions, int line, int column) {
+        Set<String> declared = new HashSet<>();
+        for (TypeRecord exceptionType : exceptions) {
+            validateTypeExists(exceptionType, false, line, column);
+            SemanticType type = convertType(exceptionType);
+            if (!type.isClass() || !hasThrowableAncestor(type.className())) {
+                throw new SemanticException(
+                        "A cláusula throws aceita somente tipos que estendem Throwable.", line, column);
+            }
+            if (!declared.add(type.className())) {
+                throw new SemanticException(
+                        "A exceção '" + type.className() + "' foi declarada mais de uma vez em throws.",
+                        line, column);
+            }
+        }
+    }
+
+
+    @Override
+    public void visit(CallRecord node) {
+        getExpressionType(node);
+    }
+
+
+    @Override
+    public void visit(ExpressionStatementRecord node) {
+        node.expression().accept(this);
+    }
+
+
+    @Override
+    public void visit(InterfaceRecord node) {
+
+        Set<String> signatures = new HashSet<>();
+        String previousClass = currentClass;
+        currentClass = node.name();
+
+        try {
+            for (FunctionRecord function : node.functions()) {
+                if (!signatures.add(methodSignature(function))) {
+                    throw new SemanticException(
+                            "Assinatura duplicada na interface: '"
+                                    + function.name() + "'.",
+                            function.line(),
+                            function.column());
+                }
+
+                if (function.isStatic()
+                        && (function.isAbstract() || function.isDefault() || function.isFinal()
+                                || function.isNative() || function.block() == null
+                                || function.visibility() == TokenType.PROTECTED)) {
+                    throw new SemanticException(
+                            "Método static de interface precisa ter corpo e não pode ser abstract, "
+                                    + "default, final, native ou protected.",
+                            function.line(), function.column());
+                }
+
+                function.accept(this);
+            }
+        } finally {
+            currentClass = previousClass;
+        }
+    }
+
+    private String methodSignature(FunctionRecord function) {
+        StringBuilder signature = new StringBuilder(function.name()).append('(');
+
+        for (ParameterRecord parameter : function.parameters()) {
+            signature.append(parameter.type().name()).append(';');
+        }
+
+        return signature.append(')').toString();
+    }
+
+
+    @Override
+    public void visit(SuperAttributeRecord node) {
+        getExpressionType(node);
+    }
+
+
+    @Override
+    public void visit(SuperCallRecord node) {
+        getExpressionType(node);
+    }
+
+
+    @Override
+    public void visit(ThisRecord node) {
+
+        validateThisContext(
+                node.line(),
+                node.column());
+    }
+
+
+    @Override
+    public void visit(ThisAttributeRecord node) {
+
+        validateThisContext(
+                node.line(),
+                node.column());
+
+        AttributeRecord attribute = findInheritedAttribute(
+                currentClass,
+                node.name());
+
+        if (attribute == null) {
+            throw new SemanticException(
+                    "Atributo '" + node.name()
+                            + "' não declarado na classe '"
+                            + currentClass + "'.",
+                    node.line(),
+                    node.column());
+        }
+
+        ClassRecord declaringClass = findDeclaringClass(currentClass, node.name());
+
+        validateMemberVisibility(
+                attribute.visibility(),
+                declaringClass == null ? null : declaringClass.name(),
+                attribute.name(),
+                node.line(),
+                node.column());
+    }
+
+    @Override
+    public void visit(ThisCallRecord node) {
+        getExpressionType(node);
+    }
+
+
+    @Override
+    public void visit(AssignmentRecord node) {
+        if (node.value() instanceof ArrayInitializerRecord initializer) {
+            throw new SemanticException(
+                    "Um inicializador de array direto só pode ser usado em uma declaração.",
+                    initializer.line(),
+                    initializer.column());
+        }
+
+        VariableSymbolRecord localTarget = node.target() instanceof VariableRecord variable
+                ? findLocalVariable(variable.name())
+                : null;
+
+        String assignedFieldName = null;
+        if (node.target() instanceof ThisAttributeRecord attributeExpression) {
+            assignedFieldName = attributeExpression.name();
+        } else if (node.target() instanceof SuperAttributeRecord attributeExpression) {
+            AttributeRecord attribute = resolveSuperAttribute(attributeExpression);
+            if (attribute.isFinal()) {
+                throw new SemanticException(
+                        "Não é permitido modificar o atributo final '"
+                                + attribute.name() + "'.",
+                        node.line(),
+                        node.column());
+            }
+        } else if (node.target() instanceof MemberAccessRecord memberAccess) {
+            ClassRecord staticReceiver = resolveStaticClassReceiver(memberAccess.receiver());
+            SemanticType receiverType = staticReceiver == null
+                    ? getExpressionType(memberAccess.receiver()) : null;
+            if (receiverType != null && receiverType.isArray() && memberAccess.name().equals("length")) {
+                throw new SemanticException(
+                        "A propriedade length de um array não pode ser modificada.",
+                        node.line(),
+                        node.column());
+            }
+            AttributeRecord attribute = staticReceiver == null
+                    ? resolveObjectAttribute(memberAccess)
+                    : resolveStaticClassAttribute(staticReceiver, memberAccess);
+
+            if (attribute.isFinal()) {
+                throw new SemanticException(
+                        "Não é permitido modificar o atributo final '"
+                                + attribute.name() + "'.",
+                        node.line(),
+                        node.column());
+            }
+        } else if (node.target() instanceof VariableRecord variable
+                && !resolvesToLocalVariable(variable.name())) {
+            assignedFieldName = variable.name();
+            AttributeRecord importedAttribute = resolveStaticImportedAttribute(
+                    variable.staticImports(), variable.name(), variable.line(), variable.column());
+            if (importedAttribute != null && importedAttribute.isFinal()) {
+                throw new SemanticException(
+                        "Não é permitido modificar o atributo final '"
+                                + importedAttribute.name() + "'.",
+                        node.line(),
+                        node.column());
+            }
+        }
+
+        if (assignedFieldName != null) {
+            AttributeRecord attribute = findInheritedAttribute(
+                    currentClass,
+                    assignedFieldName);
+
+            if (attribute != null) {
+                assignFinalField(attribute, node.line(), node.column());
+            }
+        }
+
+        if (!(node.target() instanceof ThisAttributeRecord)
+                && !(node.target() instanceof SuperAttributeRecord)
+                && !(node.target() instanceof MemberAccessRecord)
+                && !(node.target() instanceof ArrayAccessRecord)
+                && !(node.target() instanceof VariableRecord)
+                && !(node.target() instanceof RegisterRecord)) {
+            throw new SemanticException(
+                    "Destino de atribuição inválido.",
+                    node.line(),
+                    node.column());
+        }
+
+        SemanticType targetType = localTarget == null
+                ? getExpressionType(node.target())
+                : localTarget.type();
+
+        if (targetType == null) {
+            throw new SemanticException(
+                    "Não foi possível determinar os tipos da atribuição.",
+                    node.line(),
+                    node.column());
+        }
+
+        if (node.target() instanceof RegisterRecord) {
+            validateRegisterAssignment(
+                    targetType,
+                    getExpressionType(node.value()),
+                    node.line(),
+                    node.column());
+        } else {
+            validateExpressionAssignable(
+                    targetType,
+                    node.value(),
+                    node.line(),
+                    node.column());
+        }
+        if (localTarget != null) {
+            definitelyAssignedVariables.add(localTarget);
+        }
+    }
+}

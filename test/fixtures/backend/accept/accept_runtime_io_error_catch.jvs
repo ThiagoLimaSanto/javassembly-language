@@ -1,0 +1,10 @@
+public class RuntimeIoErrorCatchTest {
+    public static func void main(String[] args) {
+        try {
+            printLn "stdout is closed";
+        } catch (IOException error) {
+            return;
+        }
+        return;
+    }
+}

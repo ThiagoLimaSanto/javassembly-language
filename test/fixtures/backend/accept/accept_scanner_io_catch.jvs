@@ -1,0 +1,12 @@
+import jvs.io.Scanner;
+
+public class ScannerIoCatchTest {
+    public static func void main(String[] args) {
+        try {
+            printLn Scanner.readInt();
+        } catch (IOException error) {
+            printLn "input failed";
+        }
+        return;
+    }
+}

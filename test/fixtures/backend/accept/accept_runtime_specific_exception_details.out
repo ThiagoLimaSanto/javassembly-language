@@ -1,0 +1,5 @@
+IndexOutOfBoundsException
+Índice fora dos limites do array.
+bounds finally
+NullPointerException
+Tentativa de acessar uma referência null.

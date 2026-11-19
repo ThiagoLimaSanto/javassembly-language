@@ -9,18 +9,18 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-import src.Frontend;
-import src.ast.records.ProgramRecord;
-import src.exceptions.LanguageException;
-import src.exceptions.LexicalException;
-import src.exceptions.LongOutOfRangeException;
-import src.exceptions.SemanticException;
-import src.exceptions.SyntacticException;
-import src.lexer.Lexer;
-import src.lexer.Token;
-import src.lexer.TokenType;
-import src.parser.TokenStream;
-import src.semantic.SemanticAnalyzer;
+import compiler.Frontend;
+import compiler.ast.records.ProgramRecord;
+import compiler.exceptions.LanguageException;
+import compiler.exceptions.LexicalException;
+import compiler.exceptions.LongOutOfRangeException;
+import compiler.exceptions.SemanticException;
+import compiler.exceptions.SyntacticException;
+import compiler.lexer.Lexer;
+import compiler.lexer.Token;
+import compiler.lexer.TokenType;
+import compiler.parser.TokenStream;
+import compiler.semantic.SemanticAnalyzer;
 
 public final class RuleFixtureTests {
     private RuleFixtureTests() {

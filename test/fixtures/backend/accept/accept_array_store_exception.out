@@ -1,0 +1,3 @@
+compatible child stored
+ArrayStoreException
+O valor não é compatível com o tipo real dos elementos do array.

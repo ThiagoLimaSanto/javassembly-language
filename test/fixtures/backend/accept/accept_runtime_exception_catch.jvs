@@ -1,0 +1,37 @@
+class Throwable {}
+
+class RuntimeTrapBox {
+    int value;
+}
+
+public class RuntimeExceptionCatchTest {
+    public static func void triggerBoundsError() {
+        int[] values = new int[1];
+        print values[1];
+        return;
+    }
+
+    public static func void main(String[] args) {
+        RuntimeTrapBox box = null;
+        try {
+            try {
+                print box.value;
+            } finally {
+                printLn "inner finally after null access";
+            }
+        } catch (Throwable error) {
+            printLn "caught null access in same method";
+        } finally {
+            printLn "outer finally after null access";
+        }
+
+        try {
+            triggerBoundsError();
+        } catch (Throwable error) {
+            printLn "caught bounds error from called method";
+        } finally {
+            printLn "finally after called-method error";
+        }
+        return;
+    }
+}

@@ -1,0 +1,35 @@
+package projects.exemplo.src;
+
+import jvs.io.Scanner;
+
+public class Teste{
+    public static func void main(String[] args) {
+        print "Digite o seu nome: ";
+        String name = Scanner.readLine();
+        print "Digite a sua idade: ";
+        int idade = Scanner.readInt();
+
+        Funcionario funcionario = new Funcionario(idade, name, "TI");
+
+        printfLn "O seu nome é %s e tem %d anos e trabalho com %s.", funcionario.name, funcionario.idade, funcionario.cargo;
+    }
+}
+
+public class Pessoa{
+    int idade;
+    String name;
+
+    public Pessoa(int idade, String name){
+        this.idade = idade;
+        this.name = name;
+    }
+}
+
+public class Funcionario extends Pessoa{
+    String cargo;
+
+    public Funcionario(int idade, String name, String cargo){
+        super(idade, name);
+        this.cargo = cargo;
+    }
+}

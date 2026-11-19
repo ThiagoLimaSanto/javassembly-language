@@ -1,0 +1,65 @@
+import jvs.io.Scanner;
+
+class RuntimeTrapBox {
+    int value;
+}
+
+public class RuntimeTrapTypesTest {
+    public static func int divide(int divisor) {
+        return div 12, divisor;
+    }
+
+    public static func void main(String[] args) throws IOException {
+        try {
+            int[] values = new int[neg 1];
+        } catch (NegativeArraySizeException error) {
+            printLn error.getType();
+        }
+
+        try {
+            int[] values = new int[1];
+            printLn values[1];
+        } catch (IndexOutOfBoundsException error) {
+            printLn error.getType();
+        }
+
+        try {
+            printLn divide(0);
+        } catch (ArithmeticException error) {
+            printLn error.getType();
+        }
+
+        try {
+            RuntimeTrapBox box = null;
+            printLn box.value;
+        } catch (NullPointerException error) {
+            printLn error.getType();
+        }
+
+        try {
+            RuntimeTrapBox box = new RuntimeTrapBox();
+            RuntimeTrapBox alias = box;
+            free(box);
+            printLn alias.value;
+        } catch (InvalidReferenceException error) {
+            printLn error.getType();
+        }
+
+        try {
+            RuntimeTrapBox box = new RuntimeTrapBox();
+            RuntimeTrapBox alias = box;
+            free(box);
+            free(alias);
+        } catch (InvalidFreeException error) {
+            printLn error.getType();
+        }
+
+        try {
+            int value = Scanner.readInt();
+            printLn value;
+        } catch (InputMismatchException error) {
+            printLn error.getType();
+        }
+        return;
+    }
+}

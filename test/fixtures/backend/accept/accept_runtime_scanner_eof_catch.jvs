@@ -1,0 +1,15 @@
+import jvs.io.Scanner;
+
+public class RuntimeScannerEofCatchTest {
+    public static func void main(String[] args) throws IOException {
+        try {
+            printLn Scanner.readInt();
+        } catch (NoSuchElementException error) {
+            printLn error.getType();
+            printLn error.getMessage();
+        } finally {
+            printLn "EOF finally";
+        }
+        return;
+    }
+}

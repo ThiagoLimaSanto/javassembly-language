@@ -1,7 +1,7 @@
-import io.Scanner;
+import jvs.io.Scanner;
 
 public class ScannerLinesTest {
-    public static func void main(String[] args) {
+    public static func void main(String[] args) throws IOException {
         String empty = Scanner.readLine();
         String sentence = Scanner.readLine();
         print "<";

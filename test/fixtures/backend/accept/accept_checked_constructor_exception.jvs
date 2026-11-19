@@ -1,0 +1,18 @@
+class ConstructorCheckedException extends Exception {}
+
+class CheckedConstructorBox {
+    public CheckedConstructorBox() throws ConstructorCheckedException {
+        throw new ConstructorCheckedException();
+    }
+}
+
+public class CheckedConstructorExceptionTest {
+    public static func void main(String[] args) {
+        try {
+            CheckedConstructorBox box = new CheckedConstructorBox();
+        } catch (ConstructorCheckedException error) {
+            printLn "constructor exception caught";
+        }
+        return;
+    }
+}

@@ -1,0 +1,20 @@
+class ArrayStoreParent {
+    int value;
+}
+class ArrayStoreChild extends ArrayStoreParent {}
+class ArrayStoreSibling extends ArrayStoreParent {}
+
+public class ArrayStoreExceptionTest {
+    public static func void main(String[] args) {
+        ArrayStoreParent[] values = new ArrayStoreChild[1];
+        values[0] = new ArrayStoreChild();
+        printLn "compatible child stored";
+        try {
+            values[0] = new ArrayStoreSibling();
+        } catch (ArrayStoreException error) {
+            printLn error.getType();
+            printLn error.getMessage();
+        }
+        return;
+    }
+}

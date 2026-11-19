@@ -1,0 +1,23 @@
+class CheckedReachabilityParent extends Exception {}
+class CheckedReachabilityChild extends CheckedReachabilityParent {}
+
+public class NestedCheckedReachabilityTest {
+    public static func void maybeFail() throws CheckedReachabilityParent {
+        throw new CheckedReachabilityChild();
+    }
+
+    public static func void main(String[] args) {
+        try {
+            try {
+                maybeFail();
+            } finally {
+                int cleanup = 1;
+            }
+        } catch (CheckedReachabilityChild child) {
+            int handled = 1;
+        } catch (CheckedReachabilityParent parent) {
+            int handled = 2;
+        }
+        return;
+    }
+}

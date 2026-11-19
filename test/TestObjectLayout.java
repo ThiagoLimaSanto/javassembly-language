@@ -4,11 +4,11 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Map;
 
-import src.Frontend;
-import src.ast.records.ProgramRecord;
-import src.backend.memory.ClassLayout;
-import src.backend.memory.FieldLayout;
-import src.backend.memory.ObjectLayout;
+import compiler.Frontend;
+import compiler.ast.records.ProgramRecord;
+import compiler.backend.memory.ClassLayout;
+import compiler.backend.memory.FieldLayout;
+import compiler.backend.memory.ObjectLayout;
 
 public class TestObjectLayout {
 

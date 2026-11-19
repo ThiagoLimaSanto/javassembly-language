@@ -1,7 +1,7 @@
-import io.Scanner;
+import jvs.io.Scanner;
 
 public class ScannerTokensTest {
-    public static func void main(String[] args) {
+    public static func void main(String[] args) throws IOException {
         int integer = Scanner.readInt();
         long longValue = Scanner.readLong();
         double decimal = Scanner.readDouble();

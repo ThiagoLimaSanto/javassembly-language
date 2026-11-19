@@ -1,0 +1,5 @@
+public class ThrowNonExceptionTest {
+    public static func void main(String[] args) {
+        throw "not an exception";
+    }
+}

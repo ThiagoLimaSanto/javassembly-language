@@ -1,10 +1,10 @@
 package test;
 
-import src.Frontend;
-import src.ast.records.ProgramRecord;
-import src.exceptions.SemanticException;
-import src.semantic.EntryPointValidator;
-import src.semantic.SemanticAnalyzer;
+import compiler.Frontend;
+import compiler.ast.records.ProgramRecord;
+import compiler.exceptions.SemanticException;
+import compiler.semantic.EntryPointValidator;
+import compiler.semantic.SemanticAnalyzer;
 
 public final class EntryPointValidatorTests {
     private EntryPointValidatorTests() {

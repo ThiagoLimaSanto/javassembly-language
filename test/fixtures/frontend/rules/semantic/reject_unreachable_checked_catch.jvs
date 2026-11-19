@@ -1,0 +1,10 @@
+public class UnreachableCheckedCatchTest {
+    public static func void main(String[] args) {
+        try {
+            int value = 1;
+        } catch (IOException error) {
+            printLn error.getType();
+        }
+        return;
+    }
+}

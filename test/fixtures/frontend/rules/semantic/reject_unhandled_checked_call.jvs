@@ -1,0 +1,15 @@
+class CheckedExample extends Exception {}
+
+public class UnhandledCheckedCallTest {
+    public static func void fail() throws CheckedExample {
+        throw new CheckedExample();
+    }
+
+    public static func void caller() {
+        fail();
+    }
+
+    public static func void main(String[] args) {
+        return;
+    }
+}

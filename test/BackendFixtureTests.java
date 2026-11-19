@@ -7,14 +7,14 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
-import src.Frontend;
-import src.ast.records.ProgramRecord;
-import src.backend.asm.NasmGenerator;
-import src.backend.ir.IRGenerator;
-import src.backend.ir.IRProgram;
-import src.backend.memory.ObjectLayout;
-import src.backend.optimization.IROptimizer;
-import src.semantic.SemanticAnalyzer;
+import compiler.Frontend;
+import compiler.ast.records.ProgramRecord;
+import compiler.backend.asm.NasmGenerator;
+import compiler.backend.ir.IRGenerator;
+import compiler.backend.ir.IRProgram;
+import compiler.backend.memory.ObjectLayout;
+import compiler.backend.optimization.IROptimizer;
+import compiler.semantic.SemanticAnalyzer;
 
 public final class BackendFixtureTests {
     private BackendFixtureTests() {
@@ -100,17 +100,24 @@ public final class BackendFixtureTests {
                 return "ld failed (" + linked.exitCode() + "): " + linked.stderr();
             }
 
-            ProcessBuilder execution = new ProcessBuilder(executable.toString())
+            boolean closeStdout = Files.isRegularFile(replaceExtension(fixture, ".closed_stdout"));
+            boolean limitData = Files.isRegularFile(replaceExtension(fixture, ".low_data_limit"));
+            List<String> executionCommand = limitData
+                    ? List.of("bash", "-c", "ulimit -d 512; exec \"$1\"", "backend-fixture",
+                            executable.toString())
+                    : List.of(executable.toString());
+            ProcessBuilder execution = new ProcessBuilder(executionCommand)
                     .directory(tempDirectory.toFile())
-                    .redirectOutput(stdoutFile.toFile())
                     .redirectError(stderrFile.toFile());
+            if (!closeStdout) execution.redirectOutput(stdoutFile.toFile());
             Path inputFile = replaceExtension(fixture, ".in");
             if (Files.isRegularFile(inputFile)) {
                 execution.redirectInput(inputFile.toFile());
             }
             Process process = execution.start();
+            if (closeStdout) process.getInputStream().close();
             int exitCode = process.waitFor();
-            String stdout = Files.readString(stdoutFile);
+            String stdout = closeStdout ? "" : Files.readString(stdoutFile);
             String stderr = Files.readString(stderrFile);
             String expected = Files.readString(expectedFile);
 
@@ -136,8 +143,16 @@ public final class BackendFixtureTests {
                     return "stdout mismatch before runtime failure; expected <"
                             + expectedStdout + ">, got <" + stdout + ">";
                 }
-                if (!stderr.equals(expected)) {
-                    return "stderr mismatch; expected <" + expected + ">, got <" + stderr + ">";
+                if (!stderr.startsWith(expected)) {
+                    return "stderr mismatch; expected prefix <" + expected + ">, got <" + stderr + ">";
+                }
+                String stackTrace = stderr.substring(expected.length());
+                if (stackTrace.isEmpty()) {
+                    return "uncaught exception did not include a stack frame";
+                }
+                if (!stackTrace.matches("(?:  at [^\\n]+\\([^\\n]+\\.jvs:[0-9]+:[0-9]+\\)\\n)+")
+                        || stackTrace.contains("__")) {
+                    return "uncaught exception stack trace is malformed: <" + stackTrace + ">";
                 }
             }
             return null;
