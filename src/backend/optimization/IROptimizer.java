@@ -289,7 +289,7 @@ public class IROptimizer {
                 constants.put(freedReference, Operand.constant(null, Operand.Type.REF));
             }
         }
-        if (instruction.opCode() == IROpCode.CALL)
+        if (instruction.opCode() == IROpCode.CALL || instruction.opCode() == IROpCode.CALL_VIRTUAL)
             constants.clear();
     }
 
@@ -524,7 +524,8 @@ public class IROptimizer {
             for (int index = block.instructions.size() - 1; index >= 0; index--) {
                 IRInstruction instruction = block.instructions.get(index);
                 Operand destination = instruction.destination();
-                if (instruction.opCode() == IROpCode.CALL) {
+                if (instruction.opCode() == IROpCode.CALL
+                        || instruction.opCode() == IROpCode.CALL_VIRTUAL) {
 
                     live.addAll(allVariables);
                 }
@@ -827,7 +828,7 @@ public class IROptimizer {
 
     private boolean isHeapMutation(IROpCode opcode) {
         return switch (opcode) {
-            case CALL, ALLOC_OBJECT, FREE_OBJECT, ALLOC_ARRAY, FREE_ARRAY,
+            case CALL, CALL_VIRTUAL, ALLOC_OBJECT, FREE_OBJECT, ALLOC_ARRAY, FREE_ARRAY,
                     STORE_FIELD, STORE_ARRAY -> true;
             default -> false;
         };

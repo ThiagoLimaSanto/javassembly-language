@@ -46,6 +46,6 @@ public class ProgramAnalyzer {
 
         var ir = new IRGenerator(classLayouts).generate(program);
         ir = new IROptimizer().optimize(ir);
-        return new NasmGenerator().generate(ir);
+        return new NasmGenerator(program).generate(ir);
     }
 }

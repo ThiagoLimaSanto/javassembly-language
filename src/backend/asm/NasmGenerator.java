@@ -10,6 +10,8 @@ import src.backend.ir.IRInstruction;
 import src.backend.ir.IROpCode;
 import src.backend.ir.IRProgram;
 import src.backend.ir.Operand;
+import src.backend.memory.VirtualMethodTable;
+import src.ast.records.ProgramRecord;
 
 public class NasmGenerator {
 
@@ -21,6 +23,15 @@ public class NasmGenerator {
     private int nextGpParameter;
     private int nextXmmParameter;
     private int nextFreeLabel;
+    private final VirtualMethodTable virtualMethodTable;
+
+    public NasmGenerator() {
+        this.virtualMethodTable = null;
+    }
+
+    public NasmGenerator(ProgramRecord program) {
+        this.virtualMethodTable = new VirtualMethodTable(program);
+    }
 
     public String generate(IRProgram program) {
         nextFreeLabel = 0;
@@ -120,11 +131,30 @@ public class NasmGenerator {
         }
         asm.append("__f64_scale: dq 0x412e848000000000\n");
         asm.append("__f64_round: dq 0x3fe0000000000000\n\n");
+        appendVirtualTables(asm);
         asm.append("section .bss\n");
         asm.append("__heap_start: resq 1\n");
         asm.append("__heap_end: resq 1\n");
         asm.append("__number_buffer: resb 32\n\n");
         asm.append("section .text\n\n");
+    }
+
+    private void appendVirtualTables(StringBuilder asm) {
+        if (virtualMethodTable == null || virtualMethodTable.tables().isEmpty()) {
+            return;
+        }
+        asm.append("section .data\n");
+        for (Map.Entry<String, List<String>> table : virtualMethodTable.tables().entrySet()) {
+            asm.append("__vtable_").append(table.getKey()).append(":\n");
+            if (table.getValue().isEmpty()) {
+                asm.append("    dq 0\n");
+            } else {
+                for (String methodLabel : table.getValue()) {
+                    asm.append("    dq ").append(methodLabel).append("\n");
+                }
+            }
+        }
+        asm.append('\n');
     }
 
     private void prepareStringLabels(List<IRInstruction> instructions) {
@@ -370,6 +400,8 @@ public class NasmGenerator {
             }
 
             case CALL -> emitCall(asm, instruction);
+
+            case CALL_VIRTUAL -> emitVirtualCall(asm, instruction);
 
             case LOAD_FIELD -> emitFieldLoad(asm, instruction);
 
@@ -955,13 +987,19 @@ public class NasmGenerator {
     private void emitObjectAllocation(StringBuilder asm, IRInstruction instruction) {
         if (instruction.destination() == null
                 || instruction.destination().type() != Operand.Type.REF
-                || instruction.left() == null) {
+                || instruction.left() == null
+                || instruction.right() == null
+                || instruction.right().kind() != Operand.Kind.CONSTANT
+                || !(instruction.right().value() instanceof String className)) {
             throw new IllegalArgumentException(
-                    "ALLOC_OBJECT exige destino REF e tamanho.");
+                    "ALLOC_OBJECT exige destino REF, tamanho e nome da classe.");
         }
 
         loadI32(asm, instruction.left(), "edi");
         asm.append("    call __heap_alloc\n");
+        asm.append("    lea rdx, [rel __vtable_").append(className).append(
+                "]\n");
+        asm.append("    mov qword [rax], rdx\n");
         storeI64(asm, instruction.destination(), "rax");
     }
 
@@ -1416,6 +1454,70 @@ public class NasmGenerator {
             } else {
                 storeI32(asm, instruction.destination(), "eax");
             }
+        }
+    }
+
+    private void emitVirtualCall(StringBuilder asm, IRInstruction instruction) {
+        if (virtualMethodTable == null
+                || instruction.left() == null
+                || instruction.right() == null
+                || instruction.right().kind() != Operand.Kind.CONSTANT
+                || !(instruction.right().value() instanceof Integer slot)
+                || slot < 0) {
+            throw new IllegalArgumentException("CALL_VIRTUAL exige receptor e slot válido.");
+        }
+
+        loadI64(asm, instruction.left(), "rdi");
+        asm.append("    test rdi, rdi\n");
+        asm.append("    jz __runtime_invalid_reference\n");
+        asm.append("    call __heap_validate\n");
+        asm.append("    mov rax, qword [rdi]\n");
+        asm.append("    mov r10, qword [rax + ").append(slot * 8).append("]\n");
+        asm.append("    test r10, r10\n");
+        asm.append("    jz __runtime_invalid_reference\n");
+
+        String[] gpRegisters = { "rsi", "rdx", "rcx", "r8", "r9" };
+        String[] xmmRegisters = {
+                "xmm0", "xmm1", "xmm2", "xmm3",
+                "xmm4", "xmm5", "xmm6", "xmm7"
+        };
+        int gpIndex = 0;
+        int xmmIndex = 0;
+        for (Operand argument : instruction.arguments()) {
+            if (argument.type() == Operand.Type.F64) {
+                if (xmmIndex == xmmRegisters.length) {
+                    throw new UnsupportedOperationException(
+                            "Chamadas virtuais suportam até oito argumentos double.");
+                }
+                loadF64(asm, argument, xmmRegisters[xmmIndex++]);
+            } else {
+                if (gpIndex == gpRegisters.length) {
+                    throw new UnsupportedOperationException(
+                            "Chamadas virtuais suportam até cinco argumentos inteiros/referência além de this.");
+                }
+                String register = gpRegisters[gpIndex++];
+                if (argument.type() == Operand.Type.I32 || argument.type() == Operand.Type.BOOL) {
+                    loadI32(asm, argument, register32(register));
+                } else {
+                    loadI64(asm, argument, register);
+                }
+            }
+        }
+
+        asm.append("    call r10\n");
+        storeCallResult(asm, instruction.destination());
+    }
+
+    private void storeCallResult(StringBuilder asm, Operand destination) {
+        if (destination == null) {
+            return;
+        }
+        if (destination.type() == Operand.Type.F64) {
+            storeF64(asm, destination, "xmm0");
+        } else if (destination.type() == Operand.Type.I64 || destination.type() == Operand.Type.REF) {
+            storeI64(asm, destination, "rax");
+        } else {
+            storeI32(asm, destination, "eax");
         }
     }
 

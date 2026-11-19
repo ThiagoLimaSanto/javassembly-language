@@ -25,6 +25,7 @@ public enum IROpCode {
     JUMP_IF_TRUE,
 
     CALL,
+    CALL_VIRTUAL,
     RETURN,
     PRINT,
     PRINT_FORMAT,

@@ -26,6 +26,7 @@ import src.ast.records.FunctionRecord;
 import src.ast.records.IfRecord;
 import src.ast.records.LiteralRecord;
 import src.ast.records.MemberAccessRecord;
+import src.ast.records.MemberCallRecord;
 import src.ast.records.NewObjectRecord;
 import src.ast.records.ParameterRecord;
 import src.ast.records.PrintRecord;
@@ -33,15 +34,23 @@ import src.ast.records.PrintfRecord;
 import src.ast.records.ProgramRecord;
 import src.ast.records.ReturnRecord;
 import src.ast.records.TypeRecord;
+import src.ast.records.ThisAttributeRecord;
+import src.ast.records.ThisCallRecord;
+import src.ast.records.ThisRecord;
+import src.ast.records.SuperCallRecord;
 import src.ast.records.UnaryExpressionRecord;
 import src.ast.records.VariableRecord;
 import src.ast.records.WhileRecord;
 import src.backend.memory.ClassLayout;
 import src.backend.memory.FieldLayout;
+import src.backend.memory.VirtualMethodTable;
 import src.lexer.TokenType;
 
 public final class IRGenerator {
     private record ResolvedField(Operand receiver, FieldLayout field) {
+    }
+
+    private record ResolvedMethod(ClassRecord owner, FunctionRecord function) {
     }
 
     private final Deque<Map<String, Operand>> variableScopes = new ArrayDeque<>();
@@ -50,7 +59,7 @@ public final class IRGenerator {
     private final Map<Operand, String> sourceTypesByOperand = new HashMap<>();
     private final Map<String, ClassRecord> classes = new HashMap<>();
     private final Map<String, FunctionRecord> functionsByLabel = new HashMap<>();
-    private final Map<String, ClassRecord> ownersByLabel = new HashMap<>();
+    private VirtualMethodTable virtualMethodTable;
     private int nextTemp;
     private int nextLabel;
     private int nextVariable;
@@ -71,7 +80,7 @@ public final class IRGenerator {
         nextVariable = 0;
         classes.clear();
         functionsByLabel.clear();
-        ownersByLabel.clear();
+        virtualMethodTable = new VirtualMethodTable(ast);
         referenceTypesByOperand.clear();
         sourceTypesByOperand.clear();
 
@@ -97,14 +106,9 @@ public final class IRGenerator {
                 if (function.isAbstract()) {
                     continue;
                 }
-                if (!function.isStatic()) {
-                    throw unsupported("A geração de código ainda não suporta métodos de instância: "
-                            + classNode.name() + "." + function.name() + ".");
-                }
                 validateFunctionTypes(function);
                 String label = functionLabel(classNode, function);
                 functionsByLabel.put(label, function);
-                ownersByLabel.put(label, classNode);
             }
         }
 
@@ -122,6 +126,14 @@ public final class IRGenerator {
                 pushVariableScope();
                 ir.add(new IRInstruction(IROpCode.LABEL,
                         Operand.label(functionLabel(classNode, function)), null, null));
+
+                if (!function.isStatic()) {
+                    Operand thisOperand = declareVariable("this", Operand.Type.REF);
+                    registerReferenceType(thisOperand, new TypeRecord(classNode.name()));
+                    ir.add(new IRInstruction(IROpCode.PARAM,
+                            thisOperand,
+                            Operand.constant(-1, Operand.Type.I32), null));
+                }
 
                 for (int index = 0; index < function.parameters().size(); index++) {
                     ParameterRecord parameter = function.parameters().get(index);
@@ -274,15 +286,36 @@ public final class IRGenerator {
                     null));
         } else if (statement instanceof AssignmentRecord assignment) {
             if (assignment.target() instanceof VariableRecord variable) {
-                Operand destination = expression(ir, variable);
-                Operand value;
-                if (assignment.value() instanceof ArrayInitializerRecord initializer) {
-                    String expectedArrayType = sourceTypesByOperand.get(destination);
-                    value = emitArrayInitializer(ir, expectedArrayType, initializer);
+                Operand destination = resolveVariable(variable.name());
+                if (destination == null && currentFunction != null && !currentFunction.isStatic()) {
+                    ResolvedField target = resolveField(
+                            currentClassName,
+                            variable.name(),
+                            resolveVariable("this"));
+                    FieldLayout field = target.field();
+                    Operand value = coerce(
+                            ir,
+                            expression(ir, assignment.value()),
+                            typeOf(new TypeRecord(field.type())));
+                    ir.add(new IRInstruction(
+                            IROpCode.STORE_FIELD,
+                            null,
+                            target.receiver(),
+                            Operand.constant(field.offSet(), Operand.Type.I32),
+                            List.of(value)));
                 } else {
-                    value = coerce(ir, expression(ir, assignment.value()), destination.type());
+                    if (destination == null) {
+                        throw unsupported("Variável sem símbolo na geração de IR: " + variable.name() + ".");
+                    }
+                    Operand value;
+                    if (assignment.value() instanceof ArrayInitializerRecord initializer) {
+                        String expectedArrayType = sourceTypesByOperand.get(destination);
+                        value = emitArrayInitializer(ir, expectedArrayType, initializer);
+                    } else {
+                        value = coerce(ir, expression(ir, assignment.value()), destination.type());
+                    }
+                    ir.add(new IRInstruction(IROpCode.ASSIGN, destination, value, null));
                 }
-                ir.add(new IRInstruction(IROpCode.ASSIGN, destination, value, null));
             } else if (assignment.target() instanceof MemberAccessRecord member) {
                 ResolvedField target = resolveField(ir, member);
                 FieldLayout field = target.field();
@@ -296,6 +329,20 @@ public final class IRGenerator {
                         IROpCode.STORE_FIELD,
                         null,
                         target.receiver(),
+                        Operand.constant(field.offSet(), Operand.Type.I32),
+                        List.of(value)));
+            } else if (assignment.target() instanceof ThisAttributeRecord attribute) {
+                Operand receiver = resolveVariable("this");
+                ResolvedField target = resolveField(currentClassName, attribute.name(), receiver);
+                FieldLayout field = target.field();
+                Operand value = coerce(
+                        ir,
+                        expression(ir, assignment.value()),
+                        typeOf(new TypeRecord(field.type())));
+                ir.add(new IRInstruction(
+                        IROpCode.STORE_FIELD,
+                        null,
+                        receiver,
                         Operand.constant(field.offSet(), Operand.Type.I32),
                         List.of(value)));
             } else if (assignment.target() instanceof ArrayAccessRecord access) {
@@ -318,6 +365,12 @@ public final class IRGenerator {
         } else if (statement instanceof ExpressionStatementRecord expressionStatement) {
             if (expressionStatement.expression() instanceof CallRecord call) {
                 emitCall(ir, call, false);
+            } else if (expressionStatement.expression() instanceof MemberCallRecord call) {
+                emitMemberCall(ir, call, false);
+            } else if (expressionStatement.expression() instanceof ThisCallRecord call) {
+                emitThisCall(ir, call, false);
+            } else if (expressionStatement.expression() instanceof SuperCallRecord call) {
+                emitSuperCall(ir, call, false);
             } else {
                 throw unsupported("Este tipo de expressão como comando ainda não é suportado.");
             }
@@ -385,9 +438,28 @@ public final class IRGenerator {
         if (expression instanceof VariableRecord variable) {
             Operand operand = resolveVariable(variable.name());
             if (operand == null) {
+                if (currentFunction != null && !currentFunction.isStatic()) {
+                    ResolvedField field = resolveField(
+                            currentClassName,
+                            variable.name(),
+                            resolveVariable("this"));
+                    return loadField(ir, field);
+                }
                 throw unsupported("Variável sem símbolo na geração de IR: " + variable.name() + ".");
             }
             return operand;
+        }
+        if (expression instanceof ThisRecord) {
+            Operand thisOperand = resolveVariable("this");
+            if (thisOperand == null) {
+                throw unsupported("this só pode ser usado em um método de instância.");
+            }
+            return thisOperand;
+        }
+        if (expression instanceof ThisAttributeRecord attribute) {
+            Operand receiver = resolveVariable("this");
+            ResolvedField resolved = resolveField(currentClassName, attribute.name(), receiver);
+            return loadField(ir, resolved);
         }
         if (expression instanceof MemberAccessRecord member) {
             Operand memberReceiver = expression(ir, member.receiver());
@@ -401,17 +473,16 @@ public final class IRGenerator {
             ResolvedField resolved = resolveField(ir, member, memberReceiver);
             FieldLayout field = resolved.field();
 
-            Operand.Type fieldType = typeOf(new TypeRecord(field.type()));
-            Operand result = Operand.temporary("t" + nextTemp++, fieldType);
-
-            ir.add(new IRInstruction(
-                    IROpCode.LOAD_FIELD,
-                    result,
-                    resolved.receiver(),
-                    Operand.constant(field.offSet(), Operand.Type.I32)));
-
-            registerReferenceType(result, new TypeRecord(field.type()));
-            return result;
+            return loadField(ir, resolved);
+        }
+        if (expression instanceof MemberCallRecord call) {
+            return emitMemberCall(ir, call, true);
+        }
+        if (expression instanceof ThisCallRecord call) {
+            return emitThisCall(ir, call, true);
+        }
+        if (expression instanceof SuperCallRecord call) {
+            return emitSuperCall(ir, call, true);
         }
         if (expression instanceof ArrayAccessRecord access) {
             Operand array = expression(ir, access.array());
@@ -534,7 +605,7 @@ public final class IRGenerator {
                     IROpCode.ALLOC_OBJECT,
                     result,
                     Operand.constant(allocationSize, Operand.Type.I32),
-                    null));
+                    Operand.constant(className, Operand.Type.REF)));
 
             referenceTypesByOperand.put(result, className);
             sourceTypesByOperand.put(result, className);
@@ -766,17 +837,33 @@ public final class IRGenerator {
                             + member.name() + "'.");
         }
 
+        return resolveField(receiverClass, member.name(), receiver);
+    }
+
+    private ResolvedField resolveField(String receiverClass, String memberName, Operand receiver) {
         ClassLayout layout = classLayouts.get(receiverClass);
         if (layout == null) {
             throw unsupported("Layout não encontrado para a classe '" + receiverClass + "'.");
         }
 
-        FieldLayout field = layout.getField(member.name());
+        FieldLayout field = layout.getField(memberName);
         if (field == null) {
             throw unsupported(
-                    "Campo '" + member.name() + "' não encontrado em '" + receiverClass + "'.");
+                    "Campo '" + memberName + "' não encontrado em '" + receiverClass + "'.");
         }
         return new ResolvedField(receiver, field);
+    }
+
+    private Operand loadField(IRProgram ir, ResolvedField resolved) {
+        FieldLayout field = resolved.field();
+        Operand result = Operand.temporary("t" + nextTemp++, typeOf(new TypeRecord(field.type())));
+        ir.add(new IRInstruction(
+                IROpCode.LOAD_FIELD,
+                result,
+                resolved.receiver(),
+                Operand.constant(field.offSet(), Operand.Type.I32)));
+        registerReferenceType(result, new TypeRecord(field.type()));
+        return result;
     }
 
     private boolean isStringExpression(ExpressionInterface expression, Operand value) {
@@ -791,7 +878,26 @@ public final class IRGenerator {
         for (ExpressionInterface argument : call.arguments())
             arguments.add(expression(ir, argument));
 
-        String targetLabel = resolveCallTarget(call, arguments);
+        String targetLabel;
+        try {
+            targetLabel = resolveCallTarget(call, arguments);
+        } catch (UnsupportedOperationException exception) {
+            if (!exception.getMessage().startsWith("Nenhuma sobrecarga suportada")
+                    || currentFunction == null || currentFunction.isStatic()) {
+                throw exception;
+            }
+            ResolvedMethod instanceMethod = resolveInstanceMethod(
+                    currentClassName,
+                    call.name(),
+                    arguments);
+            return emitInstanceCall(
+                    ir,
+                    resolveVariable("this"),
+                    arguments,
+                    instanceMethod,
+                    keepResult,
+                    VirtualMethodTable.isVirtual(instanceMethod.function()));
+        }
         FunctionRecord target = functionsByLabel.get(targetLabel);
         if (target == null)
             throw unsupported("Não foi possível resolver a função chamada '" + call.name() + "'.");
@@ -815,6 +921,168 @@ public final class IRGenerator {
             registerReferenceType(destination, target.returnType());
         }
         return destination;
+    }
+
+    private Operand emitMemberCall(IRProgram ir, MemberCallRecord call, boolean keepResult) {
+        Operand receiver = expression(ir, call.receiver());
+        String receiverClass = sourceTypesByOperand.get(receiver);
+        if (receiverClass == null) {
+            receiverClass = referenceTypesByOperand.get(receiver);
+        }
+        if (receiverClass == null || !classes.containsKey(receiverClass)) {
+            throw unsupported("Não foi possível determinar a classe do receptor de '"
+                    + call.name() + "'.");
+        }
+        List<Operand> arguments = new ArrayList<>();
+        for (ExpressionInterface argument : call.arguments()) {
+            arguments.add(expression(ir, argument));
+        }
+        ResolvedMethod method = resolveInstanceMethod(receiverClass, call.name(), arguments);
+        return emitInstanceCall(ir, receiver, arguments, method, keepResult,
+                VirtualMethodTable.isVirtual(method.function()));
+    }
+
+    private Operand emitThisCall(IRProgram ir, ThisCallRecord call, boolean keepResult) {
+        Operand receiver = resolveVariable("this");
+        if (receiver == null) {
+            throw unsupported("this só pode ser usado em um método de instância.");
+        }
+        List<Operand> arguments = new ArrayList<>();
+        for (ExpressionInterface argument : call.arguments()) {
+            arguments.add(expression(ir, argument));
+        }
+        ResolvedMethod method = resolveInstanceMethod(currentClassName, call.name(), arguments);
+        return emitInstanceCall(ir, receiver, arguments, method, keepResult,
+                VirtualMethodTable.isVirtual(method.function()));
+    }
+
+    private Operand emitSuperCall(IRProgram ir, SuperCallRecord call, boolean keepResult) {
+        ClassRecord current = classes.get(currentClassName);
+        String parentName = current == null ? null : current.superClass();
+        Operand receiver = resolveVariable("this");
+        if (parentName == null || receiver == null) {
+            throw unsupported("super só pode chamar um método pai dentro de método de instância.");
+        }
+        List<Operand> arguments = new ArrayList<>();
+        for (ExpressionInterface argument : call.arguments()) {
+            arguments.add(expression(ir, argument));
+        }
+        ResolvedMethod method = resolveInstanceMethod(parentName, call.name(), arguments);
+        return emitInstanceCall(ir, receiver, arguments, method, keepResult, false);
+    }
+
+    private Operand emitInstanceCall(
+            IRProgram ir,
+            Operand receiver,
+            List<Operand> arguments,
+            ResolvedMethod method,
+            boolean keepResult,
+            boolean virtual) {
+        FunctionRecord function = method.function();
+        if (arguments.size() != function.parameters().size()) {
+            throw unsupported("Quantidade de argumentos incompatível para '" + function.name() + "'.");
+        }
+        List<Operand> convertedArguments = new ArrayList<>();
+        for (int index = 0; index < arguments.size(); index++) {
+            convertedArguments.add(coerce(
+                    ir,
+                    arguments.get(index),
+                    typeOf(function.parameters().get(index).type())));
+        }
+        boolean returnsVoid = function.returnType().name().equals("void");
+        if (keepResult && returnsVoid) {
+            throw unsupported("Uma função void não pode ser usada como expressão.");
+        }
+        Operand destination = keepResult
+                ? Operand.temporary("t" + nextTemp++, typeOf(function.returnType()))
+                : null;
+        if (virtual) {
+            ir.add(new IRInstruction(
+                    IROpCode.CALL_VIRTUAL,
+                    destination,
+                    receiver,
+                    Operand.constant(virtualMethodTable.slot(function), Operand.Type.I32),
+                    convertedArguments));
+        } else {
+            List<Operand> allArguments = new ArrayList<>(convertedArguments.size() + 1);
+            allArguments.add(receiver);
+            allArguments.addAll(convertedArguments);
+            ir.add(new IRInstruction(
+                    IROpCode.CALL,
+                    destination,
+                    Operand.label(functionLabel(method.owner(), function)),
+                    null,
+                    allArguments));
+        }
+        if (destination != null) {
+            registerReferenceType(destination, function.returnType());
+        }
+        return destination;
+    }
+
+    private ResolvedMethod resolveInstanceMethod(
+            String className,
+            String methodName,
+            List<Operand> arguments) {
+        List<ResolvedMethod> candidates = new ArrayList<>();
+        java.util.Set<String> seenSignatures = new java.util.HashSet<>();
+        ClassRecord owner = classes.get(className);
+        while (owner != null) {
+            for (FunctionRecord function : owner.functions()) {
+                if (!function.name().equals(methodName) || function.isStatic()) {
+                    continue;
+                }
+                String signature = VirtualMethodTable.signature(function);
+                if (seenSignatures.add(signature)) {
+                    candidates.add(new ResolvedMethod(owner, function));
+                }
+            }
+            owner = owner.superClass() == null ? null : classes.get(owner.superClass());
+        }
+
+        ResolvedMethod best = null;
+        int bestScore = Integer.MAX_VALUE;
+        boolean ambiguous = false;
+        for (ResolvedMethod candidate : candidates) {
+            FunctionRecord function = candidate.function();
+            if (function.parameters().size() != arguments.size()) {
+                continue;
+            }
+            int score = 0;
+            boolean applicable = true;
+            for (int index = 0; index < arguments.size(); index++) {
+                Operand.Type actual = arguments.get(index).type();
+                Operand.Type expected = typeOf(function.parameters().get(index).type());
+                if (actual == expected) {
+                    continue;
+                }
+                if (actual == Operand.Type.I32 && expected == Operand.Type.I64) {
+                    score++;
+                } else if (isInteger(actual) && expected == Operand.Type.F64) {
+                    score += actual == Operand.Type.I32 ? 2 : 1;
+                } else {
+                    applicable = false;
+                    break;
+                }
+            }
+            if (!applicable) {
+                continue;
+            }
+            if (score < bestScore) {
+                best = candidate;
+                bestScore = score;
+                ambiguous = false;
+            } else if (score == bestScore) {
+                ambiguous = true;
+            }
+        }
+        if (ambiguous) {
+            throw unsupported("Chamada ambígua do método '" + methodName + "'.");
+        }
+        if (best == null) {
+            throw unsupported("Método de instância não encontrado: " + className + "." + methodName + ".");
+        }
+        return best;
     }
 
     private String resolveCallTarget(CallRecord call, List<Operand> arguments) {

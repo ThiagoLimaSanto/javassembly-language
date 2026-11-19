@@ -68,8 +68,8 @@ public class ObjectLayout {
         }
 
         List<FieldLayout> fields = new ArrayList<>();
-        int currentOffset = 0;
-        int classAlignment = 1;
+        int currentOffset = 8;
+        int classAlignment = 8;
 
         String parentName = classNode.superClass();
         if (parentName != null && !parentName.equals("Object")) {
