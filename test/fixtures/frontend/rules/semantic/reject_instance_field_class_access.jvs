@@ -1,0 +1,10 @@
+class InstanceFieldOwner {
+    public int value = 3;
+}
+
+public class SemanticRejectInstanceFieldClassAccess {
+    public static func void main(String[] args) {
+        int result = InstanceFieldOwner.value;
+        return;
+    }
+}

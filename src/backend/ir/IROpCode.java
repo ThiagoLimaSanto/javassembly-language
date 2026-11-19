@@ -35,6 +35,8 @@ public enum IROpCode {
 
     LOAD_FIELD,
     STORE_FIELD,
+    LOAD_STATIC,
+    STORE_STATIC,
     ALLOC_OBJECT,
     FREE_OBJECT,
     ALLOC_ARRAY,

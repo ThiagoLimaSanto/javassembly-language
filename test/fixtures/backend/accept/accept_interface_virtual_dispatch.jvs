@@ -1,0 +1,43 @@
+public interface ValueProvider {
+    public func int value();
+}
+
+public class FirstValueProvider implements ValueProvider {
+    public func int value() {
+        return 17;
+    }
+}
+
+public class SecondValueProvider implements ValueProvider {
+    public func int value() {
+        return 29;
+    }
+}
+
+public class ValueHolder {
+    ValueProvider provider;
+
+    public ValueHolder(ValueProvider provider) {
+        this.provider = provider;
+    }
+
+    public func int readValue() {
+        return this.provider.value();
+    }
+}
+
+public class InterfaceVirtualDispatchTest {
+    public static func void main(String[] args) {
+        ValueProvider provider = new FirstValueProvider();
+        printLn provider.value();
+
+        provider = new SecondValueProvider();
+        printLn provider.value();
+
+        ValueHolder holder = new ValueHolder(provider);
+        printLn holder.readValue();
+
+        free(holder);
+        return;
+    }
+}

@@ -1,0 +1,11 @@
+class StaticFieldOwner {
+    public static int value = 3;
+}
+
+public class SemanticStaticFieldAccess {
+    public static func void main(String[] args) {
+        StaticFieldOwner.value = add StaticFieldOwner.value, 4;
+        int result = StaticFieldOwner.value;
+        return;
+    }
+}

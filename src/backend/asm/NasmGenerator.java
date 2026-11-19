@@ -11,6 +11,9 @@ import src.backend.ir.IROpCode;
 import src.backend.ir.IRProgram;
 import src.backend.ir.Operand;
 import src.backend.memory.VirtualMethodTable;
+import src.backend.memory.StaticFieldSupport;
+import src.ast.records.AttributeRecord;
+import src.ast.records.ClassRecord;
 import src.ast.records.ProgramRecord;
 
 public class NasmGenerator {
@@ -24,13 +27,16 @@ public class NasmGenerator {
     private int nextXmmParameter;
     private int nextFreeLabel;
     private final VirtualMethodTable virtualMethodTable;
+    private final ProgramRecord sourceProgram;
 
     public NasmGenerator() {
         this.virtualMethodTable = null;
+        this.sourceProgram = null;
     }
 
     public NasmGenerator(ProgramRecord program) {
         this.virtualMethodTable = new VirtualMethodTable(program);
+        this.sourceProgram = program;
     }
 
     public String generate(IRProgram program) {
@@ -137,6 +143,7 @@ public class NasmGenerator {
         asm.append("__f64_round: dq 0x3fe0000000000000\n\n");
         appendVirtualTables(asm);
         asm.append("section .bss\n");
+        appendStaticStorage(asm);
         asm.append("__heap_start: resq 1\n");
         asm.append("__heap_end: resq 1\n");
         asm.append("__number_buffer: resb 32\n\n");
@@ -153,6 +160,21 @@ public class NasmGenerator {
         asm.append("__scanner_double_digits: resq 1\n");
         asm.append("__scanner_double_fraction_digits: resq 1\n\n");
         asm.append("section .text\n\n");
+    }
+
+    private void appendStaticStorage(StringBuilder asm) {
+        if (sourceProgram == null) return;
+        for (ClassRecord classNode : sourceProgram.classes()) {
+            for (AttributeRecord attribute : classNode.attributes()) {
+                if (!attribute.isStatic()) continue;
+                int size = StaticFieldSupport.sizeOf(attribute.type().name());
+                int alignment = Math.min(size, 8);
+                asm.append("align ").append(alignment).append('\n')
+                        .append(StaticFieldSupport.label(classNode.name(), attribute.name()))
+                        .append(": resb ").append(size).append('\n');
+            }
+        }
+        asm.append('\n');
     }
 
     private void appendVirtualTables(StringBuilder asm) {
@@ -288,6 +310,7 @@ public class NasmGenerator {
         asm.append("global _start\n");
         asm.append("_start:\n");
         asm.append("    xor ebp, ebp\n");
+        asm.append("    call __JVS.static_init__void__ret_void\n");
         asm.append("    lea rdi, [rsp+8]\n");
         asm.append("    call ").append(entryFunction).append("\n");
         asm.append("    xor edi, edi\n");
@@ -423,6 +446,10 @@ public class NasmGenerator {
             case LOAD_FIELD -> emitFieldLoad(asm, instruction);
 
             case STORE_FIELD -> emitFieldStore(asm, instruction);
+
+            case LOAD_STATIC -> emitStaticLoad(asm, instruction);
+
+            case STORE_STATIC -> emitStaticStore(asm, instruction);
 
             case ALLOC_OBJECT -> emitObjectAllocation(asm, instruction);
 
@@ -1251,6 +1278,66 @@ public class NasmGenerator {
             default -> throw new UnsupportedOperationException(
                     "Tipo não suportado em STORE_FIELD: " + value.type());
         }
+    }
+
+    private void emitStaticStore(StringBuilder asm, IRInstruction instruction) {
+        String label = staticLabel(instruction.left());
+        if (instruction.arguments().size() != 1) {
+            throw new IllegalArgumentException("STORE_STATIC exige exatamente um valor.");
+        }
+        Operand value = instruction.arguments().get(0);
+        switch (value.type()) {
+            case BOOL -> {
+                loadI32(asm, value, "eax");
+                asm.append("    mov byte [rel ").append(label).append("], al\n");
+            }
+            case I32 -> {
+                loadI32(asm, value, "eax");
+                asm.append("    mov dword [rel ").append(label).append("], eax\n");
+            }
+            case I64, REF -> {
+                loadI64(asm, value, "rax");
+                asm.append("    mov qword [rel ").append(label).append("], rax\n");
+            }
+            case F64 -> {
+                loadF64(asm, value, "xmm0");
+                asm.append("    movsd qword [rel ").append(label).append("], xmm0\n");
+            }
+            default -> throw new UnsupportedOperationException(
+                    "Tipo não suportado em STORE_STATIC: " + value.type());
+        }
+    }
+
+    private void emitStaticLoad(StringBuilder asm, IRInstruction instruction) {
+        String label = staticLabel(instruction.left());
+        Operand destination = instruction.destination();
+        switch (destination.type()) {
+            case BOOL -> {
+                asm.append("    movzx eax, byte [rel ").append(label).append("]\n");
+                storeI32(asm, destination, "eax");
+            }
+            case I32 -> {
+                asm.append("    mov eax, dword [rel ").append(label).append("]\n");
+                storeI32(asm, destination, "eax");
+            }
+            case I64, REF -> {
+                asm.append("    mov rax, qword [rel ").append(label).append("]\n");
+                storeI64(asm, destination, "rax");
+            }
+            case F64 -> {
+                asm.append("    movsd xmm0, qword [rel ").append(label).append("]\n");
+                storeF64(asm, destination, "xmm0");
+            }
+            default -> throw new UnsupportedOperationException(
+                    "Tipo não suportado em LOAD_STATIC: " + destination.type());
+        }
+    }
+
+    private String staticLabel(Operand operand) {
+        if (operand == null || operand.kind() != Operand.Kind.LABEL) {
+            throw new IllegalArgumentException("A operação static exige um label de armazenamento.");
+        }
+        return operand.value().toString();
     }
 
     private void emitFieldLoad(StringBuilder asm, IRInstruction instruction) {

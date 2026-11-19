@@ -1224,7 +1224,11 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private ClassRecord resolveStaticClassReceiver(MemberCallRecord call) {
-        if (!(call.receiver() instanceof VariableRecord variable)
+        return resolveStaticClassReceiver(call.receiver());
+    }
+
+    private ClassRecord resolveStaticClassReceiver(ExpressionInterface receiver) {
+        if (!(receiver instanceof VariableRecord variable)
                 || findLocalVariable(variable.name()) != null
                 || findInheritedAttribute(currentClass, variable.name()) != null) {
             return null;
@@ -1241,6 +1245,33 @@ public class SemanticAnalyzer implements ASTVisitor {
                     variable.column());
         }
         return matches.isEmpty() ? null : matches.get(0);
+    }
+
+    private AttributeRecord resolveStaticClassAttribute(
+            ClassRecord receiverClass,
+            MemberAccessRecord access) {
+        ClassRecord owner = receiverClass;
+        Set<String> visited = new HashSet<>();
+        while (owner != null && visited.add(owner.name())) {
+            for (AttributeRecord attribute : owner.attributes()) {
+                if (!attribute.name().equals(access.name())) continue;
+                if (!attribute.isStatic()) {
+                    throw new SemanticException(
+                            "O atributo de instância '" + access.name()
+                                    + "' não pode ser acessado pela classe.",
+                            access.line(), access.column());
+                }
+                validateMemberVisibility(
+                        attribute.visibility(), owner.name(), access.name(), receiverClass.name(),
+                        access.line(), access.column());
+                return attribute;
+            }
+            owner = owner.superClass() == null ? null : classes.get(owner.superClass());
+        }
+        throw new SemanticException(
+                "A classe '" + receiverClass.name() + "' não possui o atributo static '"
+                        + access.name() + "'.",
+                access.line(), access.column());
     }
 
     private FunctionRecord resolveStaticClassMethod(
@@ -2458,6 +2489,10 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         if (expression instanceof MemberAccessRecord access) {
+            ClassRecord staticReceiver = resolveStaticClassReceiver(access.receiver());
+            if (staticReceiver != null) {
+                return convertType(resolveStaticClassAttribute(staticReceiver, access).type());
+            }
             SemanticType receiverType = getExpressionType(access.receiver());
             if (receiverType.isArray() && access.name().equals("length")) {
                 return SemanticType.primitive(TokenType.INT);
@@ -3893,14 +3928,18 @@ public class SemanticAnalyzer implements ASTVisitor {
                         node.column());
             }
         } else if (node.target() instanceof MemberAccessRecord memberAccess) {
-            SemanticType receiverType = getExpressionType(memberAccess.receiver());
-            if (receiverType.isArray() && memberAccess.name().equals("length")) {
+            ClassRecord staticReceiver = resolveStaticClassReceiver(memberAccess.receiver());
+            SemanticType receiverType = staticReceiver == null
+                    ? getExpressionType(memberAccess.receiver()) : null;
+            if (receiverType != null && receiverType.isArray() && memberAccess.name().equals("length")) {
                 throw new SemanticException(
                         "A propriedade length de um array não pode ser modificada.",
                         node.line(),
                         node.column());
             }
-            AttributeRecord attribute = resolveObjectAttribute(memberAccess);
+            AttributeRecord attribute = staticReceiver == null
+                    ? resolveObjectAttribute(memberAccess)
+                    : resolveStaticClassAttribute(staticReceiver, memberAccess);
 
             if (attribute.isFinal()) {
                 throw new SemanticException(

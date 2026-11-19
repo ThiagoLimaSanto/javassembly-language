@@ -1,0 +1,33 @@
+class SharedStaticState {
+    public static int value = 11;
+}
+
+class DerivedStaticState extends SharedStaticState {
+}
+
+public class StaticFields {
+    public static int count = 5;
+    public static long total = 3000000002L;
+    public static double ratio = 2.5;
+    public static boolean enabled = True;
+    public static String message = "ready";
+
+    public static func void update() {
+        count = add count, 2;
+        StaticFields.total = add StaticFields.total, 1L;
+        return;
+    }
+
+    public static func void main(String[] args) {
+        update();
+        printLn count;
+        printLn total;
+        printLn ratio;
+        printLn enabled;
+        printLn message;
+        printLn DerivedStaticState.value;
+        DerivedStaticState.value = 13;
+        printLn SharedStaticState.value;
+        return;
+    }
+}

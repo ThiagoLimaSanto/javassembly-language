@@ -829,7 +829,7 @@ public class IROptimizer {
     private boolean isHeapMutation(IROpCode opcode) {
         return switch (opcode) {
             case CALL, CALL_VIRTUAL, ALLOC_OBJECT, FREE_OBJECT, ALLOC_ARRAY, FREE_ARRAY,
-                    STORE_FIELD, STORE_ARRAY -> true;
+                    STORE_FIELD, STORE_STATIC, STORE_ARRAY -> true;
             default -> false;
         };
     }

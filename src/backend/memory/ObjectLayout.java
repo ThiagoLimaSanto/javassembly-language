@@ -5,6 +5,8 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 import src.ast.records.AttributeRecord;
 import src.ast.records.ClassRecord;
@@ -36,13 +38,16 @@ public class ObjectLayout {
     public Map<String, ClassLayout> calculate(ProgramRecord program) {
         Map<String, ClassRecord> classesByName = new LinkedHashMap<>();
         Map<String, ClassLayout> layouts = new LinkedHashMap<>();
+        Set<String> interfaceNames = program.interfaces().stream()
+                .map(interfaceNode -> interfaceNode.name())
+                .collect(Collectors.toSet());
 
         for (ClassRecord classNode : program.classes()) {
             classesByName.put(classNode.name(), classNode);
         }
 
         for (ClassRecord classNode : program.classes()) {
-            calculate(classNode, classesByName, layouts);
+            calculate(classNode, classesByName, interfaceNames, layouts);
         }
 
         return Collections.unmodifiableMap(layouts);
@@ -54,12 +59,13 @@ public class ObjectLayout {
                     "Para calcular uma classe com herança, use calculate(ProgramRecord).");
         }
         Map<String, ClassRecord> classesByName = Map.of(classNode.name(), classNode);
-        return calculate(classNode, classesByName, new LinkedHashMap<>());
+        return calculate(classNode, classesByName, Set.of(), new LinkedHashMap<>());
     }
 
     private ClassLayout calculate(
             ClassRecord classNode,
             Map<String, ClassRecord> classesByName,
+            Set<String> interfaceNames,
             Map<String, ClassLayout> layouts) {
         String className = classNode.name();
         ClassLayout cached = layouts.get(className);
@@ -80,7 +86,7 @@ public class ObjectLayout {
                                 + className + "'.");
             }
 
-            ClassLayout parentLayout = calculate(parent, classesByName, layouts);
+            ClassLayout parentLayout = calculate(parent, classesByName, interfaceNames, layouts);
             fields.addAll(parentLayout.fields());
             currentOffset = parentLayout.size();
             classAlignment = parentLayout.alignment();
@@ -96,7 +102,7 @@ public class ObjectLayout {
 
             TypeInfo info = types.get(type);
 
-            if (info == null && classesByName.containsKey(type)) {
+            if (info == null && (classesByName.containsKey(type) || interfaceNames.contains(type))) {
                 info = new TypeInfo(8, 8);
             }
 

@@ -1,0 +1,37 @@
+public interface BaseCounter {
+    public func int value();
+
+    default func int adjustedValue() {
+        return add this.value(), 1;
+    }
+}
+
+public interface Counter extends BaseCounter {
+}
+
+public class ConcreteCounter implements Counter {
+    public func int value() {
+        return 41;
+    }
+}
+
+public class OverriddenCounter implements Counter {
+    public func int value() {
+        return 41;
+    }
+
+    public func int adjustedValue() {
+        return 99;
+    }
+}
+
+public class InterfaceDefaultMethodTest {
+    public static func void main(String[] args) {
+        Counter counter = new ConcreteCounter();
+        printLn counter.adjustedValue();
+
+        counter = new OverriddenCounter();
+        printLn counter.adjustedValue();
+        return;
+    }
+}
