@@ -404,6 +404,7 @@ public class IROptimizer {
                 while (next < instructions.size()
                         && instructions.get(next).opCode() == IROpCode.LABEL
                         && instructions.get(next).destination() != null) {
+                    if (isFunctionLabel(instructions.get(next))) break;
                     if (target.equals(instructions.get(next).destination().value().toString())) {
                         instruction = null;
                         break;

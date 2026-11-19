@@ -3879,7 +3879,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(ThrowRecord node) {
         SemanticType thrown = getExpressionType(node.expression());
-        if (!thrown.isClass() || !isSubclassOf(thrown.className(), "Throwable")) {
+        if (!thrown.isClass() || !hasThrowableAncestor(thrown.className())) {
             throw new SemanticException("throw exige um objeto cuja classe estenda Throwable.",
                     node.line(), node.column());
         }
@@ -3898,7 +3898,7 @@ public class SemanticAnalyzer implements ASTVisitor {
         for (CatchRecord handler : node.catches()) {
             validateTypeExists(handler.type(), false, handler.line(), handler.column());
             SemanticType catchType = convertType(handler.type());
-            if (!catchType.isClass() || !isSubclassOf(catchType.className(), "Throwable")) {
+            if (!catchType.isClass() || !hasThrowableAncestor(catchType.className())) {
                 throw new SemanticException("O tipo do catch deve estender Throwable.",
                         handler.line(), handler.column());
             }
@@ -3932,6 +3932,11 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (node.finallyBlock() != null) {
             node.finallyBlock().accept(this);
         }
+    }
+
+    private boolean hasThrowableAncestor(String className) {
+        return getAssignableTypes(className).stream()
+                .anyMatch(type -> type.equals("Throwable") || type.endsWith(".Throwable"));
     }
 
 

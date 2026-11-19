@@ -348,6 +348,16 @@ public class NasmGenerator {
         asm.append("    xor edi, edi\n");
         asm.append("    mov eax, 60\n");
         asm.append("    syscall\n");
+        asm.append("__uncaught_exception:\n");
+        asm.append("    mov eax, 1\n");
+        asm.append("    mov edi, 2\n");
+        asm.append("    lea rsi, [rel __uncaught_exception_message]\n");
+        asm.append("    mov edx, __uncaught_exception_message_length\n");
+        asm.append("    syscall\n");
+        asm.append("    mov eax, 60\n");
+        asm.append("    mov edi, 1\n");
+        asm.append("    syscall\n");
+        asm.append("    ud2\n");
     }
 
     private void emitFunction(
