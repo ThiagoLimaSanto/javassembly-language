@@ -61,11 +61,13 @@ public class NasmGenerator {
     private int nextFreeLabel;
     private final VirtualMethodTable virtualMethodTable;
     private final ProgramRecord sourceProgram;
+    private final Map<String, ClassRecord> sourceClassesByName;
     private final TargetPlatform target;
 
     public NasmGenerator() {
         this.virtualMethodTable = null;
         this.sourceProgram = null;
+        this.sourceClassesByName = Map.of();
         this.target = TargetPlatform.LINUX_X64;
     }
 
@@ -76,6 +78,11 @@ public class NasmGenerator {
     public NasmGenerator(ProgramRecord program, TargetPlatform target) {
         this.virtualMethodTable = new VirtualMethodTable(program);
         this.sourceProgram = program;
+        Map<String, ClassRecord> classesByName = new LinkedHashMap<>();
+        for (ClassRecord classRecord : program.classes()) {
+            classesByName.put(classRecord.name(), classRecord);
+        }
+        this.sourceClassesByName = Map.copyOf(classesByName);
         this.target = target;
     }
 
@@ -1919,10 +1926,7 @@ public class NasmGenerator {
     }
 
     private ClassRecord findSourceClass(String name) {
-        if (sourceProgram == null) return null;
-        return sourceProgram.classes().stream()
-                .filter(candidate -> candidate.name().equals(name))
-                .findFirst().orElse(null);
+        return sourceClassesByName.get(name);
     }
 
     private boolean isPrimitiveArrayComponent(String type) {
@@ -2512,10 +2516,11 @@ public class NasmGenerator {
 
     private String findThrowableClassName() {
         if (sourceProgram == null) return null;
-        return sourceProgram.classes().stream()
-                .map(ClassRecord::name)
-                .filter(name -> name.equals("Throwable") || name.endsWith(".Throwable"))
-                .findFirst().orElse(null);
+        for (ClassRecord classRecord : sourceProgram.classes()) {
+            String name = classRecord.name();
+            if (name.equals("Throwable") || name.endsWith(".Throwable")) return name;
+        }
+        return null;
     }
 
     private boolean isClassSubtype(ClassRecord candidate, String targetName) {
@@ -2523,10 +2528,7 @@ public class NasmGenerator {
         while (current != null) {
             if (current.equals(targetName)) return true;
             if (BuiltinExceptionTypes.isSubtype(current, targetName)) return true;
-            String currentName = current;
-            ClassRecord node = sourceProgram.classes().stream()
-                    .filter(type -> type.name().equals(currentName))
-                    .findFirst().orElse(null);
+            ClassRecord node = sourceClassesByName.get(current);
             current = node == null ? null : node.superClass();
         }
         return false;

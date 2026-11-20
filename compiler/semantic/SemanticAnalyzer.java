@@ -37,6 +37,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     private final Map<String, InterfaceRecord> interfaces = new HashMap<>();
     private final Map<String, SemanticType> registers = new HashMap<>();
     private final Map<String, Set<String>> assignableTypes = new HashMap<>();
+    private final Map<String, List<InterfaceRecord>> interfaceHierarchies = new HashMap<>();
     private final Map<String, SemanticType> convertedTypes = new HashMap<>();
     private final Deque<Set<String>> activeCatchTypes = new ArrayDeque<>();
     private final Deque<List<ThrownTypeCandidate>> activeTryExceptionTypes = new ArrayDeque<>();
@@ -270,10 +271,12 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private List<InterfaceRecord> interfaceHierarchy(String interfaceName) {
-        List<InterfaceRecord> result = new ArrayList<>();
-        Set<String> visited = new HashSet<>();
-        collectInterfaceHierarchy(interfaceName, visited, result);
-        return result;
+        return interfaceHierarchies.computeIfAbsent(interfaceName, name -> {
+            List<InterfaceRecord> result = new ArrayList<>();
+            Set<String> visited = new HashSet<>();
+            collectInterfaceHierarchy(name, visited, result);
+            return List.copyOf(result);
+        });
     }
 
     private void collectInterfaceHierarchy(

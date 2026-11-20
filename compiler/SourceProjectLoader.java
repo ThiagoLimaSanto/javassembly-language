@@ -11,6 +11,7 @@ import java.util.Set;
 import java.util.HashMap;
 import java.util.Comparator;
 import java.util.stream.Stream;
+import java.util.regex.Pattern;
 
 import compiler.ast.records.ClassRecord;
 import compiler.ast.records.InterfaceRecord;
@@ -22,10 +23,16 @@ import compiler.exceptions.SourceProjectException;
 import compiler.lexer.TokenType;
 
 final class SourceProjectLoader {
+    private static final Pattern QUALIFIED_NAME_PATTERN = Pattern.compile(
+            "\\b([\\p{javaJavaIdentifierStart}][\\p{javaJavaIdentifierPart}]*"
+                    + "(?:\\.[\\p{javaJavaIdentifierStart}][\\p{javaJavaIdentifierPart}]*)+)\\b");
+
     private final Path libraryRoot = Path.of(System.getProperty(
             "javassembly.libraryRoot", "lib")).toAbsolutePath().normalize();
     private final Set<Path> loadedFiles = new HashSet<>();
     private final Map<Path, ProgramRecord> parsedFiles = new HashMap<>();
+    private final Map<Path, Set<String>> declaredTypesByFile = new HashMap<>();
+    private final Map<String, Pattern> sourceMentionPatterns = new HashMap<>();
     private final List<ClassRecord> classes = new ArrayList<>();
     private final List<InterfaceRecord> interfaces = new ArrayList<>();
     private final List<RegisterDeclarationRecord> registers = new ArrayList<>();
@@ -117,10 +124,7 @@ final class SourceProjectLoader {
 
 
 
-        java.util.regex.Matcher qualifiedNames = java.util.regex.Pattern
-                .compile("\\b([\\p{javaJavaIdentifierStart}][\\p{javaJavaIdentifierPart}]*"
-                        + "(?:\\.[\\p{javaJavaIdentifierStart}][\\p{javaJavaIdentifierPart}]*)+)\\b")
-                .matcher(readSource(normalizedFile));
+        java.util.regex.Matcher qualifiedNames = QUALIFIED_NAME_PATTERN.matcher(readSource(normalizedFile));
         while (qualifiedNames.find()) {
             String candidate = qualifiedNames.group(1);
             if (candidate.startsWith("static:")) continue;
@@ -196,13 +200,25 @@ final class SourceProjectLoader {
                                 || sourceMentionsTypeFile(source, path))
                         .sorted(Comparator.comparing(path -> path.getFileName().toString()))
                         .toList()) {
-                    ProgramRecord sourceUnit = parse(readSource(sourceFile));
-                    sourceUnit.classes().forEach(type -> typeNames.add(type.name()));
-                    sourceUnit.interfaces().forEach(type -> typeNames.add(type.name()));
+                    typeNames.addAll(declaredTypes(sourceFile));
                 }
             }
         }
         return typeNames;
+    }
+
+    private Set<String> declaredTypes(Path sourceFile) throws IOException {
+        Path normalizedFile = sourceFile.toAbsolutePath().normalize();
+        Set<String> cached = declaredTypesByFile.get(normalizedFile);
+        if (cached != null) return cached;
+
+        ProgramRecord sourceUnit = parse(readSource(normalizedFile));
+        Set<String> declared = new HashSet<>();
+        sourceUnit.classes().forEach(type -> declared.add(type.name()));
+        sourceUnit.interfaces().forEach(type -> declared.add(type.name()));
+        Set<String> immutable = Set.copyOf(declared);
+        declaredTypesByFile.put(normalizedFile, immutable);
+        return immutable;
     }
 
     private void loadPackageSources(Path packageDirectory) throws IOException {
@@ -325,8 +341,8 @@ final class SourceProjectLoader {
     private boolean sourceMentionsTypeFile(String source, Path sourceFile) {
         String fileName = sourceFile.getFileName().toString();
         String typeName = fileName.substring(0, fileName.length() - ".jvs".length());
-        return java.util.regex.Pattern.compile("\\b"
-                + java.util.regex.Pattern.quote(typeName) + "\\b")
+        return sourceMentionPatterns.computeIfAbsent(typeName, name -> Pattern.compile("\\b"
+                + Pattern.quote(name) + "\\b"))
                 .matcher(source)
                 .find();
     }

@@ -5,13 +5,93 @@ O frontend, a IR e as otimizações são compartilhados; o destino é escolhido 
 
 ## Requisitos
 
-Em qualquer sistema, instale um JDK com `javac` e o NASM.
+O compilador JavaAssembly precisa de JDK 17 ou superior e do NASM. Para gerar um
+executável, também precisa do linker do sistema de destino.
 
-Para compilar para Linux, também é necessário GNU `ld`.
+## Tutorial: instalar os requisitos
 
-Para compilar para Windows, é necessário `link.exe` com o Windows SDK e `kernel32.lib`
-no Windows. No Linux, instale o linker cruzado MinGW-w64 x86-64 e sua biblioteca
-`kernel32` (`x86_64-w64-mingw32-ld`).
+### Ubuntu ou Debian: compilar para Linux
+
+Abra o terminal e instale o JDK, o NASM e o GNU linker:
+
+```bash
+sudo apt update
+sudo apt install openjdk-17-jdk nasm binutils
+```
+
+Confirme que os comandos estão disponíveis:
+
+```bash
+java -version
+javac -version
+nasm -v
+ld --version
+```
+
+Com esses requisitos, o Linux pode gerar executáveis Linux usando `jvsc -l`.
+
+### Ubuntu ou Debian: gerar executáveis Windows
+
+Para compilar um `.exe` a partir do Linux, instale o linker cruzado e as bibliotecas
+de importação do MinGW-w64:
+
+```bash
+sudo apt install binutils-mingw-w64-x86-64 mingw-w64-x86-64-dev
+```
+
+Confirme o linker:
+
+```bash
+x86_64-w64-mingw32-ld --version
+```
+
+Depois use `jvsc -w`. O arquivo `.exe` gerado pode ser executado no Windows; no Linux,
+é necessário ter Wine para executá-lo com `jvs -w`. Os pacotes correspondem ao
+[OpenJDK 17 do Ubuntu](https://packages.ubuntu.com/openjdk-17-jdk), ao
+[NASM](https://packages.ubuntu.com/nasm) e ao [linker MinGW-w64 x86-64](https://packages.ubuntu.com/binutils-mingw-w64-x86-64).
+
+### Windows: compilar para Windows
+
+1. Instale um JDK 17 ou superior. Com WinGet, por exemplo:
+
+   ```powershell
+   winget install --id Microsoft.OpenJDK.25 --exact
+   ```
+
+2. Instale o NASM. Com WinGet:
+
+   ```powershell
+   winget install --id NASM.NASM --exact
+   ```
+
+   Se o comando não encontrar o pacote, baixe o instalador na página oficial do
+   [NASM](https://www.nasm.us/).
+
+3. Instale o [Visual Studio Build Tools](https://learn.microsoft.com/cpp/overview/acquire-msvc?view=msvc-170).
+   No instalador, selecione **Desenvolvimento para desktop com C++**, as ferramentas
+   MSVC para x64/x86 e um Windows SDK. Esse conjunto fornece `link.exe` e `kernel32.lib`.
+
+4. Abra o **Developer PowerShell** ou o **Developer Command Prompt** do Visual Studio.
+   Esse terminal configura o caminho do linker e das bibliotecas do Windows SDK.
+
+5. Verifique as ferramentas:
+
+   ```powershell
+   java -version
+   javac -version
+   nasm -v
+   where.exe link
+   ```
+
+Agora instale o JavaAssembly conforme a seção [Instalação no Windows](#instalação-no-windows)
+e compile com `jvsc -w caminho\para\Arquivo.jvs`.
+
+Para gerar executáveis Linux, use Linux ou WSL e siga as instruções de Ubuntu/Debian.
+
+Os comandos do JDK estão documentados pela Microsoft na página de instalação do
+[Microsoft Build of OpenJDK](https://learn.microsoft.com/java/openjdk/install). O
+passo do MSVC segue a documentação de instalação dos
+[Build Tools C++](https://learn.microsoft.com/cpp/overview/acquire-msvc?view=msvc-170).
 
 ## Instalação no Linux
 
