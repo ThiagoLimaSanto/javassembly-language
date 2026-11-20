@@ -3,9 +3,13 @@
   "displayName": "JavaAssembly",
   "description": "Syntax highlighting and basic editor support for the JavaAssembly language (.jvs).",
   "version": "0.0.1",
+  "main": "./extension.js",
   "engines": {
     "vscode": "^1.146.0"
   },
+  "activationEvents": [
+    "onLanguage:javassembly"
+  ],
   "categories": [
     "Programming Languages"
   ],
@@ -20,6 +24,16 @@
       "language": "javassembly",
       "scopeName": "source.jvs",
       "path": "./syntaxes/javassembly.tmLanguage.json"
-    }]
+    }],
+    "commands": [
+      {
+        "command": "javassembly.runMain",
+        "title": "JavaAssembly: Run main"
+      },
+      {
+        "command": "javassembly.debugMain",
+        "title": "JavaAssembly: Debug main (GDB)"
+      }
+    ]
   }
 }
