@@ -140,9 +140,9 @@ public final class BackendFixtureTests {
             Process process = execution.start();
             if (closeStdout) process.getInputStream().close();
             int exitCode = process.waitFor();
-            String stdout = closeStdout ? "" : Files.readString(stdoutFile);
-            String stderr = Files.readString(stderrFile);
-            String expected = Files.readString(expectedFile);
+            String stdout = closeStdout ? "" : readNormalizedText(stdoutFile);
+            String stderr = readNormalizedText(stderrFile);
+            String expected = readNormalizedText(expectedFile);
 
             if (shouldRunSuccessfully) {
                 if (exitCode != 0) {
@@ -160,7 +160,7 @@ public final class BackendFixtureTests {
                 }
                 Path expectedStdoutFile = replaceExtension(fixture, ".out");
                 String expectedStdout = Files.isRegularFile(expectedStdoutFile)
-                        ? Files.readString(expectedStdoutFile)
+                        ? readNormalizedText(expectedStdoutFile)
                         : "";
                 if (!stdout.equals(expectedStdout)) {
                     return "stdout mismatch before runtime failure; expected <"
@@ -218,6 +218,10 @@ public final class BackendFixtureTests {
     private static Path replaceExtension(Path path, String extension) {
         String fileName = path.getFileName().toString();
         return path.resolveSibling(fileName.substring(0, fileName.length() - 4) + extension);
+    }
+
+    private static String readNormalizedText(Path path) throws IOException {
+        return Files.readString(path).replace("\r\n", "\n").replace('\r', '\n');
     }
 
     private static void deleteRecursively(Path root) {
