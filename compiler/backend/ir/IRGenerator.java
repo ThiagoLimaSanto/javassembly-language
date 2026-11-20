@@ -38,6 +38,8 @@ import compiler.ast.records.PrintRecord;
 import compiler.ast.records.PrintfRecord;
 import compiler.ast.records.ProgramRecord;
 import compiler.ast.records.ReturnRecord;
+import compiler.ast.records.RegisterDeclarationRecord;
+import compiler.ast.records.RegisterRecord;
 import compiler.ast.records.SuperCallRecord;
 import compiler.ast.records.ThisAttributeRecord;
 import compiler.ast.records.ThisCallRecord;
@@ -78,6 +80,9 @@ public final class IRGenerator {
     private final Map<String, ClassRecord> classes = new HashMap<>();
     private final Map<String, InterfaceRecord> interfaces = new HashMap<>();
     private final Map<String, FunctionRecord> functionsByLabel = new HashMap<>();
+    private final Map<String, String> registerLabels = new HashMap<>();
+    private final Map<String, Operand.Type> registerTypes = new HashMap<>();
+    private final Map<String, String> registerSourceTypes = new HashMap<>();
     private ProgramRecord sourceProgram;
     private VirtualMethodTable virtualMethodTable;
     private int nextTemp;
@@ -110,12 +115,15 @@ public final class IRGenerator {
         classes.clear();
         interfaces.clear();
         functionsByLabel.clear();
+        registerLabels.clear();
+        registerTypes.clear();
+        registerSourceTypes.clear();
         virtualMethodTable = new VirtualMethodTable(ast);
         referenceTypesByOperand.clear();
         sourceTypesByOperand.clear();
 
-        if (!ast.registers().isEmpty()) {
-            throw unsupported("A geração de código ainda não suporta registradores globais.");
+        for (RegisterDeclarationRecord declaration : ast.registers()) {
+            registerLabels.put(declaration.register().name(), globalRegisterLabel(declaration.register().name()));
         }
 
         for (InterfaceRecord interfaceNode : ast.interfaces()) {
@@ -127,11 +135,16 @@ public final class IRGenerator {
                         && !function.isDefault()
                         && !function.isFinal()
                         && !function.isNative();
+                boolean privateHelper = function.visibility() == TokenType.PRIVATE
+                        && !function.isStatic() && !function.isAbstract()
+                        && function.block() != null && !function.isDefault();
                 boolean supportedInstance = !function.isStatic()
-                        && function.visibility() != TokenType.PRIVATE
-                        && ((function.isAbstract() && !function.isDefault() && function.block() == null)
-                                || (!function.isAbstract() && function.isDefault()
-                                        && function.block() != null));
+                        && (privateHelper
+                                || (function.visibility() != TokenType.PRIVATE
+                                        && ((function.isAbstract() && !function.isDefault()
+                                                && function.block() == null)
+                                                || (!function.isAbstract() && function.isDefault()
+                                                        && function.block() != null))));
                 if (!supportedStatic && !supportedInstance) {
                     throw unsupported("Forma de método de interface ainda não suportada: '"
                             + interfaceNode.name() + "." + function.name() + "'.");
@@ -169,7 +182,8 @@ public final class IRGenerator {
         for (InterfaceRecord interfaceNode : ast.interfaces()) {
             currentClassName = interfaceNode.name();
             for (FunctionRecord function : interfaceNode.functions()) {
-                if (!function.isDefault() && !function.isStatic()) {
+                if (!function.isDefault() && !function.isStatic()
+                        && function.visibility() != TokenType.PRIVATE) {
                     continue;
                 }
                 currentFunction = function;
@@ -287,6 +301,19 @@ public final class IRGenerator {
                         Operand.label(StaticFieldSupport.label(classNode.name(), attribute.name())),
                         null, List.of(value)));
             }
+        }
+        currentClassName = null;
+        for (RegisterDeclarationRecord declaration : ast.registers()) {
+            Operand value = expression(ir, declaration.value());
+            String name = declaration.register().name();
+            registerTypes.put(name, value.type());
+            String sourceType = referenceTypeName(value);
+            registerSourceTypes.put(name, sourceType);
+            if (value.type() == Operand.Type.REF) {
+                registerReferenceType(value, new TypeRecord(sourceType));
+            }
+            ir.add(new IRInstruction(IROpCode.STORE_STATIC, null,
+                    Operand.label(registerLabels.get(name)), null, List.of(value)));
         }
         ir.add(new IRInstruction(IROpCode.RETURN, null, null, null));
         variableScopes.clear();
@@ -584,6 +611,13 @@ public final class IRGenerator {
                 + (parameters.isEmpty() ? "void" : String.join("__", parameters));
     }
 
+    private String globalRegisterLabel(String name) {
+        StringBuilder encoded = new StringBuilder("__global_register");
+        name.codePoints().forEach(codePoint -> encoded.append('_')
+                .append(Integer.toHexString(codePoint)));
+        return encoded.toString();
+    }
+
     private void emitStatement(IRProgram ir, StatementInterface statement) {
         if (statement == null) {
             return;
@@ -741,7 +775,18 @@ public final class IRGenerator {
                     object,
                     null));
         } else if (statement instanceof AssignmentRecord assignment) {
-            if (assignment.target() instanceof VariableRecord variable) {
+            if (assignment.target() instanceof RegisterRecord register) {
+                Operand.Type type = registerTypes.get(register.name());
+                String label = registerLabels.get(register.name());
+                if (type == null || label == null) {
+                    throw unsupported("Registrador global não declarado: " + register.name() + ".");
+                }
+                Operand value = assignment.value() instanceof ArrayInitializerRecord initializer
+                        ? emitArrayInitializer(ir, registerSourceTypes.get(register.name()), initializer)
+                        : coerce(ir, expression(ir, assignment.value()), type);
+                ir.add(new IRInstruction(IROpCode.STORE_STATIC, null,
+                        Operand.label(label), null, List.of(value)));
+            } else if (assignment.target() instanceof VariableRecord variable) {
                 Operand destination = resolveVariable(variable.name());
                 ResolvedStaticField staticField = destination == null
                         ? resolveStaticField(currentClassName, variable.name()) : null;
@@ -1020,6 +1065,21 @@ public final class IRGenerator {
             }
             return operand;
         }
+        if (expression instanceof RegisterRecord register) {
+            Operand.Type type = registerTypes.get(register.name());
+            String label = registerLabels.get(register.name());
+            if (type == null || label == null) {
+                throw unsupported("Registrador global não declarado: " + register.name() + ".");
+            }
+            Operand destination = Operand.temporary("t" + nextTemp++, type);
+            ir.add(new IRInstruction(IROpCode.LOAD_STATIC, destination,
+                    Operand.label(label), null));
+            String sourceType = registerSourceTypes.get(register.name());
+            if (type == Operand.Type.REF && sourceType != null) {
+                registerReferenceType(destination, new TypeRecord(sourceType));
+            }
+            return destination;
+        }
         if (expression instanceof ThisRecord) {
             Operand thisOperand = resolveVariable("this");
             if (thisOperand == null) {
@@ -1208,28 +1268,50 @@ public final class IRGenerator {
     private Operand emitArrayCreation(IRProgram ir, ArrayCreationRecord creation) {
         String arrayType = creation.type().name();
         int dimensions = arrayDimensions(arrayType);
-        if (dimensions < 1 || dimensions > 2) {
-            throw unsupported("O backend suporta arrays de até duas dimensões.");
-        }
+        if (dimensions < 1) throw unsupported("Tipo inválido para criação de array.");
         if (creation.initializer() instanceof ArrayInitializerRecord initializer) {
             return emitArrayInitializer(ir, arrayType, initializer);
         }
-        if (dimensions == 2 && creation.dimensions().size() == 2) {
-            String elementType = componentTypeName(componentTypeName(arrayType));
-            if (!elementType.equals("int")) {
-                throw unsupported("A criação retangular de arrays multidimensionais suporta int[][] por enquanto.");
-            }
-            Operand rows = expression(ir, creation.dimensions().get(0));
-            Operand columns = expression(ir, creation.dimensions().get(1));
-            ir.add(new IRInstruction(IROpCode.CHECK_ARRAY_SIZE, null, rows, null));
-            ir.add(new IRInstruction(IROpCode.CHECK_ARRAY_SIZE, null, columns, null));
-            return allocateIntArray2D(ir, arrayType, rows, columns);
+        if (creation.dimensions().isEmpty()) {
+            throw unsupported("A criação do array precisa informar ao menos uma dimensão.");
         }
-        if (creation.dimensions().size() != 1) {
-            throw unsupported("A criação do array precisa informar exatamente uma dimensão.");
+        List<Operand> lengths = creation.dimensions().stream()
+                .map(dimension -> expression(ir, dimension))
+                .toList();
+        for (Operand length : lengths) {
+            ir.add(new IRInstruction(IROpCode.CHECK_ARRAY_SIZE, null, length, null));
         }
-        Operand length = expression(ir, creation.dimensions().get(0));
-        return allocateArray(ir, arrayType, length);
+        return allocateRectangularArray(ir, arrayType, lengths, 0);
+    }
+
+    private Operand allocateRectangularArray(
+            IRProgram ir,
+            String arrayType,
+            List<Operand> dimensions,
+            int depth) {
+        Operand length = dimensions.get(depth);
+        Operand array = allocateArray(ir, arrayType, length);
+        if (depth + 1 >= dimensions.size()) return array;
+
+        String childType = componentTypeName(arrayType);
+        String testLabel = newLabel();
+        String endLabel = newLabel();
+        Operand index = Operand.temporary("t" + nextTemp++, Operand.Type.I32);
+        Operand zero = Operand.constant(0, Operand.Type.I32);
+        ir.add(new IRInstruction(IROpCode.ASSIGN, index, zero, null));
+        ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(testLabel), null, null));
+        Operand condition = Operand.temporary("t" + nextTemp++, Operand.Type.BOOL);
+        ir.add(new IRInstruction(IROpCode.LT, condition, index, length));
+        ir.add(new IRInstruction(IROpCode.JUMP_IF_FALSE, Operand.label(endLabel), condition, null));
+        Operand child = allocateRectangularArray(ir, childType, dimensions, depth + 1);
+        ir.add(new IRInstruction(IROpCode.STORE_ARRAY, null, array, index,
+                List.of(child, Operand.constant(referenceTypeName(child), Operand.Type.REF))));
+        Operand nextIndex = Operand.temporary("t" + nextTemp++, Operand.Type.I32);
+        ir.add(new IRInstruction(IROpCode.ADD, nextIndex, index, Operand.constant(1, Operand.Type.I32)));
+        ir.add(new IRInstruction(IROpCode.ASSIGN, index, nextIndex, null));
+        ir.add(new IRInstruction(IROpCode.JUMP, Operand.label(testLabel), null, null));
+        ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(endLabel), null, null));
+        return array;
     }
 
     private Operand emitArrayInitializer(
@@ -1237,10 +1319,8 @@ public final class IRGenerator {
             String arrayType,
             ArrayInitializerRecord initializer) {
         int dimensions = arrayDimensions(arrayType);
-        if (dimensions < 1 || dimensions > 2) {
-            throw unsupported("O backend suporta arrays de até duas dimensões.");
-        }
-        if (dimensions == 2) {
+        if (dimensions < 1) throw unsupported("Tipo inválido para inicializador de array.");
+        if (dimensions > 1) {
             String rowType = componentTypeName(arrayType);
             Operand array = allocateArray(
                     ir,
@@ -1283,49 +1363,6 @@ public final class IRGenerator {
                     List.of(value, Operand.constant(referenceTypeName(value), Operand.Type.REF))));
         }
         return array;
-    }
-
-    private Operand allocateIntArray2D(
-            IRProgram ir,
-            String arrayType,
-            Operand rows,
-            Operand columns) {
-        Operand result = allocateArray(ir, arrayType, rows);
-        String testLabel = newLabel();
-        String endLabel = newLabel();
-        Operand index = Operand.temporary("t" + nextTemp++, Operand.Type.I32);
-        ir.add(new IRInstruction(
-                IROpCode.ASSIGN,
-                index,
-                Operand.constant(0, Operand.Type.I32),
-                null));
-        ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(testLabel), null, null));
-        Operand condition = Operand.temporary("t" + nextTemp++, Operand.Type.BOOL);
-        ir.add(new IRInstruction(IROpCode.LT, condition, index, rows));
-        ir.add(new IRInstruction(
-                IROpCode.JUMP_IF_FALSE,
-                Operand.label(endLabel),
-                condition,
-                null));
-
-        Operand row = allocateArray(ir, componentTypeName(arrayType), columns);
-        ir.add(new IRInstruction(
-                IROpCode.STORE_ARRAY,
-                null,
-                result,
-                index,
-                List.of(row, Operand.constant(referenceTypeName(row), Operand.Type.REF))));
-
-        Operand nextIndex = Operand.temporary("t" + nextTemp++, Operand.Type.I32);
-        ir.add(new IRInstruction(
-                IROpCode.ADD,
-                nextIndex,
-                index,
-                Operand.constant(1, Operand.Type.I32)));
-        ir.add(new IRInstruction(IROpCode.ASSIGN, index, nextIndex, null));
-        ir.add(new IRInstruction(IROpCode.JUMP, Operand.label(testLabel), null, null));
-        ir.add(new IRInstruction(IROpCode.LABEL, Operand.label(endLabel), null, null));
-        return result;
     }
 
     private Operand allocateArray(IRProgram ir, String arrayType, Operand length) {
@@ -1892,6 +1929,12 @@ public final class IRGenerator {
             List<Operand> arguments,
             boolean keepResult) {
         FunctionRecord method = resolveInterfaceMethod(interfaceName, methodName, arguments);
+        if (method.visibility() == TokenType.PRIVATE) {
+            if (!interfaceName.equals(currentClassName)) {
+                throw unsupported("Método private de interface só pode ser chamado dentro da própria interface.");
+            }
+            return emitPrivateInterfaceCall(ir, receiver, interfaceName, arguments, method, keepResult);
+        }
         return emitInstanceCall(
                 ir,
                 receiver,
@@ -1916,7 +1959,9 @@ public final class IRGenerator {
         }
         for (FunctionRecord function : interfaceNode.functions()) {
             String signature = VirtualMethodTable.signature(function);
-            if (!function.isStatic() && function.name().equals(methodName)
+            if (!function.isStatic()
+                    && (function.visibility() != TokenType.PRIVATE || interfaceName.equals(currentClassName))
+                    && function.name().equals(methodName)
                     && seenSignatures.add(signature)) {
                 candidates.add(function);
             }
@@ -1924,6 +1969,37 @@ public final class IRGenerator {
         for (String parent : interfaceNode.superInterfaces()) {
             collectInterfaceMethods(parent, methodName, visitedInterfaces, seenSignatures, candidates);
         }
+    }
+
+    private Operand emitPrivateInterfaceCall(
+            IRProgram ir,
+            Operand receiver,
+            String ownerName,
+            List<Operand> arguments,
+            FunctionRecord function,
+            boolean keepResult) {
+        if (arguments.size() != function.parameters().size()) {
+            throw unsupported("Quantidade de argumentos incompatível para '" + function.name() + "'.");
+        }
+        List<Operand> convertedArguments = new ArrayList<>(arguments.size());
+        for (int index = 0; index < arguments.size(); index++) {
+            convertedArguments.add(coerce(ir, arguments.get(index),
+                    typeOf(function.parameters().get(index).type())));
+        }
+        if (keepResult && function.returnType().name().equals("void")) {
+            throw unsupported("Uma função void não pode ser usada como expressão.");
+        }
+        Operand destination = keepResult
+                ? Operand.temporary("t" + nextTemp++, typeOf(function.returnType()))
+                : null;
+        List<Operand> allArguments = new ArrayList<>(convertedArguments.size() + 1);
+        allArguments.add(receiver);
+        allArguments.addAll(convertedArguments);
+        ir.add(new IRInstruction(IROpCode.CALL, destination,
+                Operand.label(functionLabel(ownerName, function)), null, allArguments));
+        emitExceptionCheck(ir);
+        if (destination != null) registerReferenceType(destination, function.returnType());
+        return destination;
     }
 
     private Operand emitThisCall(IRProgram ir, ThisCallRecord call, boolean keepResult) {

@@ -58,6 +58,7 @@ public class NasmGenerator {
     private int nextStringLabel;
     private int nextGpParameter;
     private int nextXmmParameter;
+    private int nextStackParameter;
     private int nextFreeLabel;
     private final VirtualMethodTable virtualMethodTable;
     private final ProgramRecord sourceProgram;
@@ -93,7 +94,7 @@ public class NasmGenerator {
         nextFreeLabel = 0;
         StringBuilder asm = new StringBuilder();
         prepareStringLabels(program.instructions());
-        appendHeader(asm);
+        appendHeader(asm, program.instructions());
 
         List<IRInstruction> function = new ArrayList<>();
 
@@ -155,7 +156,7 @@ public class NasmGenerator {
 
         StringBuilder asm = new StringBuilder();
         prepareStringLabels(target);
-        appendHeader(asm);
+        appendHeader(asm, target);
         emitFunction(asm, target);
         appendRuntimeSupport(asm);
         if (!this.target.isWindows()) {
@@ -164,7 +165,7 @@ public class NasmGenerator {
         return asm.toString();
     }
 
-    private void appendHeader(StringBuilder asm) {
+    private void appendHeader(StringBuilder asm, List<IRInstruction> instructions) {
         if (target.isWindows()) {
             WindowsRuntime.appendImports(asm);
         }
@@ -200,10 +201,8 @@ public class NasmGenerator {
         }
         asm.append("__f64_scale: dq 0x412e848000000000\n");
         asm.append("__f64_round: dq 0x3fe0000000000000\n\n");
-        if (target.isWindows()) {
-            asm.append("__jvs_empty_args_array_type: db \"String[]\", 0\n")
-                    .append("__jvs_empty_args_element_type: db \"String\", 0\n");
-        }
+        asm.append("__jvs_main_args_array_type: db \"String[]\", 0\n")
+                .append("__jvs_main_args_element_type: db \"String\", 0\n");
         appendVirtualTables(asm);
         asm.append("section .data\n");
         asm.append("__jvs_array_vtable: dq 0\n");
@@ -223,9 +222,13 @@ public class NasmGenerator {
         }
         asm.append('\n');
         asm.append("section .bss\n");
-        appendStaticStorage(asm);
+        appendStaticStorage(asm, instructions);
         asm.append("__heap_start: resq 1\n");
         asm.append("__heap_end: resq 1\n");
+        if (!target.isWindows()) {
+            asm.append("__jvs_start_argc: resq 1\n")
+                    .append("__jvs_start_argv: resq 1\n");
+        }
         if (target.isWindows()) {
             asm.append("__heap_commit_end: resq 1\n")
                     .append("__heap_reserved_end: resq 1\n");
@@ -381,19 +384,48 @@ public class NasmGenerator {
                 .append("    jmp __runtime_throw_current\n");
     }
 
-    private void appendStaticStorage(StringBuilder asm) {
-        if (sourceProgram == null) return;
-        for (ClassRecord classNode : sourceProgram.classes()) {
-            for (AttributeRecord attribute : classNode.attributes()) {
-                if (!attribute.isStatic()) continue;
-                int size = StaticFieldSupport.sizeOf(attribute.type().name());
-                int alignment = Math.min(size, 8);
-                asm.append("align ").append(alignment).append('\n')
-                        .append(StaticFieldSupport.label(classNode.name(), attribute.name()))
-                        .append(": resb ").append(size).append('\n');
+    private void appendStaticStorage(StringBuilder asm, List<IRInstruction> instructions) {
+        Set<String> emitted = new LinkedHashSet<>();
+        if (sourceProgram != null) {
+            for (ClassRecord classNode : sourceProgram.classes()) {
+                for (AttributeRecord attribute : classNode.attributes()) {
+                    if (!attribute.isStatic()) continue;
+                    String label = StaticFieldSupport.label(classNode.name(), attribute.name());
+                    int size = StaticFieldSupport.sizeOf(attribute.type().name());
+                    appendStaticStorageSlot(asm, label, size, emitted);
+                }
             }
         }
+        Map<String, Operand.Type> generatedGlobals = new LinkedHashMap<>();
+        for (IRInstruction instruction : instructions) {
+            if (instruction.opCode() != IROpCode.LOAD_STATIC
+                    && instruction.opCode() != IROpCode.STORE_STATIC) continue;
+            Operand labelOperand = instruction.opCode() == IROpCode.LOAD_STATIC
+                    ? instruction.left() : instruction.left();
+            if (labelOperand == null || labelOperand.kind() != Operand.Kind.LABEL) continue;
+            String label = labelOperand.value().toString();
+            if (!label.startsWith("__global_register_")) continue;
+            Operand value = instruction.opCode() == IROpCode.LOAD_STATIC
+                    ? instruction.destination()
+                    : instruction.arguments().isEmpty() ? null : instruction.arguments().get(0);
+            if (value != null) generatedGlobals.putIfAbsent(label, value.type());
+        }
+        for (Map.Entry<String, Operand.Type> global : generatedGlobals.entrySet()) {
+            int size = switch (global.getValue()) {
+                case BOOL -> 1;
+                case I32 -> 4;
+                case I64, F64, REF -> 8;
+            };
+            appendStaticStorageSlot(asm, global.getKey(), size, emitted);
+        }
         asm.append('\n');
+    }
+
+    private void appendStaticStorageSlot(StringBuilder asm, String label, int size, Set<String> emitted) {
+        if (!emitted.add(label)) return;
+        int alignment = Math.min(size, 8);
+        asm.append("align ").append(alignment).append('\n')
+                .append(label).append(": resb ").append(size).append('\n');
     }
 
     private void appendVirtualTables(StringBuilder asm) {
@@ -562,6 +594,11 @@ public class NasmGenerator {
         asm.append("global _start\n");
         asm.append("_start:\n");
         asm.append("    xor ebp, ebp\n");
+        asm.append("    mov rax, qword [rsp]\n")
+                .append("    dec rax\n")
+                .append("    mov qword [rel __jvs_start_argc], rax\n")
+                .append("    lea rax, [rsp+8]\n")
+                .append("    mov qword [rel __jvs_start_argv], rax\n");
         asm.append("    mov eax, 13\n"); // rt_sigaction
         asm.append("    mov edi, 13\n"); // SIGPIPE
         asm.append("    lea rsi, [rel __jvs_sigpipe_ignore_action]\n");
@@ -569,7 +606,10 @@ public class NasmGenerator {
         asm.append("    mov r10d, 8\n");
         asm.append("    syscall\n");
         asm.append("    call __JVS.static_init__void__ret_void\n");
-        asm.append("    lea rdi, [rsp+8]\n");
+        if (entryFunction.endsWith(".main__String_array__ret_void")) {
+            asm.append("    call __jvs_build_linux_args\n")
+                    .append("    mov rdi, rax\n");
+        }
         asm.append("    call ").append(entryFunction).append("\n");
         asm.append("    cmp qword [rel __jvs_exception_ptr], 0\n");
         asm.append("    jne __uncaught_exception\n");
@@ -592,15 +632,7 @@ public class NasmGenerator {
         WindowsRuntime.appendConsoleCodePageSetup(asm);
         asm.append("    call __JVS.static_init__void__ret_void\n");
         if (entryFunction.endsWith(".main__String_array__ret_void")) {
-            asm.append("    mov edi, 32\n")
-                    .append("    call __heap_alloc\n")
-                    .append("    lea rdx, [rel __jvs_array_vtable]\n")
-                    .append("    mov qword [rax], rdx\n")
-                    .append("    mov qword [rax+8], 0\n")
-                    .append("    lea rdx, [rel __jvs_empty_args_array_type]\n")
-                    .append("    mov qword [rax+16], rdx\n")
-                    .append("    lea rdx, [rel __jvs_empty_args_element_type]\n")
-                    .append("    mov qword [rax+24], rdx\n")
+            asm.append("    call __jvs_build_windows_args\n")
                     .append("    mov rdi, rax\n");
         }
         asm.append("    call ").append(entryFunction).append('\n')
@@ -634,6 +666,7 @@ public class NasmGenerator {
 
         nextGpParameter = 0;
         nextXmmParameter = 0;
+        nextStackParameter = 0;
         int instructionIndex = 1;
         while (instructionIndex < instructions.size()
                 && instructions.get(instructionIndex).opCode() == IROpCode.PARAM) {
@@ -744,32 +777,48 @@ public class NasmGenerator {
                             "xmm4", "xmm5", "xmm6", "xmm7"
                     };
                     if (nextXmmParameter >= xmmRegisters.length) {
-                        throw new UnsupportedBackendFeatureException(
-                                "Mais de oito parâmetros double ainda não são suportados.");
+                        int sourceOffset = 16 + nextStackParameter++ * 8;
+                        asm.append("    movsd xmm0, qword [rbp+").append(sourceOffset).append("]\n")
+                                .append("    movsd qword ").append(address(destination)).append(", xmm0\n");
+                    } else {
+                        asm.append("    movsd qword ").append(address(destination))
+                                .append(", ").append(xmmRegisters[nextXmmParameter]).append("\n");
                     }
-                    asm.append("    movsd qword ").append(address(destination))
-                            .append(", ").append(xmmRegisters[nextXmmParameter++]).append("\n");
+                    nextXmmParameter++;
                 } else {
                     String[] gpRegisters = {
                             "rdi", "rsi", "rdx", "rcx", "r8", "r9"
                     };
                     if (nextGpParameter >= gpRegisters.length) {
-                        throw new UnsupportedBackendFeatureException(
-                                "Mais de seis parâmetros inteiros/referência ainda não são suportados.");
-                    }
-                    String register = gpRegisters[nextGpParameter++];
-                    if (destination.type() == Operand.Type.I32
-                            || destination.type() == Operand.Type.BOOL) {
-                        register = register32(register);
-                        asm.append("    mov dword ").append(address(destination))
-                                .append(", ").append(register).append("\n");
-                    } else if (destination.type() == Operand.Type.I64
-                            || destination.type() == Operand.Type.REF) {
-                        asm.append("    mov qword ").append(address(destination))
-                                .append(", ").append(register).append("\n");
+                        int sourceOffset = 16 + nextStackParameter++ * 8;
+                        if (destination.type() == Operand.Type.I32
+                                || destination.type() == Operand.Type.BOOL) {
+                            asm.append("    mov eax, dword [rbp+").append(sourceOffset).append("]\n")
+                                    .append("    mov dword ").append(address(destination)).append(", eax\n");
+                        } else if (destination.type() == Operand.Type.I64
+                                || destination.type() == Operand.Type.REF) {
+                            asm.append("    mov rax, qword [rbp+").append(sourceOffset).append("]\n")
+                                    .append("    mov qword ").append(address(destination)).append(", rax\n");
+                        } else {
+                            throw new UnsupportedBackendFeatureException(
+                                    "Tipo de parâmetro ainda não suportado: " + destination.type());
+                        }
+                        nextGpParameter++;
                     } else {
-                        throw new UnsupportedBackendFeatureException(
-                                "Tipo de parâmetro ainda não suportado: " + destination.type());
+                        String register = gpRegisters[nextGpParameter++];
+                        if (destination.type() == Operand.Type.I32
+                                || destination.type() == Operand.Type.BOOL) {
+                            register = register32(register);
+                            asm.append("    mov dword ").append(address(destination))
+                                    .append(", ").append(register).append("\n");
+                        } else if (destination.type() == Operand.Type.I64
+                                || destination.type() == Operand.Type.REF) {
+                            asm.append("    mov qword ").append(address(destination))
+                                    .append(", ").append(register).append("\n");
+                        } else {
+                            throw new UnsupportedBackendFeatureException(
+                                    "Tipo de parâmetro ainda não suportado: " + destination.type());
+                        }
                     }
                 }
             }
@@ -1449,6 +1498,9 @@ public class NasmGenerator {
         appendFloatPrinter(asm);
         if (target.isWindows()) {
             WindowsRuntime.appendIoSupport(asm);
+            WindowsRuntime.appendCommandLineSupport(asm);
+        } else {
+            appendLinuxCommandLineSupport(asm);
         }
         ScannerRuntime.append(asm, target.isWindows());
     }
@@ -1640,6 +1692,47 @@ public class NasmGenerator {
         asm.append("    mov eax, 60\n");
         asm.append("    syscall\n");
         asm.append("    ud2\n");
+    }
+
+    private void appendLinuxCommandLineSupport(StringBuilder asm) {
+        asm.append("__jvs_build_linux_args:\n")
+                .append("    push rbp\n")
+                .append("    mov rbp, rsp\n")
+                .append("    sub rsp, 16\n")
+                .append("    mov rax, qword [rel __jvs_start_argc]\n")
+                .append("    shl rax, 3\n")
+                .append("    jc __runtime_out_of_memory\n")
+                .append("    add rax, 32\n")
+                .append("    jc __runtime_out_of_memory\n")
+                .append("    mov rdi, rax\n")
+                .append("    call __heap_alloc\n")
+                .append("    mov qword [rbp-8], rax\n")
+                .append("    lea rdx, [rel __jvs_array_vtable]\n")
+                .append("    mov qword [rax], rdx\n")
+                .append("    mov rdx, qword [rel __jvs_start_argc]\n")
+                .append("    mov qword [rax+8], rdx\n")
+                .append("    lea rdx, [rel __jvs_main_args_array_type]\n")
+                .append("    mov qword [rax+16], rdx\n")
+                .append("    lea rdx, [rel __jvs_main_args_element_type]\n")
+                .append("    mov qword [rax+24], rdx\n")
+                .append("    mov qword [rbp-16], 0\n")
+                .append(".linux_args_loop:\n")
+                .append("    mov rax, qword [rbp-16]\n")
+                .append("    cmp rax, qword [rel __jvs_start_argc]\n")
+                .append("    jae .linux_args_done\n")
+                .append("    inc rax\n")
+                .append("    shl rax, 3\n")
+                .append("    mov rdx, qword [rel __jvs_start_argv]\n")
+                .append("    mov rcx, qword [rdx+rax]\n")
+                .append("    mov rax, qword [rbp-8]\n")
+                .append("    mov rdx, qword [rbp-16]\n")
+                .append("    mov qword [rax+rdx*8+32], rcx\n")
+                .append("    inc qword [rbp-16]\n")
+                .append("    jmp .linux_args_loop\n")
+                .append(".linux_args_done:\n")
+                .append("    mov rax, qword [rbp-8]\n")
+                .append("    leave\n")
+                .append("    ret\n\n");
     }
 
     private void emitObjectAllocation(StringBuilder asm, IRInstruction instruction) {
@@ -2277,37 +2370,11 @@ public class NasmGenerator {
     private void emitCall(
             StringBuilder asm,
             IRInstruction instruction) {
-        String[] gpRegisters = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
-        String[] xmmRegisters = {
-                "xmm0", "xmm1", "xmm2", "xmm3",
-                "xmm4", "xmm5", "xmm6", "xmm7"
-        };
-        int gpIndex = 0;
-        int xmmIndex = 0;
-        for (Operand argument : instruction.arguments()) {
-            if (argument.type() == Operand.Type.F64) {
-                if (xmmIndex == xmmRegisters.length) {
-                    throw new UnsupportedBackendFeatureException(
-                            "Chamadas suportam até oito argumentos double em registradores.");
-                }
-                loadF64(asm, argument, xmmRegisters[xmmIndex++]);
-            } else {
-                if (gpIndex == gpRegisters.length) {
-                    throw new UnsupportedBackendFeatureException(
-                            "Chamadas suportam até seis argumentos inteiros/referência em registradores.");
-                }
-                String register = gpRegisters[gpIndex++];
-                if (argument.type() == Operand.Type.I32 || argument.type() == Operand.Type.BOOL) {
-                    loadI32(asm, argument, register32(register));
-                } else {
-                    loadI64(asm, argument, register);
-                }
-            }
-        }
-
+        int outgoingBytes = emitCallArguments(asm, instruction.arguments(), 0);
         asm.append("    call ")
                 .append(instruction.left().value())
                 .append("\n");
+        if (outgoingBytes != 0) asm.append("    add rsp, ").append(outgoingBytes).append("\n");
 
         if (instruction.destination() != null) {
             if (instruction.destination().type() == Operand.Type.F64) {
@@ -2340,36 +2407,74 @@ public class NasmGenerator {
         asm.append("    test r10, r10\n");
         asm.append("    jz __runtime_abstract_method\n");
 
-        String[] gpRegisters = { "rsi", "rdx", "rcx", "r8", "r9" };
+        int outgoingBytes = emitCallArguments(asm, instruction.arguments(), 1);
+        asm.append("    call r10\n");
+        if (outgoingBytes != 0) asm.append("    add rsp, ").append(outgoingBytes).append("\n");
+        storeCallResult(asm, instruction.destination());
+    }
+
+    /**
+     * Loads arguments using the compiler's internal x64 convention. Arguments
+     * beyond the available GP/XMM registers are placed in 8-byte stack slots.
+     * For virtual calls, GP register zero is already occupied by the receiver.
+     */
+    private int emitCallArguments(StringBuilder asm, List<Operand> arguments, int initialGpIndex) {
+        String[] gpRegisters = { "rdi", "rsi", "rdx", "rcx", "r8", "r9" };
         String[] xmmRegisters = {
                 "xmm0", "xmm1", "xmm2", "xmm3",
                 "xmm4", "xmm5", "xmm6", "xmm7"
         };
-        int gpIndex = 0;
+        int gpIndex = initialGpIndex;
         int xmmIndex = 0;
-        for (Operand argument : instruction.arguments()) {
+        int stackIndex = 0;
+        int spills = countSpilledArguments(arguments, initialGpIndex);
+        int outgoingBytes = align(spills * 8, 16);
+        if (outgoingBytes != 0) asm.append("    sub rsp, ").append(outgoingBytes).append("\n");
+
+        for (Operand argument : arguments) {
             if (argument.type() == Operand.Type.F64) {
                 if (xmmIndex == xmmRegisters.length) {
-                    throw new UnsupportedBackendFeatureException(
-                            "Chamadas virtuais suportam até oito argumentos double.");
+                    loadF64(asm, argument, "xmm0");
+                    asm.append("    movsd qword [rsp+").append(stackIndex++ * 8).append("], xmm0\n");
+                } else {
+                    loadF64(asm, argument, xmmRegisters[xmmIndex]);
                 }
-                loadF64(asm, argument, xmmRegisters[xmmIndex++]);
+                xmmIndex++;
             } else {
                 if (gpIndex == gpRegisters.length) {
-                    throw new UnsupportedBackendFeatureException(
-                            "Chamadas virtuais suportam até cinco argumentos inteiros/referência além de this.");
-                }
-                String register = gpRegisters[gpIndex++];
-                if (argument.type() == Operand.Type.I32 || argument.type() == Operand.Type.BOOL) {
-                    loadI32(asm, argument, register32(register));
+                    if (argument.type() == Operand.Type.I32 || argument.type() == Operand.Type.BOOL) {
+                        loadI32(asm, argument, "eax");
+                        asm.append("    mov qword [rsp+").append(stackIndex++ * 8).append("], rax\n");
+                    } else {
+                        loadI64(asm, argument, "rax");
+                        asm.append("    mov qword [rsp+").append(stackIndex++ * 8).append("], rax\n");
+                    }
                 } else {
-                    loadI64(asm, argument, register);
+                    String register = gpRegisters[gpIndex];
+                    if (argument.type() == Operand.Type.I32 || argument.type() == Operand.Type.BOOL) {
+                        loadI32(asm, argument, register32(register));
+                    } else {
+                        loadI64(asm, argument, register);
+                    }
                 }
+                gpIndex++;
             }
         }
+        return outgoingBytes;
+    }
 
-        asm.append("    call r10\n");
-        storeCallResult(asm, instruction.destination());
+    private int countSpilledArguments(List<Operand> arguments, int initialGpIndex) {
+        int gpIndex = initialGpIndex;
+        int xmmIndex = 0;
+        int spills = 0;
+        for (Operand argument : arguments) {
+            if (argument.type() == Operand.Type.F64) {
+                if (xmmIndex++ >= 8) spills++;
+            } else if (gpIndex++ >= 6) {
+                spills++;
+            }
+        }
+        return spills;
     }
 
     private void emitCatchMatch(StringBuilder asm, IRInstruction instruction) {

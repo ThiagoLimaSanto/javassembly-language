@@ -104,9 +104,9 @@ Depois use `jvsc -w`. O arquivo `.exe` gerado pode ser executado no Windows; no 
 
    Adicione `C:\msys64\ucrt64\bin` ao `Path` do usuário no Windows. Se instalou o MSYS2
    em outro local, use o caminho correspondente à pasta `ucrt64\bin`. O compilador procura
-   `libkernel32.a` junto da instalação do `ld.exe` e adiciona o diretório automaticamente.
+   `libkernel32.a` e `libshell32.a` junto da instalação do `ld.exe` e adiciona o diretório automaticamente.
    Para uma instalação MinGW fora dos layouts padrão, configure `JAVASSEMBLY_WINDOWS_LIB_DIR`
-   com o diretório que contém `libkernel32.a`.
+   com o diretório que contém esses dois arquivos.
 
 4. Abra um terminal novo e confirme as ferramentas:
 
@@ -213,7 +213,9 @@ Para um arquivo fora de `src/`, a pasta `out/` é criada ao lado dele. Imports d
 biblioteca padrão, como `jvs.io.Scanner`, são resolvidos a partir da instalação do
 compilador.
 
-## Limitação atual do destino Windows
+## Argumentos de `main`
 
-O método `main(String[] args)` recebe um array vazio no Windows; os argumentos passados
-na linha de comando ainda não são convertidos para esse array.
+Quando o programa declara `main(String[] args)`, o compilador cria um array com os
+argumentos informados ao executar o programa. O nome do executável não é incluído.
+No Windows, os argumentos são convertidos de UTF-16 para UTF-8 antes de serem entregues
+ao programa. `main()` sem parâmetros continua disponível.

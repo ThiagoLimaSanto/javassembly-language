@@ -121,7 +121,7 @@ public class ProgramAnalyzer {
             command.add(linker);
         }
         command.addAll(List.of("-e", "start", "--subsystem", "console", "-o",
-                executable.toString(), object.toString(), "-lkernel32"));
+                executable.toString(), object.toString(), "-lshell32", "-lkernel32"));
         runTool(command, executable, linker);
     }
 
@@ -130,11 +130,12 @@ public class ProgramAnalyzer {
         String configuredLibraryDirectory = System.getenv("JAVASSEMBLY_WINDOWS_LIB_DIR");
         if (configuredLibraryDirectory != null && !configuredLibraryDirectory.isBlank()) {
             Path directory = Path.of(configuredLibraryDirectory).toAbsolutePath().normalize();
-            if (Files.isRegularFile(directory.resolve("libkernel32.a"))) {
+            if (hasRequiredWindowsLibraries(directory)) {
                 Path executablePath = linkerPaths.isEmpty() ? Path.of(linker) : linkerPaths.get(0);
                 return new WindowsLinkerConfig(executablePath, directory);
             }
-            throw new OutputException("JAVASSEMBLY_WINDOWS_LIB_DIR não contém libkernel32.a.", outputPath, null);
+            throw new OutputException("JAVASSEMBLY_WINDOWS_LIB_DIR precisa conter libkernel32.a e "
+                    + "libshell32.a.", outputPath, null);
         }
 
         for (Path linkerPath : linkerPaths) {
@@ -149,14 +150,19 @@ public class ProgramAnalyzer {
                     binDirectory.resolve("..\\lib").normalize(),
                     binDirectory.resolve("..\\x86_64-w64-mingw32\\lib").normalize());
             for (Path candidate : candidates) {
-                if (Files.isRegularFile(candidate.resolve("libkernel32.a"))) {
+                if (hasRequiredWindowsLibraries(candidate)) {
                     return new WindowsLinkerConfig(linkerPath, candidate.toAbsolutePath().normalize());
                 }
             }
         }
 
-        throw new OutputException("Não encontrei libkernel32.a nas pastas padrão do MinGW-w64. "
-                + "Configure JAVASSEMBLY_WINDOWS_LIB_DIR com a pasta que contém esse arquivo.", outputPath, null);
+        throw new OutputException("Não encontrei libkernel32.a e libshell32.a nas pastas padrão do MinGW-w64. "
+                + "Configure JAVASSEMBLY_WINDOWS_LIB_DIR com a pasta que contém esses arquivos.", outputPath, null);
+    }
+
+    private boolean hasRequiredWindowsLibraries(Path directory) {
+        return Files.isRegularFile(directory.resolve("libkernel32.a"))
+                && Files.isRegularFile(directory.resolve("libshell32.a"));
     }
 
     private List<Path> findExecutablePaths(String executable) {

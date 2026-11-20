@@ -3224,6 +3224,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             }
 
             for (FunctionRecord function : node.functions()) {
+                validateNativeBackendDeclaration(node, function);
                 if (function.isAbstract() && !node.isAbstract()) {
                     throw new SemanticException(
                             "A classe '" + node.name()
@@ -3270,6 +3271,31 @@ public class SemanticAnalyzer implements ASTVisitor {
             currentClass = previousClass;
             classScope = previousClassScope;
             constructorDelegations = previousConstructorDelegations;
+        }
+    }
+
+    private void validateNativeBackendDeclaration(ClassRecord owner, FunctionRecord function) {
+        if (!function.isNative()) return;
+        String expectedReturn = switch (function.name()) {
+            case "readInt" -> "int";
+            case "readLong" -> "long";
+            case "readDouble" -> "double";
+            case "readBoolean" -> "boolean";
+            case "readString", "readLine" -> "String";
+            default -> null;
+        };
+        boolean scannerOwner = owner.name().equals("jvs.io.Scanner")
+                || owner.name().equals("io.Scanner");
+        boolean supported = scannerOwner
+                && expectedReturn != null
+                && function.parameters().isEmpty()
+                && function.returnType().name().equals(expectedReturn);
+        if (!supported) {
+            throw new SemanticException(
+                    "Método native sem implementação no runtime: '" + owner.name() + "."
+                            + function.name() + "'. Atualmente, native está reservado aos métodos de entrada do Scanner.",
+                    function.line(),
+                    function.column());
         }
     }
 
