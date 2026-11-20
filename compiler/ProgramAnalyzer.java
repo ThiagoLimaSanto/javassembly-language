@@ -105,17 +105,11 @@ public class ProgramAnalyzer {
         boolean windowsHost = System.getProperty("os.name", "")
                 .toLowerCase(java.util.Locale.ROOT).startsWith("windows");
         String configuredLinker = System.getenv("JAVASSEMBLY_WINDOWS_LINKER");
-        if (windowsHost) {
-            String linker = configuredLinker == null || configuredLinker.isBlank()
-                    ? "link.exe" : configuredLinker;
-            runTool(List.of(linker, "/nologo", "/entry:start", "/subsystem:console", "/nodefaultlib",
-                    "/out:" + executable, object.toString(), "kernel32.lib"), executable, "link.exe");
-        } else {
-            String linker = configuredLinker == null || configuredLinker.isBlank()
-                    ? "x86_64-w64-mingw32-ld" : configuredLinker;
-            runTool(List.of(linker, "-e", "start", "--subsystem", "console", "-o",
-                    executable.toString(), object.toString(), "-lkernel32"), executable, linker);
-        }
+        String linker = configuredLinker == null || configuredLinker.isBlank()
+                ? windowsHost ? "ld.exe" : "x86_64-w64-mingw32-ld"
+                : configuredLinker;
+        runTool(List.of(linker, "-e", "start", "--subsystem", "console", "-o",
+                executable.toString(), object.toString(), "-lkernel32"), executable, linker);
     }
 
     private String baseName(Path sourceFile) {

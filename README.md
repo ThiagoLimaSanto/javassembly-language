@@ -88,20 +88,33 @@ Depois use `jvsc -w`. O arquivo `.exe` gerado pode ser executado no Windows; no 
    Se o comando não encontrar o pacote, baixe o instalador na página oficial do
    [NASM](https://www.nasm.us/).
 
-3. Instale o [Visual Studio Build Tools](https://learn.microsoft.com/cpp/overview/acquire-msvc?view=msvc-170).
-   No instalador, selecione **Desenvolvimento para desktop com C++**, as ferramentas
-   MSVC para x64/x86 e um Windows SDK. Esse conjunto fornece `link.exe` e `kernel32.lib`.
+3. Instale o [MSYS2](https://www.msys2.org/). Abra o terminal **MSYS2 UCRT64** pelo menu
+   Iniciar e instale o linker MinGW-w64 e as bibliotecas de importação do Windows:
 
-4. Abra o **Developer PowerShell** ou o **Developer Command Prompt** do Visual Studio.
-   Esse terminal configura o caminho do linker e das bibliotecas do Windows SDK.
+   ```bash
+   pacman -Syu
+   ```
 
-5. Verifique as ferramentas:
+   Se o terminal fechar ao atualizar, abra novamente o **MSYS2 UCRT64** e repita
+   `pacman -Syu`. Quando a atualização terminar, instale os pacotes necessários:
+
+   ```bash
+   pacman -S --needed mingw-w64-ucrt-x86_64-binutils mingw-w64-ucrt-x86_64-crt
+   ```
+
+   Adicione `C:\msys64\ucrt64\bin` ao `Path` do usuário no Windows. Se instalou o MSYS2
+   em outro local, use o caminho correspondente à pasta `ucrt64\bin`.
+
+4. Abra um terminal novo e confirme as ferramentas:
 
    ```powershell
    java -version
    nasm -v
-   where.exe link
+   where.exe ld.exe
    ```
+
+   O primeiro resultado de `where.exe ld.exe` deve apontar para `ucrt64\bin\ld.exe`.
+   O backend usa esse linker diretamente;
 
 Agora instale o pacote da Release conforme a seção [Instalação no Windows](#instalação-no-windows)
 e compile com `jvsc -w caminho\para\Arquivo.jvs`.
@@ -109,9 +122,8 @@ e compile com `jvsc -w caminho\para\Arquivo.jvs`.
 Para gerar executáveis Linux, use Linux ou WSL e siga as instruções de Ubuntu/Debian.
 
 Os comandos do JDK estão documentados pela Microsoft na página de instalação do
-[Microsoft Build of OpenJDK](https://learn.microsoft.com/java/openjdk/install). O
-passo do MSVC segue a documentação de instalação dos
-[Build Tools C++](https://learn.microsoft.com/cpp/overview/acquire-msvc?view=msvc-170).
+[Microsoft Build of OpenJDK](https://learn.microsoft.com/java/openjdk/install). Os pacotes
+MinGW-w64 usados acima são mantidos pelo [MSYS2](https://www.msys2.org/).
 
 ## Instalação no Linux
 
