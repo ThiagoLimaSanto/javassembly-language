@@ -9,6 +9,7 @@ import java.util.List;
 
 import compiler.Frontend;
 import compiler.TargetPlatform;
+import compiler.WindowsLinker;
 import compiler.ast.records.ProgramRecord;
 import compiler.backend.asm.NasmGenerator;
 import compiler.backend.ir.IRGenerator;
@@ -107,15 +108,9 @@ public final class BackendFixtureTests {
             if (assembled.exitCode() != 0) {
                 return "nasm failed (" + assembled.exitCode() + "): " + assembled.stderr();
             }
-            List<String> linkCommand = new ArrayList<>();
-            linkCommand.add(target.isWindows() ? "ld.exe" : "ld");
-            if (target.isWindows()) {
-                linkCommand.addAll(List.of("-e", "start", "--subsystem", "console"));
-            }
-            linkCommand.addAll(List.of("-o", executable.toString(), objectFile.toString()));
-            if (target.isWindows()) {
-                linkCommand.addAll(List.of("-lshell32", "-lkernel32"));
-            }
+            List<String> linkCommand = target.isWindows()
+                    ? WindowsLinker.command(objectFile, executable)
+                    : List.of("ld", "-o", executable.toString(), objectFile.toString());
             ProcessResult linked = run(linkCommand, tempDirectory);
             if (linked.exitCode() != 0) {
                 return "ld failed (" + linked.exitCode() + "): " + linked.stderr();
