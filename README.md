@@ -5,9 +5,21 @@ O frontend, a IR e as otimizações são compartilhados; o destino é escolhido 
 
 ## Requisitos
 
-O pacote de uma Release precisa de Java Runtime (JRE) 17 ou superior e do NASM.
-Para gerar um executável, também precisa do linker do sistema de destino. O JDK só é
-necessário para compilar o JavaAssembly a partir do código-fonte.
+Para usar o pacote publicado em uma Release, instale:
+
+- Java Runtime (JRE) 17 ou superior;
+- NASM;
+- o linker correspondente ao sistema para o qual você vai gerar o executável.
+
+O ZIP da Release já contém `javassembly.jar` e as bibliotecas da linguagem. Portanto,
+`javac` e o JDK não são necessários para instalar ou usar esse pacote. O JDK é necessário
+somente se você for compilar o JavaAssembly a partir do código-fonte.
+
+## Baixar o JavaAssembly
+
+Abra [Releases](https://github.com/ThiagoLimaSanto/javassembly-language/releases/latest)
+e baixe o arquivo `javassembly-vX.Y.Z.zip`. Esse é o pacote pronto para instalar nos dois
+sistemas. Os arquivos **Source code** contêm apenas o código-fonte do repositório.
 
 ## Tutorial: instalar os requisitos
 
@@ -28,8 +40,11 @@ nasm -v
 ld --version
 ```
 
-Se você for instalar diretamente do repositório de código-fonte, instale o JDK no
-lugar do JRE (`openjdk-17-jdk`). O pacote baixado em **Releases** já inclui o JAR.
+Se for compilar o JavaAssembly a partir do código-fonte, instale também o JDK:
+
+```bash
+sudo apt install openjdk-17-jdk
+```
 
 Com esses requisitos, o Linux pode gerar executáveis Linux usando `jvsc -l`.
 
@@ -55,12 +70,14 @@ Depois use `jvsc -w`. O arquivo `.exe` gerado pode ser executado no Windows; no 
 
 ### Windows: compilar para Windows
 
-1. Instale Java 17 ou superior. O pacote de uma Release precisa apenas do Java Runtime;
-   para instalar a partir do código-fonte, instale um JDK. Com WinGet, por exemplo:
+1. Instale o Java Runtime 17 ou superior. Com WinGet:
 
    ```powershell
-   winget install --id Microsoft.OpenJDK.25 --exact
+   winget install --id EclipseAdoptium.Temurin.17.JRE --exact
    ```
+
+   Para compilar o JavaAssembly a partir do código-fonte, instale o JDK no lugar do JRE.
+   Consulte as [instruções oficiais do Eclipse Temurin](https://adoptium.net/installation/).
 
 2. Instale o NASM. Com WinGet:
 
@@ -86,7 +103,7 @@ Depois use `jvsc -w`. O arquivo `.exe` gerado pode ser executado no Windows; no 
    where.exe link
    ```
 
-Agora instale o JavaAssembly conforme a seção [Instalação no Windows](#instalação-no-windows)
+Agora instale o pacote da Release conforme a seção [Instalação no Windows](#instalação-no-windows)
 e compile com `jvsc -w caminho\para\Arquivo.jvs`.
 
 Para gerar executáveis Linux, use Linux ou WSL e siga as instruções de Ubuntu/Debian.
@@ -98,26 +115,30 @@ passo do MSVC segue a documentação de instalação dos
 
 ## Instalação no Linux
 
-Baixe e extraia o arquivo ZIP mais recente na página **Releases** do GitHub. O pacote
-inclui `javassembly.jar`, as bibliotecas da linguagem e os lançadores. Não é necessário
-ter `javac` para instalar uma Release.
+Baixe o `javassembly-vX.Y.Z.zip` pela seção [Releases](#baixar-o-javassembly) e extraia-o.
+No terminal, entre na pasta extraída e execute o instalador.
 
 Instalação global para todos os usuários:
 
 ```bash
+unzip javassembly-vX.Y.Z.zip -d javassembly
+cd javassembly
 sudo bash install.sh --system
 ```
 
 Instalação somente para o usuário atual:
 
 ```bash
+unzip javassembly-vX.Y.Z.zip -d javassembly
+cd javassembly
 bash install.sh
 source ~/.profile
 ```
 
 ## Instalação no Windows
 
-Baixe e extraia o ZIP da Release. Na pasta extraída, execute no PowerShell:
+Baixe `javassembly-vX.Y.Z.zip` pela seção [Releases](#baixar-o-javassembly), extraia o
+arquivo e abra o PowerShell na pasta extraída. Execute:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
