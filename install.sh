@@ -11,7 +11,7 @@ if [[ ! -f "$compiler_jar" ]]; then
     fi
     build_dir="$repo_root/build/jar-install"
     mkdir -p "$build_dir/classes"
-    javac -d "$build_dir/classes" -sourcepath "$repo_root" "$repo_root/compiler/Main.java"
+    javac -encoding UTF-8 -d "$build_dir/classes" -sourcepath "$repo_root" "$repo_root/compiler/Main.java"
     jar --create --file "$build_dir/javassembly.jar" --main-class compiler.Main -C "$build_dir/classes" .
     compiler_jar="$build_dir/javassembly.jar"
 fi

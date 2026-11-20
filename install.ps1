@@ -14,7 +14,7 @@ if (-not (Test-Path $jarSource)) {
     $buildRoot = Join-Path $sourceRoot "build\jar-install"
     $classes = Join-Path $buildRoot "classes"
     New-Item -ItemType Directory -Force -Path $classes | Out-Null
-    & javac -d $classes -sourcepath $sourceRoot $mainSource
+    & javac -encoding UTF-8 -d $classes -sourcepath $sourceRoot $mainSource
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     & jar --create --file (Join-Path $buildRoot "javassembly.jar") --main-class compiler.Main -C $classes .
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
