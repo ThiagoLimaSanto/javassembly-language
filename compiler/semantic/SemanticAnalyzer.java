@@ -340,7 +340,49 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     private List<FunctionRecord> objectMethods() {
         ClassRecord objectClass = classes.get("jvs.lang.Object");
-        return objectClass == null ? List.of() : objectClass.functions();
+        List<FunctionRecord> methods = new ArrayList<>();
+        if (objectClass != null) {
+            methods.addAll(objectClass.functions());
+        }
+
+        // These methods belong to java.lang.Object conceptually, but their runtime
+        // implementations are not part of the current JVS runtime yet. Keeping
+        // their signatures here lets the frontend apply Java's inheritance rules.
+        methods.add(builtinObjectMethod("Class", "getClass", true));
+        methods.add(builtinObjectMethod("void", "notify", true));
+        methods.add(builtinObjectMethod("void", "notifyAll", true));
+        methods.add(builtinObjectMethod("void", "wait", true));
+        methods.add(builtinObjectMethod(
+                "void", "wait", true, new TypeRecord("long")));
+        methods.add(builtinObjectMethod(
+                "void", "wait", true, new TypeRecord("long"), new TypeRecord("int")));
+
+        return methods;
+    }
+
+    private FunctionRecord builtinObjectMethod(
+            String returnType,
+            String name,
+            boolean isFinal,
+            TypeRecord... parameterTypes) {
+        List<ParameterRecord> parameters = new ArrayList<>();
+        for (int index = 0; index < parameterTypes.length; index++) {
+            parameters.add(new ParameterRecord(
+                    parameterTypes[index], "arg" + index, 0, 0));
+        }
+        return new FunctionRecord(
+                TokenType.PUBLIC,
+                false,
+                isFinal,
+                new TypeRecord(returnType),
+                name,
+                parameters,
+                null,
+                false,
+                false,
+                true,
+                0,
+                0);
     }
 
     private List<FunctionRecord> mostSpecificInterfaceDeclarations(
