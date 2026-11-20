@@ -16,14 +16,7 @@ import compiler.semantic.BuiltinExceptionTypes;
 
 public class ObjectLayout {
 
-    private static class TypeInfo {
-        int size;
-        int alignment;
-
-        public TypeInfo(int size, int alignment) {
-            this.size = size;
-            this.alignment = alignment;
-        }
+    private record TypeInfo(int size, int alignment) {
     }
 
     private final Map<String, TypeInfo> types = new LinkedHashMap<>();
@@ -57,7 +50,7 @@ public class ObjectLayout {
 
     public ClassLayout calculate(ClassRecord classNode) {
         if (classNode.superClass() != null
-                && !classNode.superClass().equals("Object")
+                && !classNode.superClass().equals("jvs.lang.Object")
                 && !BuiltinExceptionTypes.isBuiltin(classNode.superClass())) {
             throw new ObjectLayoutException(
                     "Para calcular uma classe com herança, use calculate(ProgramRecord).");
@@ -82,15 +75,16 @@ public class ObjectLayout {
         int classAlignment = 8;
 
         String parentName = classNode.superClass();
-        if (parentName != null && !parentName.equals("Object")) {
+        if (parentName != null) {
             ClassRecord parent = classesByName.get(parentName);
             if (parent == null) {
-                if (BuiltinExceptionTypes.isBuiltin(parentName)) {
+                if (BuiltinExceptionTypes.isBuiltin(parentName)
+                        || parentName.equals("jvs.lang.Object")) {
                     parentName = null;
                 } else {
-                throw new ObjectLayoutException(
-                        "Classe pai '" + parentName + "' não encontrada ao calcular o layout de '"
-                                + className + "'.");
+                    throw new ObjectLayoutException(
+                            "Classe pai '" + parentName + "' não encontrada ao calcular o layout de '"
+                                    + className + "'.");
                 }
             }
             if (parent != null) {
@@ -127,22 +121,22 @@ public class ObjectLayout {
 
             currentOffset = alignUp(
                     currentOffset,
-                    info.alignment);
+                    info.alignment());
 
             FieldLayout field = new FieldLayout(
                     name,
                     type,
                     currentOffset,
-                    info.size,
-                    info.alignment);
+                    info.size(),
+                    info.alignment());
 
             fields.add(field);
 
-            currentOffset += info.size;
+            currentOffset += info.size();
 
             classAlignment = Math.max(
                     classAlignment,
-                    info.alignment);
+                    info.alignment());
         }
 
         int totalSize = alignUp(

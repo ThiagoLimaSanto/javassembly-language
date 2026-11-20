@@ -1,0 +1,11 @@
+package jvs.lang;
+
+public class Object {
+    public func boolean equals(Object other) {
+        return cmp.eq this, other;
+    }
+
+    public native func int hashCode();
+
+    public native func String toString();
+}

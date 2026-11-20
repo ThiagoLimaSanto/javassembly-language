@@ -77,6 +77,11 @@ jobs:
         shell: bash
         run: java -cp build/test-classes test.BackendFixtureTests
 
+      - name: Run Windows backend fixture suite
+        if: runner.os == 'Windows'
+        shell: bash
+        run: java -cp build/test-classes test.BackendFixtureTests test/fixtures/backend -w
+
       - name: Assemble compiler distribution for smoke test
         shell: bash
         run: cp build/package/javassembly.jar javassembly.jar

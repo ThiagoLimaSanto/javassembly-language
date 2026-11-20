@@ -1,0 +1,12 @@
+R0 = 17;
+
+class RegisterBackedStatic {
+    public static int copied = R0;
+}
+
+public class StaticRegisterInitializer {
+    public static func void main(String[] args) {
+        printLn RegisterBackedStatic.copied;
+        return;
+    }
+}

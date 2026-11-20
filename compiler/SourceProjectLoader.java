@@ -39,6 +39,18 @@ final class SourceProjectLoader {
     private final Map<String, String> sourceFiles = new HashMap<>();
 
     ProgramRecord load(Path entryFile) throws IOException {
+        Path coreObject = libraryRoot.resolve("jvs/lang/Object.jvs").normalize();
+        if (Files.isRegularFile(coreObject)) {
+            loadFile(coreObject);
+        } else {
+            throw new SourceProjectException(
+                    "A classe-base jvs.lang.Object não foi encontrada na biblioteca padrão.",
+                    coreObject);
+        }
+        Path coreString = libraryRoot.resolve("jvs/lang/String.jvs").normalize();
+        if (Files.isRegularFile(coreString)) {
+            loadFile(coreString);
+        }
         loadFile(entryFile.toAbsolutePath().normalize());
         return new ProgramRecord(classes, interfaces, registers, "", List.of(), sourceFiles);
     }
@@ -161,12 +173,43 @@ final class SourceProjectLoader {
             ProgramRecord preliminary = parse(source);
             Path sourceRoot = findSourceRoot(file, preliminary.packageName());
             Set<String> knownTypes = indexVisibleSourceTypes(sourceRoot, preliminary, source);
-            ProgramRecord resolved = Frontend.parse(source, knownTypes);
+            ProgramRecord resolved = addImplicitObjectSuperclass(
+                    Frontend.parse(source, knownTypes));
             parsedFiles.put(file, resolved);
             return resolved;
         } catch (LanguageException exception) {
-            throw (LanguageException) exception.atSource(file);
+            throw exception.atSource(file);
         }
+    }
+
+    private ProgramRecord addImplicitObjectSuperclass(ProgramRecord unit) {
+        List<ClassRecord> normalizedClasses = unit.classes().stream()
+                .map(classNode -> {
+                    if (classNode.name().equals("jvs.lang.Object")
+                            || classNode.superClass() != null) {
+                        return classNode;
+                    }
+                    return new ClassRecord(
+                            classNode.visibility(),
+                            classNode.name(),
+                            "jvs.lang.Object",
+                            classNode.interfaces(),
+                            classNode.attributes(),
+                            classNode.functions(),
+                            classNode.constructors(),
+                            classNode.isAbstract(),
+                            classNode.isFinal(),
+                            classNode.line(),
+                            classNode.column());
+                })
+                .toList();
+        return new ProgramRecord(
+                normalizedClasses,
+                unit.interfaces(),
+                unit.registers(),
+                unit.packageName(),
+                unit.imports(),
+                unit.sourceFiles());
     }
 
     private Set<String> indexVisibleSourceTypes(

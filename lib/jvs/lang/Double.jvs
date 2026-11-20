@@ -1,0 +1,29 @@
+package jvs.lang;
+
+public final class Double {
+    public static final double NaN = Double.parseDouble("NaN");
+    public static final double POSITIVE_INFINITY = Double.parseDouble("Infinity");
+    public static final double NEGATIVE_INFINITY = Double.parseDouble("-Infinity");
+
+    private double value;
+
+    public Double(double value) {
+        this.value = value;
+    }
+
+    public func double doubleValue() {
+        return value;
+    }
+
+    public static func Double valueOf(double value) {
+        return new Double(value);
+    }
+
+    public native func String toString();
+
+    public native func boolean equals(Object other);
+
+    public native func int hashCode();
+
+    public static native func double parseDouble(String value) throws NumberFormatException;
+}

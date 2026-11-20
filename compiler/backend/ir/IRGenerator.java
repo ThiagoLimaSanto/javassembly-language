@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import compiler.NativeMethodSupport;
 import compiler.ast.ExpressionInterface;
 import compiler.ast.StatementInterface;
 import compiler.ast.records.ArrayAccessRecord;
@@ -289,6 +290,19 @@ public final class IRGenerator {
         pushVariableScope();
         ir.add(new IRInstruction(IROpCode.LABEL,
                 Operand.label("__JVS.static_init__void__ret_void"), null, null));
+        currentClassName = null;
+        for (RegisterDeclarationRecord declaration : ast.registers()) {
+            Operand value = expression(ir, declaration.value());
+            String name = declaration.register().name();
+            registerTypes.put(name, value.type());
+            String sourceType = referenceTypeName(value);
+            registerSourceTypes.put(name, sourceType);
+            if (value.type() == Operand.Type.REF) {
+                registerReferenceType(value, new TypeRecord(sourceType));
+            }
+            ir.add(new IRInstruction(IROpCode.STORE_STATIC, null,
+                    Operand.label(registerLabels.get(name)), null, List.of(value)));
+        }
         for (ClassRecord classNode : ast.classes()) {
             currentClassName = classNode.name();
             for (AttributeRecord attribute : classNode.attributes()) {
@@ -303,18 +317,6 @@ public final class IRGenerator {
             }
         }
         currentClassName = null;
-        for (RegisterDeclarationRecord declaration : ast.registers()) {
-            Operand value = expression(ir, declaration.value());
-            String name = declaration.register().name();
-            registerTypes.put(name, value.type());
-            String sourceType = referenceTypeName(value);
-            registerSourceTypes.put(name, sourceType);
-            if (value.type() == Operand.Type.REF) {
-                registerReferenceType(value, new TypeRecord(sourceType));
-            }
-            ir.add(new IRInstruction(IROpCode.STORE_STATIC, null,
-                    Operand.label(registerLabels.get(name)), null, List.of(value)));
-        }
         ir.add(new IRInstruction(IROpCode.RETURN, null, null, null));
         variableScopes.clear();
         currentFunction = null;
@@ -333,18 +335,7 @@ public final class IRGenerator {
     }
 
     private void validateNativeScannerFunction(ClassRecord owner, FunctionRecord function) {
-        String expectedReturn = switch (function.name()) {
-            case "readInt" -> "int";
-            case "readLong" -> "long";
-            case "readDouble" -> "double";
-            case "readBoolean" -> "boolean";
-            case "readString", "readLine" -> "String";
-            default -> null;
-        };
-        if (!(owner.name().equals("io.Scanner") || owner.name().equals("jvs.io.Scanner"))
-                || expectedReturn == null
-                || !function.parameters().isEmpty()
-                || !function.returnType().name().equals(expectedReturn)) {
+        if (!NativeMethodSupport.supports(owner, function)) {
             throw unsupported("Método native ainda sem implementação no runtime: '"
                     + owner.name() + "." + function.name() + "'.");
         }
@@ -416,8 +407,7 @@ public final class IRGenerator {
                 invocationArguments.add(expression(ir, argument));
             }
         }
-        if (targetClassName != null && !targetClassName.equals("Object")
-                && !BuiltinExceptionTypes.isBuiltin(targetClassName)) {
+        if (targetClassName != null && !BuiltinExceptionTypes.isBuiltin(targetClassName)) {
             ClassRecord targetClass = classes.get(targetClassName);
             if (targetClass == null) {
                 throw unsupported("Classe pai não encontrada: " + targetClassName + ".");
@@ -515,7 +505,7 @@ public final class IRGenerator {
         Operand.Type expected = typeOf(parameterType);
         if (argument.type() == expected) {
             String actualSourceType = sourceTypesByOperand.get(argument);
-            String expectedSourceType = parameterType.name();
+            String expectedSourceType = canonicalTypeName(parameterType.name());
             if (argument.type() != Operand.Type.REF) {
                 return 0;
             }
@@ -531,7 +521,7 @@ public final class IRGenerator {
             if (actualSourceType.equals(expectedSourceType)) {
                 return 0;
             }
-            return expectedSourceType.equals("Object")
+            return expectedSourceType.equals("jvs.lang.Object")
                     || isSubclassOf(actualSourceType, expectedSourceType) ? 1 : -1;
         }
         if (argument.type() == Operand.Type.I32 && expected == Operand.Type.I64) {
@@ -544,7 +534,8 @@ public final class IRGenerator {
     }
 
     private boolean isSubclassOf(String className, String expectedClassName) {
-        String current = className;
+        String current = canonicalTypeName(className);
+        expectedClassName = canonicalTypeName(expectedClassName);
         while (current != null) {
             if (current.equals(expectedClassName)) {
                 return true;
@@ -575,7 +566,7 @@ public final class IRGenerator {
                     && otherOperandType == Operand.Type.REF) {
                 moreSpecific = isSubclassOf(candidateType, otherType)
                         || ((candidateType.endsWith("[]") || candidateType.equals("String"))
-                                && otherType.equals("Object"));
+                                && canonicalTypeName(otherType).equals("jvs.lang.Object"));
             } else {
                 return false;
             }
@@ -1023,11 +1014,22 @@ public final class IRGenerator {
     }
 
     private void registerReferenceType(Operand operand, TypeRecord sourceType) {
-        String className = sourceType.name();
+        String className = canonicalTypeName(sourceType.name());
         sourceTypesByOperand.put(operand, className);
         if (classes.containsKey(className)) {
             referenceTypesByOperand.put(operand, className);
         }
+    }
+
+    private String canonicalTypeName(String typeName) {
+        if (typeName == null) return null;
+        if (typeName.equals("String")) return "jvs.lang.String";
+        if (typeName.equals("Object")) return "jvs.lang.Object";
+        if (typeName.equals("String[]")) return "jvs.lang.String[]";
+        if (typeName.equals("Object[]")) return "jvs.lang.Object[]";
+        if (typeName.startsWith("String[")) return "jvs.lang.String" + typeName.substring("String".length());
+        if (typeName.startsWith("Object[")) return "jvs.lang.Object" + typeName.substring("Object".length());
+        return typeName;
     }
 
     private Operand expression(IRProgram ir, ExpressionInterface expression) {
@@ -1043,8 +1045,11 @@ public final class IRGenerator {
                 return Operand.constant(value, Operand.Type.BOOL);
             if (value == null)
                 return Operand.constant(null, Operand.Type.REF);
-            if (value instanceof String)
-                return Operand.constant(value, Operand.Type.REF);
+            if (value instanceof String) {
+                Operand literalOperand = Operand.constant(value, Operand.Type.REF);
+                sourceTypesByOperand.put(literalOperand, "jvs.lang.String");
+                return literalOperand;
+            }
             throw unsupported("Literal de texto ainda não é suportado pelo backend.");
         }
         if (expression instanceof VariableRecord variable) {
@@ -1366,6 +1371,7 @@ public final class IRGenerator {
     }
 
     private Operand allocateArray(IRProgram ir, String arrayType, Operand length) {
+        arrayType = canonicalTypeName(arrayType);
         String elementType = componentTypeName(arrayType);
         Operand.Type valueType = typeOf(new TypeRecord(elementType));
         int elementSize = switch (valueType) {
@@ -1390,16 +1396,16 @@ public final class IRGenerator {
         if (operand == null || operand.type() != Operand.Type.REF) return "";
         if (operand.kind() == Operand.Kind.CONSTANT) {
             return operand.value() == null ? "null"
-                    : operand.value() instanceof String ? "String" : "Object";
+                    : operand.value() instanceof String ? "jvs.lang.String" : "jvs.lang.Object";
         }
-        return sourceTypesByOperand.getOrDefault(operand, "Object");
+        return canonicalTypeName(sourceTypesByOperand.getOrDefault(operand, "jvs.lang.Object"));
     }
 
     private String componentTypeName(String arrayType) {
         if (arrayType == null || !arrayType.endsWith("[]")) {
             throw unsupported("Era esperado um array, mas o tipo não foi identificado.");
         }
-        return arrayType.substring(0, arrayType.length() - 2);
+        return canonicalTypeName(arrayType.substring(0, arrayType.length() - 2));
     }
 
     private int arrayDimensions(String typeName) {
@@ -1538,7 +1544,7 @@ public final class IRGenerator {
         if (expression instanceof LiteralRecord literal) {
             return literal.value() instanceof String;
         }
-        return "String".equals(sourceTypesByOperand.get(value));
+        return "jvs.lang.String".equals(canonicalTypeName(sourceTypesByOperand.get(value)));
     }
 
     private Operand emitCall(IRProgram ir, CallRecord call, boolean keepResult) {

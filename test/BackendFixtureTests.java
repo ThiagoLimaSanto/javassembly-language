@@ -8,6 +8,7 @@ import java.util.Comparator;
 import java.util.List;
 
 import compiler.Frontend;
+import compiler.TargetPlatform;
 import compiler.ast.records.ProgramRecord;
 import compiler.backend.asm.NasmGenerator;
 import compiler.backend.ir.IRGenerator;
@@ -24,6 +25,9 @@ public final class BackendFixtureTests {
         Path fixtureRoot = args.length == 0
                 ? Path.of("test/fixtures/backend")
                 : Path.of(args[0]);
+        TargetPlatform target = args.length < 2
+                ? TargetPlatform.LINUX_X64
+                : TargetPlatform.fromFlag(args[1]);
         if (!Files.isDirectory(fixtureRoot)) {
             throw new IllegalArgumentException("Backend fixture directory not found: " + fixtureRoot);
         }
@@ -42,8 +46,15 @@ public final class BackendFixtureTests {
 
         List<String> failures = new ArrayList<>();
         int passed = 0;
+        int skipped = 0;
         for (Path fixture : fixtures) {
-            String failure = runFixture(fixture);
+            if (target.isWindows()
+                    && Files.isRegularFile(replaceExtension(fixture, ".low_data_limit"))) {
+                skipped++;
+                System.out.println("SKIP " + fixture + " - artificial Linux data limit");
+                continue;
+            }
+            String failure = runFixture(fixture, target);
             if (failure == null) {
                 passed++;
                 System.out.println("PASS " + fixture);
@@ -54,13 +65,14 @@ public final class BackendFixtureTests {
         }
 
         System.out.println();
-        System.out.println("Backend fixtures: " + passed + "/" + fixtures.size() + " passed.");
+        System.out.println("Backend fixtures (" + target.directoryName() + "): "
+                + passed + "/" + fixtures.size() + " passed, " + skipped + " skipped.");
         if (!failures.isEmpty()) {
             throw new AssertionError(failures.size() + " backend fixture(s) failed.");
         }
     }
 
-    private static String runFixture(Path fixture) {
+    private static String runFixture(Path fixture, TargetPlatform target) {
         String fileName = fixture.getFileName().toString();
         boolean shouldRunSuccessfully = fileName.startsWith("accept_");
         boolean shouldFailAtRuntime = fileName.startsWith("reject_");
@@ -83,19 +95,28 @@ public final class BackendFixtureTests {
             ir = new IROptimizer().optimize(ir);
 
             Path assembly = tempDirectory.resolve("fixture.asm");
-            Path objectFile = tempDirectory.resolve("fixture.o");
-            Path executable = tempDirectory.resolve("fixture");
+            Path objectFile = tempDirectory.resolve("fixture" + target.objectExtension());
+            Path executable = tempDirectory.resolve("fixture" + target.executableExtension());
             Path stdoutFile = tempDirectory.resolve("stdout.txt");
             Path stderrFile = tempDirectory.resolve("stderr.txt");
-            Files.writeString(assembly, new NasmGenerator(program).generate(ir));
+            Files.writeString(assembly, new NasmGenerator(program, target).generate(ir));
 
             ProcessResult assembled = run(List.of(
-                    "nasm", "-f", "elf64", assembly.toString(), "-o", objectFile.toString()), tempDirectory);
+                    "nasm", "-f", target.nasmFormat(), assembly.toString(), "-o", objectFile.toString()),
+                    tempDirectory);
             if (assembled.exitCode() != 0) {
                 return "nasm failed (" + assembled.exitCode() + "): " + assembled.stderr();
             }
-            ProcessResult linked = run(List.of("ld", "-o", executable.toString(), objectFile.toString()),
-                    tempDirectory);
+            List<String> linkCommand = new ArrayList<>();
+            linkCommand.add(target.isWindows() ? "ld.exe" : "ld");
+            if (target.isWindows()) {
+                linkCommand.addAll(List.of("-e", "start", "--subsystem", "console"));
+            }
+            linkCommand.addAll(List.of("-o", executable.toString(), objectFile.toString()));
+            if (target.isWindows()) {
+                linkCommand.addAll(List.of("-lshell32", "-lkernel32"));
+            }
+            ProcessResult linked = run(linkCommand, tempDirectory);
             if (linked.exitCode() != 0) {
                 return "ld failed (" + linked.exitCode() + "): " + linked.stderr();
             }
@@ -160,6 +181,16 @@ public final class BackendFixtureTests {
                 if (!stackTrace.matches("(?:  at [^\\n]+\\([^\\n]+\\.jvs:[0-9]+:[0-9]+\\)\\n)+")
                         || stackTrace.contains("__")) {
                     return "uncaught exception stack trace is malformed: <" + stackTrace + ">";
+                }
+                Path expectedTraceFile = replaceExtension(fixture, ".trace");
+                if (Files.isRegularFile(expectedTraceFile)) {
+                    String firstFrame = stackTrace.lines().findFirst().orElse("");
+                    for (String expectedTracePart : Files.readAllLines(expectedTraceFile)) {
+                        if (!expectedTracePart.isBlank() && !firstFrame.contains(expectedTracePart)) {
+                            return "first runtime frame did not contain <" + expectedTracePart
+                                    + ">; got <" + firstFrame + ">";
+                        }
+                    }
                 }
             }
             return null;

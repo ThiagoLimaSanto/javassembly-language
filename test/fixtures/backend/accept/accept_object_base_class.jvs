@@ -1,0 +1,20 @@
+public class ObjectIdentityProbe { }
+
+public class ObjectBaseClassTest {
+    public static func void main(String[] args) {
+        Object root = new Object();
+        Object first = new ObjectIdentityProbe();
+        Object alias = first;
+        Object other = new ObjectIdentityProbe();
+        String text = "same";
+        Object stringAsObject = text;
+
+        printLn root.equals(root);
+        printLn first.equals(alias);
+        printLn first.equals(other);
+        printLn cmp.eq root.hashCode(), root.hashCode();
+        printLn stringAsObject.equals("same");
+        printLn stringAsObject.equals(other);
+        return;
+    }
+}

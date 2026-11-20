@@ -1,0 +1,8 @@
+-19|19
+3000000002|3000000002
+1|true
+0|false
+2.500000|2.500000
+-2147483648|9223372036854775807
+int format error caught
+long overflow caught

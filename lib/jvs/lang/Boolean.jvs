@@ -1,0 +1,31 @@
+package jvs.lang;
+
+public final class Boolean {
+    public static final Boolean TRUE = new Boolean(True);
+    public static final Boolean FALSE = new Boolean(False);
+
+    private boolean value;
+
+    public Boolean(boolean value) {
+        this.value = value;
+    }
+
+    public func boolean booleanValue() {
+        return value;
+    }
+
+    public static func Boolean valueOf(boolean value) {
+        if (value) {
+            return TRUE;
+        }
+        return FALSE;
+    }
+
+    public native func String toString();
+
+    public native func boolean equals(Object other);
+
+    public native func int hashCode();
+
+    public static native func boolean parseBoolean(String value);
+}

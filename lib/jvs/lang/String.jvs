@@ -1,0 +1,37 @@
+package jvs.lang;
+
+public final class String {
+    private long data;
+    private int byteLength;
+
+    private String() {
+    }
+
+    public native func int length();
+
+    public native func boolean isEmpty();
+
+    public native func boolean equals(Object other);
+
+    public native func int hashCode();
+
+    public native func String toString();
+
+    public native func int codePointAt(int index) throws IndexOutOfBoundsException;
+
+    public native func String substring(int beginIndex) throws IndexOutOfBoundsException;
+
+    public native func String substring(int beginIndex, int endIndex) throws IndexOutOfBoundsException;
+
+    public native func int indexOf(String value);
+
+    public native func int indexOf(String value, int fromIndex);
+
+    public native func boolean startsWith(String prefix);
+
+    public native func boolean endsWith(String suffix);
+
+    public native func boolean contains(String value);
+
+    public native func String[] split(String regex) throws NullPointerException;
+}

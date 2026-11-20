@@ -1,0 +1,30 @@
+package jvs.lang;
+
+public final class Integer {
+    public static final int MIN_VALUE = sub neg 2147483647, 1;
+    public static final int MAX_VALUE = 2147483647;
+
+    private int value;
+
+    public Integer(int value) {
+        this.value = value;
+    }
+
+    public func int intValue() {
+        return value;
+    }
+
+    public static func Integer valueOf(int value) {
+        return new Integer(value);
+    }
+
+    public native func String toString();
+
+    public native func boolean equals(Object other);
+
+    public native func int hashCode();
+
+    public static native func int parseInt(String value) throws NumberFormatException;
+
+    public static native func int parseInt(String value, int radix) throws NumberFormatException;
+}

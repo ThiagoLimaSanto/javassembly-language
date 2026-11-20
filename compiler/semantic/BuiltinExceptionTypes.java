@@ -15,6 +15,7 @@ public final class BuiltinExceptionTypes {
             Map.entry("StackOverflowError", "VirtualMachineError"),
             Map.entry("NoSuchElementException", "RuntimeException"),
             Map.entry("InputMismatchException", "NoSuchElementException"),
+            Map.entry("NumberFormatException", "RuntimeException"),
             Map.entry("IOException", "Exception"),
             Map.entry("ArrayStoreException", "RuntimeException"),
             Map.entry("IndexOutOfBoundsException", "RuntimeException"),
@@ -32,8 +33,8 @@ public final class BuiltinExceptionTypes {
     }
 
     public static boolean isBuiltin(String typeName) {
-        return simpleName(typeName).equals("Throwable")
-                || PARENTS.containsKey(simpleName(typeName));
+        String name = simpleName(typeName);
+        return name.equals("Throwable") || PARENTS.containsKey(name);
     }
 
     public static String parentOf(String typeName) {

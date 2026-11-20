@@ -15,6 +15,7 @@ import compiler.ast.ExpressionInterface;
 import compiler.ast.StatementInterface;
 import compiler.ast.records.*;
 import compiler.ast.visitor.ASTVisitor;
+import compiler.NativeMethodSupport;
 import compiler.exceptions.CompilerInvariantException;
 import compiler.exceptions.LanguageException;
 import compiler.exceptions.SemanticException;
@@ -104,7 +105,10 @@ public class SemanticAnalyzer implements ASTVisitor {
                 SemanticType.primitive(TokenType.DOUBLE);
 
             case "String" ->
-                SemanticType.primitive(TokenType.STRING);
+                SemanticType.classType("jvs.lang.String");
+
+            case "Object" ->
+                SemanticType.classType("jvs.lang.Object");
 
             case "boolean" ->
                 SemanticType.primitive(TokenType.BOOLEAN);
@@ -126,6 +130,9 @@ public class SemanticAnalyzer implements ASTVisitor {
     private SemanticType convertType(TokenType type) {
         if (type == TokenType.NULL) {
             return SemanticType.nullType();
+        }
+        if (type == TokenType.STRING) {
+            return SemanticType.classType("jvs.lang.String");
         }
         return SemanticType.primitive(type);
     }
@@ -255,7 +262,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             }
             currentName = currentClassNode.superClass();
         }
-        compatibleTypes.add("Object");
+        compatibleTypes.add("jvs.lang.Object");
 
         Set<String> immutableTypes = Set.copyOf(compatibleTypes);
         assignableTypes.put(className, immutableTypes);
@@ -331,49 +338,9 @@ public class SemanticAnalyzer implements ASTVisitor {
         return mostSpecificInterfaceDeclarations(declarations);
     }
 
-    private List<FunctionRecord> objectMethods(int line, int column) {
-        return List.of(
-                builtinMethod(TokenType.PUBLIC, false, "boolean", "equals", List.of("Object"), line, column),
-                builtinMethod(TokenType.PUBLIC, false, "int", "hashCode", List.of(), line, column),
-                builtinMethod(TokenType.PUBLIC, false, "String", "toString", List.of(), line, column),
-                builtinMethod(TokenType.PUBLIC, true, "Class", "getClass", List.of(), line, column),
-                builtinMethod(TokenType.PROTECTED, false, "Object", "clone", List.of(), line, column),
-                builtinMethod(TokenType.PROTECTED, false, "void", "finalize", List.of(), line, column),
-                builtinMethod(TokenType.PUBLIC, true, "void", "notify", List.of(), line, column),
-                builtinMethod(TokenType.PUBLIC, true, "void", "notifyAll", List.of(), line, column),
-                builtinMethod(TokenType.PUBLIC, true, "void", "wait", List.of(), line, column),
-                builtinMethod(TokenType.PUBLIC, true, "void", "wait", List.of("long"), line, column),
-                builtinMethod(TokenType.PUBLIC, true, "void", "wait", List.of("long", "int"), line, column));
-    }
-
-    private FunctionRecord builtinMethod(
-            TokenType visibility,
-            boolean isFinal,
-            String returnType,
-            String name,
-            List<String> parameterTypes,
-            int line,
-            int column) {
-        List<ParameterRecord> parameters = new ArrayList<>();
-        for (int index = 0; index < parameterTypes.size(); index++) {
-            parameters.add(new ParameterRecord(
-                    new TypeRecord(parameterTypes.get(index)),
-                    "arg" + index,
-                    line,
-                    column));
-        }
-        return new FunctionRecord(
-                visibility,
-                false,
-                isFinal,
-                new TypeRecord(returnType),
-                name,
-                parameters,
-                null,
-                false,
-                false,
-                line,
-                column);
+    private List<FunctionRecord> objectMethods() {
+        ClassRecord objectClass = classes.get("jvs.lang.Object");
+        return objectClass == null ? List.of() : objectClass.functions();
     }
 
     private List<FunctionRecord> mostSpecificInterfaceDeclarations(
@@ -490,7 +457,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             if (!method.isDefault()) {
                 continue;
             }
-            for (FunctionRecord objectMethod : objectMethods(method.line(), method.column())) {
+            for (FunctionRecord objectMethod : objectMethods()) {
                 if (objectMethod.visibility() == TokenType.PUBLIC
                         && sameSignature(method, objectMethod)) {
                     throw new SemanticException(
@@ -599,16 +566,6 @@ public class SemanticAnalyzer implements ASTVisitor {
                     "Só é possível instanciar uma classe concreta.",
                     creation.line(),
                     creation.column());
-        }
-
-        if (type.className().equals("Object")) {
-            if (!creation.arguments().isEmpty()) {
-                throw new SemanticException(
-                        "O construtor de 'Object' não recebe argumentos.",
-                        creation.line(),
-                        creation.column());
-            }
-            return null;
         }
 
         ClassRecord classNode = classes.get(type.className());
@@ -1143,7 +1100,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             for (FunctionRecord candidate : candidates) {
                 interfaceSignatures.add(methodSignature(candidate));
             }
-            for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+            for (FunctionRecord function : objectMethods()) {
                 if (function.visibility() == TokenType.PUBLIC
                         && !interfaceSignatures.contains(methodSignature(function))
                         && matchesCall(function, call.name(), argumentTypes)) {
@@ -1206,7 +1163,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             className = classNode.superClass();
         }
 
-        for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+        for (FunctionRecord function : objectMethods()) {
             if (shadowedSignatures.add(methodSignature(function))
                     && matchesCall(function, call.name(), argumentTypes)) {
                 methodNameFound = true;
@@ -1659,14 +1616,11 @@ public class SemanticAnalyzer implements ASTVisitor {
             if (semanticType.className() == null) {
                 return;
             }
-            if (semanticType.className().equals("Object")) {
+            if (semanticType.className().equals("jvs.lang.Object")) {
                 return;
             }
         }
 
-        if (semanticType.isClass() && semanticType.className().equals("Object")) {
-            return;
-        }
         if (semanticType.isClass() && semanticType.className().equals("Class")) {
             return;
         }
@@ -1784,7 +1738,7 @@ public class SemanticAnalyzer implements ASTVisitor {
         for (FunctionRecord candidate : candidates) {
             declaredSignatures.add(methodSignature(candidate));
         }
-        for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+        for (FunctionRecord function : objectMethods()) {
             if (interfaces.containsKey(currentClass)
                     && function.visibility() != TokenType.PUBLIC) {
                 continue;
@@ -1988,9 +1942,9 @@ public class SemanticAnalyzer implements ASTVisitor {
             superClass = parent.superClass();
         }
 
-        for (FunctionRecord function : objectMethods(call.line(), call.column())) {
+        for (FunctionRecord function : objectMethods()) {
             if (function.name().equals(call.name())
-                    && isMemberAccessibleFromCurrentClass(function.visibility(), "Object")
+                    && isMemberAccessibleFromCurrentClass(function.visibility(), "jvs.lang.Object")
                     && matchesCall(function, call.name(), argumentTypes)) {
                 candidates.add(function);
                 methodFound = true;
@@ -2072,7 +2026,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             superClass = parent.superClass();
         }
 
-        for (FunctionRecord objectMethod : objectMethods(function.line(), function.column())) {
+        for (FunctionRecord objectMethod : objectMethods()) {
             if (sameSignature(objectMethod, function)) {
                 return objectMethod;
             }
@@ -2104,9 +2058,6 @@ public class SemanticAnalyzer implements ASTVisitor {
             ClassRecord parent = classes.get(current.superClass());
 
             if (parent == null) {
-                if (current.superClass().equals("Object")) {
-                    break;
-                }
                 if (BuiltinExceptionTypes.isBuiltin(current.superClass())) {
                     break;
                 }
@@ -2146,7 +2097,6 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         if (classNode.superClass() != null
-                && !classNode.superClass().equals("Object")
                 && !BuiltinExceptionTypes.isBuiltin(classNode.superClass())
                 && classNode.constructors().isEmpty()) {
             validateImplicitSuperConstructor(
@@ -3009,10 +2959,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private boolean isReferenceType(SemanticType type) {
-        return type.isArray()
-                || type.isClass()
-                || (type.isPrimitive()
-                        && type.primitiveType() == TokenType.STRING);
+        return type.isArray() || type.isClass();
     }
 
     private SemanticType componentType(SemanticType arrayType) {
@@ -3067,11 +3014,8 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         if (expected.isClass()
-                && expected.className().equals("Object")
-                && (received.isClass()
-                        || received.isArray()
-                        || (received.isPrimitive()
-                                && received.primitiveType() == TokenType.STRING))) {
+                && expected.className().equals("jvs.lang.Object")
+                && (received.isClass() || received.isArray())) {
             return true;
         }
 
@@ -3111,8 +3055,7 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private boolean isNonReferencePrimitive(SemanticType type) {
-        return type.isPrimitive()
-                && type.primitiveType() != TokenType.STRING;
+        return type.isPrimitive();
     }
 
     private void validateAssignableType(
@@ -3134,10 +3077,6 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         for (InterfaceRecord interfaceNode : node.interfaces()) {
             withSource(node, interfaceNode.name(), () -> {
-                if (interfaceNode.name().equals("Object")) {
-                    throw new SemanticException("'Object' é um tipo predefinido e não pode ser redeclarado.",
-                            interfaceNode.line(), interfaceNode.column());
-                }
                 if (interfaces.containsKey(interfaceNode.name())) {
                     throw new SemanticException("Interface '" + interfaceNode.name() + "' já declarada.",
                             interfaceNode.line(), interfaceNode.column());
@@ -3148,10 +3087,6 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         for (ClassRecord classNode : node.classes()) {
             withSource(node, classNode.name(), () -> {
-                if (classNode.name().equals("Object")) {
-                    throw new SemanticException("'Object' é um tipo predefinido e não pode ser redeclarado.",
-                            classNode.line(), classNode.column());
-                }
                 if (classes.containsKey(classNode.name())) {
                     throw new SemanticException("Classe '" + classNode.name() + "' já declarada.",
                             classNode.line(), classNode.column());
@@ -3241,9 +3176,9 @@ public class SemanticAnalyzer implements ASTVisitor {
                             function.column());
                 }
                 if (function.isNative()
-                        && (!function.isStatic() || function.isAbstract() || function.block() != null)) {
+                        && (function.isAbstract() || function.block() != null)) {
                     throw new SemanticException(
-                            "Método native precisa ser static, não abstract e não pode ter corpo.",
+                            "Método native não pode ser abstract nem ter corpo.",
                             function.line(),
                             function.column());
                 }
@@ -3276,24 +3211,10 @@ public class SemanticAnalyzer implements ASTVisitor {
 
     private void validateNativeBackendDeclaration(ClassRecord owner, FunctionRecord function) {
         if (!function.isNative()) return;
-        String expectedReturn = switch (function.name()) {
-            case "readInt" -> "int";
-            case "readLong" -> "long";
-            case "readDouble" -> "double";
-            case "readBoolean" -> "boolean";
-            case "readString", "readLine" -> "String";
-            default -> null;
-        };
-        boolean scannerOwner = owner.name().equals("jvs.io.Scanner")
-                || owner.name().equals("io.Scanner");
-        boolean supported = scannerOwner
-                && expectedReturn != null
-                && function.parameters().isEmpty()
-                && function.returnType().name().equals(expectedReturn);
-        if (!supported) {
+        if (!NativeMethodSupport.supports(owner, function)) {
             throw new SemanticException(
                     "Método native sem implementação no runtime: '" + owner.name() + "."
-                            + function.name() + "'. Atualmente, native está reservado aos métodos de entrada do Scanner.",
+                            + function.name() + "'.",
                     function.line(),
                     function.column());
         }
@@ -3327,9 +3248,9 @@ public class SemanticAnalyzer implements ASTVisitor {
             }
 
             if (node.isNative()) {
-                if (!node.isStatic() || node.isAbstract() || node.block() != null) {
+                if (node.isAbstract() || node.block() != null) {
                     throw new SemanticException(
-                            "Método native precisa ser static, não abstract e não pode ter corpo.",
+                            "Método native não pode ser abstract nem ter corpo.",
                             node.line(),
                             node.column());
                 }
@@ -3544,6 +3465,11 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (type.isNull()) {
             return;
         }
+        if (type.isClass() && type.className().equals("jvs.lang.String")) {
+            throw new SemanticException(
+                    "Objetos String são imutáveis e não podem ser liberados manualmente.",
+                    node.line(), node.column());
+        }
         boolean classReference = type.isClass() && classes.containsKey(type.className());
         if (!type.isArray() && !classReference) {
             throw new SemanticException(
@@ -3630,7 +3556,10 @@ public class SemanticAnalyzer implements ASTVisitor {
         for (int index = 0; index < expectedTypes.size(); index++) {
             SemanticType actual = getExpressionType(node.arguments().get(index));
             TokenType expected = expectedTypes.get(index);
-            if (isVoid(actual) || !actual.isPrimitive() || actual.primitiveType() != expected) {
+            boolean matches = expected == TokenType.STRING
+                    ? actual.isClass() && isSubclassOf(actual.className(), "jvs.lang.String")
+                    : actual.isPrimitive() && actual.primitiveType() == expected;
+            if (isVoid(actual) || !matches) {
                 throw invalidPrintFormat(node,
                         "o argumento " + (index + 1) + " deve ser do tipo " + formatTypeName(expected));
             }

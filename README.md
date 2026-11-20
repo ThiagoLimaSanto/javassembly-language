@@ -224,6 +224,28 @@ Para um arquivo fora de `src/`, a pasta `out/` é criada ao lado dele. Imports d
 biblioteca padrão, como `jvs.io.Scanner`, são resolvidos a partir da instalação do
 compilador.
 
+## Inspecionar o assembly e erros em execução
+
+`jvsc` mantém o assembly gerado no diretório de saída do projeto. No Linux, ele fica
+em `out/NomeDoArquivo.asm`; para Windows, em `out/windows-x64/NomeDoArquivo.asm`.
+Abra esse arquivo em um editor de texto para ver as instruções NASM e o runtime
+gerado pelo compilador:
+
+```bash
+# Linux
+jvsc -l projects/exemplo/src/Teste.jvs
+less projects/exemplo/out/Teste.asm
+
+# Windows PowerShell
+jvsc -w projects/exemplo/src/Teste.jvs
+Get-Content projects/exemplo/out/windows-x64/Teste.asm
+```
+
+Se ocorrer uma exceção não capturada em runtime, a mensagem inclui uma stack trace
+com classe, método, arquivo `.jvs`, linha e coluna. Use o primeiro frame para localizar
+a instrução que originou a falha; os frames seguintes mostram os chamadores. O mesmo
+formato é usado pelos executáveis Linux e Windows.
+
 ## Argumentos de `main`
 
 Quando o programa declara `main(String[] args)`, o compilador cria um array com os

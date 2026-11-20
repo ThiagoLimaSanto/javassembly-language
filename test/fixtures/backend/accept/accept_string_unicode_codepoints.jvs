@@ -1,0 +1,14 @@
+public class StringUnicodeCodePointsTest {
+    public static func void main(String[] args) {
+        String text = "Ação🌟";
+        String part = text.substring(1, 4);
+        String[] words = "café🌟fim".split("🌟");
+
+        printLn text.length();
+        printLn part;
+        printLn words.length;
+        printLn words[0];
+        printLn words[1];
+        return;
+    }
+}

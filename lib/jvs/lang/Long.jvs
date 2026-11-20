@@ -1,0 +1,30 @@
+package jvs.lang;
+
+public final class Long {
+    public static final long MIN_VALUE = sub neg 9223372036854775807L, 1L;
+    public static final long MAX_VALUE = 9223372036854775807L;
+
+    private long value;
+
+    public Long(long value) {
+        this.value = value;
+    }
+
+    public func long longValue() {
+        return value;
+    }
+
+    public static func Long valueOf(long value) {
+        return new Long(value);
+    }
+
+    public native func String toString();
+
+    public native func boolean equals(Object other);
+
+    public native func int hashCode();
+
+    public static native func long parseLong(String value) throws NumberFormatException;
+
+    public static native func long parseLong(String value, int radix) throws NumberFormatException;
+}

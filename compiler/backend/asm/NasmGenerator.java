@@ -31,6 +31,7 @@ import compiler.exceptions.runtime.InvalidFreeException;
 import compiler.exceptions.runtime.InvalidReferenceException;
 import compiler.exceptions.runtime.NegativeArraySizeException;
 import compiler.exceptions.runtime.NoSuchElementException;
+import compiler.exceptions.runtime.NumberFormatException;
 import compiler.exceptions.runtime.NullPointerException;
 import compiler.exceptions.runtime.OutOfMemoryError;
 import compiler.exceptions.runtime.StackOverflowError;
@@ -52,6 +53,7 @@ public class NasmGenerator {
 
     private final Map<Operand, Integer> stackOffsets = new LinkedHashMap<>();
     private final Map<String, String> stringLabels = new LinkedHashMap<>();
+    private final Map<String, String> stringObjectLabels = new LinkedHashMap<>();
     private final Set<String> arrayTypeNames = new LinkedHashSet<>();
     private int frameSize;
     private int nextDivisionLabel;
@@ -178,6 +180,7 @@ public class NasmGenerator {
         appendRuntimeMessage(asm, "__array_size_message", new NegativeArraySizeException());
         appendRuntimeMessage(asm, "__invalid_free_message", new InvalidFreeException());
         appendRuntimeMessage(asm, "__scanner_input_error_message", new InputMismatchException());
+        appendRuntimeMessage(asm, "__number_format_error_message", new NumberFormatException());
         appendRuntimeMessage(asm, "__arithmetic_error_message", new ArithmeticException());
         appendRuntimeMessage(asm, "__out_of_memory_message", new OutOfMemoryError());
         appendRuntimeMessage(asm, "__abstract_method_message", new AbstractMethodError());
@@ -201,10 +204,17 @@ public class NasmGenerator {
         }
         asm.append("__f64_scale: dq 0x412e848000000000\n");
         asm.append("__f64_round: dq 0x3fe0000000000000\n\n");
-        asm.append("__jvs_main_args_array_type: db \"String[]\", 0\n")
-                .append("__jvs_main_args_element_type: db \"String\", 0\n");
+        asm.append("__jvs_main_args_array_type: db \"jvs.lang.String[]\", 0\n")
+                .append("__jvs_main_args_element_type: db \"jvs.lang.String\", 0\n");
         appendVirtualTables(asm);
         asm.append("section .data\n");
+        for (Map.Entry<String, String> entry : stringObjectLabels.entrySet()) {
+            String value = entry.getKey();
+            asm.append(entry.getValue()).append(":\n")
+                    .append("    dq __vtable_jvs.lang.String\n")
+                    .append("    dq ").append(stringLabels.get(value)).append('\n')
+                    .append("    dq ").append(value.getBytes(StandardCharsets.UTF_8).length).append('\n');
+        }
         asm.append("__jvs_array_vtable: dq 0\n");
         for (String typeName : BuiltinExceptionTypes.names()) {
             asm.append(builtinVtableLabel(typeName)).append(": dq 0\n");
@@ -291,6 +301,7 @@ public class NasmGenerator {
                 runtimeException("StackOverflowError", "__stack_overflow_message", new StackOverflowError()),
                 runtimeException("InvalidFreeException", "__invalid_free_message", new InvalidFreeException()),
                 runtimeException("InputMismatchException", "__scanner_input_error_message", new InputMismatchException()),
+                runtimeException("NumberFormatException", "__number_format_error_message", new NumberFormatException()),
                 runtimeException("NoSuchElementException", "__no_such_element_message", new NoSuchElementException()),
                 runtimeException("IOException", "__io_error_message", new IOException()));
     }
@@ -448,6 +459,7 @@ public class NasmGenerator {
 
     private void prepareStringLabels(List<IRInstruction> instructions) {
         stringLabels.clear();
+        stringObjectLabels.clear();
         arrayTypeNames.clear();
         nextStringLabel = 0;
         registerStringValue("\n");
@@ -456,16 +468,29 @@ public class NasmGenerator {
         registerStringValue("nan");
         registerStringValue("inf");
         registerStringValue("overflow");
+        registerStringValue("NaN");
+        registerStringValue("Infinity");
         registerStringValue("(null)");
         registerStringValue("");
         registerStringValue("Throwable");
-        registerStringValue("Object");
+        registerStringValue("jvs.lang.Object");
         registerStringValue("String");
+        registerStringValue("String[]");
+        registerStringValue("jvs.lang.String");
+        registerStringValue("jvs.lang.String[]");
+        registerStringValue("true");
+        registerStringValue("false");
+        arrayTypeNames.add("String[]");
+        arrayTypeNames.add("jvs.lang.String[]");
         registerStringValue("int");
         registerStringValue("long");
         registerStringValue("double");
         registerStringValue("boolean");
         for (String typeName : BuiltinExceptionTypes.names()) registerStringValue(typeName);
+        for (RuntimeExceptionSpec spec : runtimeExceptionSpecs()) {
+            registerStringValue(spec.typeName());
+            registerStringValue(spec.diagnostic().getMessage());
+        }
         if (sourceProgram != null) {
             for (ClassRecord classNode : sourceProgram.classes()) {
                 registerStringValue(classNode.name());
@@ -500,6 +525,10 @@ public class NasmGenerator {
                 arrayTypeNames.add(arrayType);
                 for (String parent : arraySupertypes(arrayType)) registerStringValue(parent);
             }
+        }
+        int objectIndex = 0;
+        for (String value : stringLabels.keySet()) {
+            stringObjectLabels.put(value, "__jvs_string_object_" + objectIndex++);
         }
     }
 
@@ -1039,8 +1068,8 @@ public class NasmGenerator {
                 asm.append("    call __print_f64\n");
             }
             case REF -> {
-                loadI64(asm, value, "rsi");
-                asm.append("    call __write_cstr\n");
+                loadI64(asm, value, "rdi");
+                asm.append("    call __jvs_string_write\n");
             }
             case I64 -> {
                 loadI64(asm, value, "rax");
@@ -1138,8 +1167,8 @@ public class NasmGenerator {
                 asm.append("    call __print_f64\n");
             }
             case 's' -> {
-                loadI64(asm, argument, "rsi");
-                asm.append("    call __write_cstr\n");
+                loadI64(asm, argument, "rdi");
+                asm.append("    call __jvs_string_write\n");
             }
             case 'b' -> {
                 loadI32(asm, argument, "eax");
@@ -1379,6 +1408,10 @@ public class NasmGenerator {
 
         asm.append("__heap_validate:\n");
         asm.append("    mov r11, rdi\n");
+        for (String stringObjectLabel : stringObjectLabels.values()) {
+            asm.append("    lea rax, [rel ").append(stringObjectLabel).append("]\n")
+                    .append("    cmp r11, rax\n    je .heap_validate_static\n");
+        }
         asm.append("    mov r8, qword [rel __heap_start]\n");
         asm.append("    test r8, r8\n");
         asm.append("    jz __runtime_invalid_reference\n");
@@ -1396,6 +1429,8 @@ public class NasmGenerator {
         asm.append(".heap_validate_found:\n");
         asm.append("    cmp qword [r8 + 8], 1\n");
         asm.append("    jne __runtime_invalid_reference\n");
+        asm.append("    ret\n");
+        asm.append(".heap_validate_static:\n");
         asm.append("    ret\n");
 
         asm.append("__runtime_null_pointer:\n");
@@ -1424,6 +1459,9 @@ public class NasmGenerator {
 
         asm.append("__runtime_scanner_input_error:\n");
         appendRuntimeExceptionTrap(asm, "__scanner_input_error_message");
+
+        asm.append("__runtime_number_format:\n");
+        appendRuntimeExceptionTrap(asm, "__number_format_error_message");
 
         asm.append("__runtime_no_such_element:\n");
         appendRuntimeExceptionTrap(asm, "__no_such_element_message");
@@ -1503,6 +1541,10 @@ public class NasmGenerator {
             appendLinuxCommandLineSupport(asm);
         }
         ScannerRuntime.append(asm, target.isWindows());
+        List<String> runtimeClassNames = sourceProgram == null
+                ? List.of()
+                : sourceProgram.classes().stream().map(ClassRecord::name).toList();
+        StringRuntime.append(asm, stringLabels, stringObjectLabels, runtimeClassNames);
     }
 
     private void appendUncaughtTracePrinter(StringBuilder asm) {
@@ -1724,6 +1766,9 @@ public class NasmGenerator {
                 .append("    shl rax, 3\n")
                 .append("    mov rdx, qword [rel __jvs_start_argv]\n")
                 .append("    mov rcx, qword [rdx+rax]\n")
+                .append("    mov rdi, rcx\n")
+                .append("    call __jvs_new_string_cstr\n")
+                .append("    mov rcx, rax\n")
                 .append("    mov rax, qword [rbp-8]\n")
                 .append("    mov rdx, qword [rbp-16]\n")
                 .append("    mov qword [rax+rdx*8+32], rcx\n")
@@ -1921,14 +1966,9 @@ public class NasmGenerator {
         asm.append("    lea r10, [rel __jvs_array_vtable]\n");
         asm.append("    cmp rax, r10\n    je ").append(arrayValue).append('\n');
 
-        // Object[] accepts any reference. String has no object header in this runtime,
-        // so its statically known immutable string representation is checked here.
-        asm.append("    lea r10, [rel ").append(stringLabels.get("Object")).append("]\n")
+        // Object[] accepts any reference.
+        asm.append("    lea r10, [rel ").append(stringLabels.get("jvs.lang.Object")).append("]\n")
                 .append("    cmp qword [r11 - 8], r10\n    je ").append(allowed).append('\n');
-        if (staticValueType.equals("String")) {
-            asm.append("    lea r10, [rel ").append(stringLabels.get("String")).append("]\n")
-                    .append("    cmp qword [r11 - 8], r10\n    je ").append(allowed).append('\n');
-        }
 
         if (sourceProgram != null) {
             for (ClassRecord candidate : sourceProgram.classes()) {
@@ -1983,14 +2023,16 @@ public class NasmGenerator {
             ClassRecord sourceClass = sourceProgram == null ? null
                     : findSourceClass(current);
             if (sourceClass != null) {
-                current = sourceClass.superClass() == null ? "Object" : sourceClass.superClass();
+                current = sourceClass.superClass() == null
+                        ? (sourceClass.name().equals("jvs.lang.Object") ? null : "jvs.lang.Object")
+                        : sourceClass.superClass();
             } else if (BuiltinExceptionTypes.isBuiltin(current)) {
                 current = BuiltinExceptionTypes.parentOf(current);
             } else {
-                current = current.equals("Object") ? null : "Object";
+                current = current.equals("jvs.lang.Object") ? null : "jvs.lang.Object";
             }
         }
-        if (!typeName.equals("Object")) result.add("Object");
+        if (!typeName.equals("jvs.lang.Object")) result.add("jvs.lang.Object");
         return List.copyOf(result);
     }
 
@@ -2007,12 +2049,12 @@ public class NasmGenerator {
         if (isPrimitiveArrayComponent(component)) {
             result.add(arrayType);
             for (int level = 1; level < dimensions; level++) {
-                result.add("Object" + "[]".repeat(level));
+                result.add("jvs.lang.Object" + "[]".repeat(level));
             }
         } else {
             for (String parent : classSupertypes(component)) result.add(parent + suffix);
             for (int level = 1; level < dimensions; level++) {
-                result.add("Object" + "[]".repeat(level));
+                result.add("jvs.lang.Object" + "[]".repeat(level));
             }
         }
         return List.copyOf(result);
@@ -2092,7 +2134,13 @@ public class NasmGenerator {
                 : "[r11 + " + offset + "]";
 
         switch (value.type()) {
-            case I32, BOOL -> {
+            case BOOL -> {
+                loadI32(asm, value, "edx");
+                asm.append("    mov byte ")
+                        .append(fieldAddress)
+                        .append(", dl\n");
+            }
+            case I32 -> {
                 loadI32(asm, value, "edx");
                 asm.append("    mov dword ")
                         .append(fieldAddress)
@@ -2200,7 +2248,13 @@ public class NasmGenerator {
                 : "[rax + " + offset + "]";
 
         switch (instruction.destination().type()) {
-            case I32, BOOL -> {
+            case BOOL -> {
+                asm.append("    movzx eax, byte ")
+                        .append(fieldAddress)
+                        .append("\n");
+                storeI32(asm, instruction.destination(), "eax");
+            }
+            case I32 -> {
                 asm.append("    mov eax, dword ")
                         .append(fieldAddress)
                         .append("\n");
@@ -2575,10 +2629,11 @@ public class NasmGenerator {
         }
         for (RuntimeExceptionSpec spec : runtimeExceptionSpecs()) {
             asm.append(spec.objectLabel()).append("_message_").append(accessorId).append(":\n");
-            asm.append("    mov rax, qword [rdi + 16]\n    jmp ").append(done).append('\n');
+            asm.append("    lea rax, [rel ").append(stringObjectLabels.get(spec.diagnostic().getMessage()))
+                    .append("]\n    jmp ").append(done).append('\n');
         }
         asm.append(fallback).append(":\n");
-        asm.append("    lea rax, [rel ").append(stringLabels.get("")).append("]\n");
+        asm.append("    lea rax, [rel ").append(stringObjectLabels.get("")).append("]\n");
         asm.append(done).append(":\n");
         storeI64(asm, instruction.destination(), "rax");
     }
@@ -2604,15 +2659,17 @@ public class NasmGenerator {
             asm.append("    cmp rax, r10\n    je __exception_type_source_")
                     .append(accessorId).append('_').append(index).append('\n');
         }
-        asm.append("    lea rax, [rel ").append(stringLabels.get("Throwable")).append("]\n");
+        asm.append("    lea rax, [rel ").append(stringObjectLabels.get("Throwable")).append("]\n");
         asm.append("    jmp ").append(done).append('\n');
         for (RuntimeExceptionSpec spec : runtimeExceptionSpecs()) {
             asm.append(spec.objectLabel()).append("_type_").append(accessorId).append(":\n");
-            asm.append("    mov rax, qword [rdi + 8]\n    jmp ").append(done).append('\n');
+            asm.append("    lea rax, [rel ").append(stringObjectLabels.get(spec.typeName()))
+                    .append("]\n    jmp ").append(done).append('\n');
         }
         for (int index = 0; index < sourceProgram.classes().size(); index++) {
             asm.append("__exception_type_source_").append(accessorId).append('_').append(index).append(":\n");
-            asm.append("    lea rax, [rel ").append(sourceClassTypeLabel(index)).append("]\n");
+            asm.append("    lea rax, [rel ").append(stringObjectLabels.get(sourceProgram.classes().get(index).name()))
+                    .append("]\n");
             asm.append("    jmp ").append(done).append('\n');
         }
         asm.append(done).append(":\n");
@@ -2700,7 +2757,7 @@ public class NasmGenerator {
             Object value = source.value();
             if (value instanceof String text) {
                 asm.append("    lea ").append(register).append(", [rel ")
-                        .append(stringLabels.get(text)).append("]\n");
+                        .append(stringObjectLabels.get(text)).append("]\n");
                 return;
             }
             String immediate;

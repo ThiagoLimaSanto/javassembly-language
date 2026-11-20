@@ -1,0 +1,19 @@
+public class StringClassMethodsTest {
+    public static func void main(String[] args) {
+        String text = "hello world";
+        String suffix = text.substring(6);
+        String prefix = text.substring(0, 5);
+        String[] pieces = "a,b,".split(",");
+        String[] onlySeparators = ",,,".split(",");
+        String[] emptyText = "".split(",");
+
+        printLn text.length();
+        printLn suffix;
+        printLn prefix.equals("hello");
+        printfLn "%d|%s|%s", pieces.length, pieces[0], pieces[1];
+        printLn onlySeparators.length;
+        printLn emptyText.length;
+        printLn emptyText[0].length();
+        return;
+    }
+}

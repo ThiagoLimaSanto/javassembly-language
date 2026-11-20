@@ -1,0 +1,7 @@
+public class RuntimeSourceLocation {
+    public static func void main(String[] args) {
+        int value = div 10, 0;
+        printLn value;
+        return;
+    }
+}

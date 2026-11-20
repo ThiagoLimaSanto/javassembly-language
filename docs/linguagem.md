@@ -37,7 +37,23 @@ instalação e pastas de saída estão descritas no [README](../README.md).
 ## Tipos e variáveis
 
 Os tipos básicos são `int` (32 bits), `long` (64 bits), `double`, `boolean` e `String`.
+
+### Operações de `String`
+
+`String.length()` e os índices de `substring(beginIndex)` e
+`substring(beginIndex, endIndex)` contam pontos de código Unicode, não bytes UTF-8.
+Isso significa que um caractere acentuado ou um emoji fora do plano básico ocupa
+uma posição. Sequências combinadas visualmente, como uma letra seguida de acento
+combinante, ainda contam como mais de um ponto de código.
+
+`String.split(regex)` interpreta padrões regex simples: separadores literais,
+`.`, `\\d`, `\\s`, `\\w`, classes ASCII como `[a-z]` e o quantificador `+`.
+Ainda não há suporte completo à sintaxe de `java.util.regex.Pattern`, como grupos,
+alternância, âncoras, quantificadores `?`/`*` e lookarounds. Campos vazios finais
+são descartados, como no `split(regex)` do Java com limite zero.
 Classes também podem ser usadas como tipos. Booleanos são escritos `True` e `False`.
+Toda classe herda implicitamente de `jvs.lang.Object`, que fornece igualdade por
+identidade, `hashCode()` e uma representação `tipo@hash` em `toString()`.
 
 ```java
 int quantidade = 3;
@@ -49,6 +65,34 @@ String nome = "Ana";
 
 O sufixo `L` indica um literal `long`. A linguagem verifica tipos e conversões antes
 de gerar o executável.
+
+Os tipos wrapper da biblioteca `jvs.lang` representam valores primitivos como objetos.
+Use as fábricas `valueOf` para criá-los e os métodos `intValue()`, `longValue()`,
+`booleanValue()` ou `doubleValue()` para recuperar o valor primitivo:
+
+```java
+import jvs.lang.Integer;
+
+Integer valor = Integer.valueOf(19);
+int primitivo = valor.intValue();
+printLn primitivo;
+```
+
+Os wrappers comparam valores em `equals()` e mantêm `hashCode()` consistente.
+`Integer.parseInt(texto[, radix])` e `Long.parseLong(texto[, radix])` validam
+formato, radix entre 2 e 36 e overflow. `Double.parseDouble(texto)` aceita números
+decimais, expoentes, `NaN` e `Infinity`; `Boolean.parseBoolean(texto)` retorna
+`True` apenas para a palavra `true`, sem diferenciar maiúsculas de minúsculas.
+`Integer` e `Long` expõem `MIN_VALUE` e `MAX_VALUE`; `Boolean` expõe `TRUE` e
+`FALSE`; `Double` expõe `NaN`, `POSITIVE_INFINITY` e `NEGATIVE_INFINITY`.
+No momento, `Double.parseDouble` não aceita espaços externos nem literais
+hexadecimais de ponto flutuante.
+
+Além de `length`, `substring` e `split`, `String` oferece `isEmpty`, `codePointAt`,
+`indexOf`, `startsWith`, `endsWith`, `contains`, `equals` e `hashCode`.
+
+`Integer.parseInt(texto)` e `Long.parseLong(texto)` convertem texto em números e
+lançam `NumberFormatException` se o conteúdo não for válido ou exceder o limite do tipo.
 
 ## Operações e condições
 

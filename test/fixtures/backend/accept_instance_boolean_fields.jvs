@@ -1,0 +1,14 @@
+class BooleanFields {
+    public boolean first;
+    public boolean second;
+}
+
+public class InstanceBooleanFields {
+    public static func void main(String[] args) {
+        BooleanFields fields = new BooleanFields();
+        fields.second = True;
+        fields.first = False;
+        printLn fields.second;
+        return;
+    }
+}

@@ -215,7 +215,7 @@ public class Parser {
 
         private String resolveTypeName(String name) {
                 if (name.equals("Object")) {
-                        return name;
+                        return "jvs.lang.Object";
                 }
                 String imported = importedTypes.get(name);
                 if (imported != null) {
@@ -338,9 +338,7 @@ public class Parser {
                                 TokenType.CLASS,
                                 "Esperado 'class'");
 
-                Token name = tokens.consume(
-                                TokenType.IDENTIFIER,
-                                "Esperado o nome da classe");
+                Token name = consumeTypeIdentifier("Esperado o nome da classe");
 
                 String superClass = null;
 
@@ -396,7 +394,7 @@ public class Parser {
                         if (tokens.verify(TokenType.FUNC)) {
                                 functions.add(functionDeclaration(modifiers));
 
-                        } else if (tokens.verify(TokenType.IDENTIFIER)
+                        } else if (isTypeIdentifier(tokens.current())
                                         && tokens.current().getLexeme().equals(name.getLexeme())
                                         && tokens.peekNext().getType() == TokenType.OPEN_PARENTHESIS) {
                                 if (modifiers.isStatic() || modifiers.isFinal()
@@ -884,12 +882,6 @@ public class Parser {
                                         name.getLine(),
                                         name.getColumn());
                 }
-                if (modifiers.isNative() && !modifiers.isStatic()) {
-                        throw new SyntacticException(
-                                        "Nesta versão, métodos native precisam ser static.",
-                                        name.getLine(),
-                                        name.getColumn());
-                }
                 if (modifiers.isAbstract()) {
                         if (modifiers.isStatic() || modifiers.isFinal()
                                         || visibility == TokenType.PRIVATE) {
@@ -928,9 +920,7 @@ public class Parser {
         }
 
         private ConstructorRecord constructorDeclaration(TokenType visibility) {
-                Token name = tokens.consume(
-                                TokenType.IDENTIFIER,
-                                "Esperado nome do construtor");
+                Token name = consumeTypeIdentifier("Esperado nome do construtor");
                 tokens.consume(TokenType.OPEN_PARENTHESIS, "Esperado '(' após nome do construtor");
                 List<ParameterRecord> parameters = parameters();
                 tokens.consume(TokenType.CLOSE_PARENTHESIS, "Esperado ')' após parâmetros");
@@ -977,6 +967,20 @@ public class Parser {
                                 new BlockRecord(commands),
                                 name.getLine(),
                                 name.getColumn());
+        }
+
+        private Token consumeTypeIdentifier(String message) {
+                Token token = tokens.current();
+                if (token.getType() == TokenType.STRING && token.getLexeme().equals("String")) {
+                        return tokens.consume(TokenType.STRING, message);
+                }
+                return tokens.consume(TokenType.IDENTIFIER, message);
+        }
+
+        private boolean isTypeIdentifier(Token token) {
+                return token.getType() == TokenType.IDENTIFIER
+                                || (token.getType() == TokenType.STRING
+                                                && token.getLexeme().equals("String"));
         }
 
         private List<ParameterRecord> parameters() {

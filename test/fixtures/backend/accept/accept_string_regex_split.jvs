@@ -1,0 +1,21 @@
+public class StringRegexSplitTest {
+    public static func void main(String[] args) {
+        String[] words = "um   dois\ttres".split("\\s+");
+        String[] digits = "a12b345c".split("\\d+");
+        String[] punctuation = "a,,b;c".split("[,;]+");
+
+        printLn words.length;
+        printLn words[0];
+        printLn words[1];
+        printLn words[2];
+        printLn digits.length;
+        printLn digits[0];
+        printLn digits[1];
+        printLn digits[2];
+        printLn punctuation.length;
+        printLn punctuation[0];
+        printLn punctuation[1];
+        printLn punctuation[2];
+        return;
+    }
+}

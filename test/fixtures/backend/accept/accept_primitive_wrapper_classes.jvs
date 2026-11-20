@@ -1,0 +1,35 @@
+import jvs.lang.Integer;
+import jvs.lang.Long;
+import jvs.lang.Boolean;
+import jvs.lang.Double;
+
+public class PrimitiveWrapperClassesTest {
+    public static func void main(String[] args) throws NumberFormatException {
+        Integer integerValue = Integer.valueOf(19);
+        Long longValue = Long.valueOf(3000000002L);
+        Boolean trueValue = Boolean.valueOf(True);
+        Boolean falseValue = Boolean.valueOf(False);
+        Double doubleValue = Double.valueOf(2.5);
+        int parsedInt = Integer.parseInt("-2147483648");
+        long parsedLong = Long.parseLong("9223372036854775807");
+
+        printfLn "%d|%s", neg integerValue.intValue(), integerValue.toString();
+        printfLn "%ld|%s", longValue.longValue(), longValue.toString();
+        printfLn "%b|%s", trueValue.booleanValue(), trueValue.toString();
+        printfLn "%b|%s", falseValue.booleanValue(), falseValue.toString();
+        printfLn "%f|%s", doubleValue.doubleValue(), doubleValue.toString();
+        printfLn "%d|%ld", parsedInt, parsedLong;
+
+        try {
+            Integer.parseInt("19x");
+        } catch (NumberFormatException error) {
+            printLn "int format error caught";
+        }
+        try {
+            Long.parseLong("9223372036854775808");
+        } catch (NumberFormatException error) {
+            printLn "long overflow caught";
+        }
+        return;
+    }
+}

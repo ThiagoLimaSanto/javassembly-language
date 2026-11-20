@@ -697,6 +697,11 @@ public class IROptimizer {
     private IRProgram simplifyIntegerIdentity(IRProgram input) {
         IRProgram output = new IRProgram();
         for (IRInstruction instruction : input.instructions()) {
+            if (instruction.opCode() == IROpCode.ASSIGN
+                    && instruction.destination() != null
+                    && instruction.destination().equals(instruction.left())) {
+                continue;
+            }
             output.add(simplifyIdentity(instruction));
         }
         return output;
@@ -728,6 +733,15 @@ public class IROptimizer {
                 return assign(destination, right);
             if (isIntegerConstant(right, destination.type(), 1L))
                 return assign(destination, left);
+        }
+        if (instruction.opCode() == IROpCode.DIV
+                && isIntegerConstant(right, destination.type(), 1L)) {
+            return assign(destination, left);
+        }
+        if (instruction.opCode() == IROpCode.MOD
+                && isIntegerConstant(right, destination.type(), 1L)) {
+            return assign(destination, Operand.constant(
+                    destination.type() == Operand.Type.I32 ? 0 : 0L, destination.type()));
         }
         return instruction;
     }

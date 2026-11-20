@@ -1,0 +1,65 @@
+import jvs.lang.Integer;
+import jvs.lang.Long;
+import jvs.lang.Boolean;
+import jvs.lang.Double;
+
+public class LibraryClassContractsTest {
+    public static func void main(String[] args) throws NumberFormatException {
+        Integer first = Integer.valueOf(42);
+        Integer same = Integer.valueOf(42);
+        Long longValue = Long.valueOf(42L);
+        Boolean truth = Boolean.valueOf(True);
+        Double decimal = Double.valueOf(2.5);
+        String text = "Ação🌟";
+        Object root = new Object();
+        LibraryNamedObject named = new LibraryNamedObject();
+
+        printLn first.equals(same);
+        printLn cmp.eq first.hashCode(), same.hashCode();
+        printLn cmp.eq longValue.hashCode(), 42;
+        printLn truth.equals(Boolean.TRUE);
+        printLn cmp.eq truth, Boolean.valueOf(True);
+        printLn Double.valueOf(0.0).equals(Double.valueOf(neg 0.0));
+        printLn cmp.eq decimal.doubleValue(), Double.parseDouble("2.5");
+        printLn cmp.eq Double.parseDouble("1.25e2"), 125.0;
+        printLn cmp.eq Double.parseDouble("1e-3"), 0.001;
+        printLn Double.valueOf(Double.parseDouble("NaN")).equals(
+                Double.valueOf(Double.parseDouble("NaN")));
+        printLn cmp.eq Double.parseDouble("Infinity"), Double.parseDouble("+Infinity");
+        printLn cmp.eq Double.NEGATIVE_INFINITY, Double.parseDouble("-Infinity");
+        printLn cmp.eq Double.valueOf(Double.NaN).hashCode(),
+                Double.valueOf(Double.parseDouble("NaN")).hashCode();
+        printLn cmp.eq Integer.parseInt("ff", 16), 255;
+        printLn cmp.eq Long.parseLong("101", 2), 5L;
+        printLn Boolean.parseBoolean("TrUe");
+        printLn Boolean.parseBoolean("false");
+        printLn Integer.MIN_VALUE;
+        printLn Long.MAX_VALUE;
+        printLn text.isEmpty();
+        printLn text.codePointAt(1);
+        printLn text.indexOf("🌟");
+        printLn text.indexOf("o", 1);
+        printLn text.indexOf("z");
+        printLn text.indexOf("", 99);
+        printLn text.startsWith("Ação");
+        printLn text.endsWith("🌟");
+        printLn text.contains("ção");
+        printLn root.toString().startsWith("jvs.lang.Object@");
+        printLn named.toString().startsWith("LibraryNamedObject@");
+        printLn cmp.eq "same".hashCode(), "same".hashCode();
+
+        try {
+            Double.parseDouble("2.5x");
+        } catch (NumberFormatException error) {
+            printLn "double format error caught";
+        }
+        try {
+            Integer.parseInt("2", 1);
+        } catch (NumberFormatException error) {
+            printLn "radix range error caught";
+        }
+        return;
+    }
+}
+
+class LibraryNamedObject { }
