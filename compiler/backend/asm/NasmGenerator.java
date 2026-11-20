@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import compiler.TargetPlatform;
 import compiler.ast.records.AttributeRecord;
 import compiler.ast.records.ClassRecord;
 import compiler.ast.records.ProgramRecord;
@@ -60,15 +61,22 @@ public class NasmGenerator {
     private int nextFreeLabel;
     private final VirtualMethodTable virtualMethodTable;
     private final ProgramRecord sourceProgram;
+    private final TargetPlatform target;
 
     public NasmGenerator() {
         this.virtualMethodTable = null;
         this.sourceProgram = null;
+        this.target = TargetPlatform.LINUX_X64;
     }
 
     public NasmGenerator(ProgramRecord program) {
+        this(program, TargetPlatform.LINUX_X64);
+    }
+
+    public NasmGenerator(ProgramRecord program, TargetPlatform target) {
         this.virtualMethodTable = new VirtualMethodTable(program);
         this.sourceProgram = program;
+        this.target = target;
     }
 
     public String generate(IRProgram program) {
@@ -107,7 +115,9 @@ public class NasmGenerator {
         }
         emitEntryPoint(asm, entryFunction);
         appendRuntimeSupport(asm);
-        asm.append("section .note.GNU-stack noalloc noexec nowrite progbits\n");
+        if (!target.isWindows()) {
+            asm.append("section .note.GNU-stack noalloc noexec nowrite progbits\n");
+        }
 
         return asm.toString();
     }
@@ -141,13 +151,18 @@ public class NasmGenerator {
         appendHeader(asm);
         emitFunction(asm, target);
         appendRuntimeSupport(asm);
-        asm.append("section .note.GNU-stack noalloc noexec nowrite progbits\n");
+        if (!this.target.isWindows()) {
+            asm.append("section .note.GNU-stack noalloc noexec nowrite progbits\n");
+        }
         return asm.toString();
     }
 
     private void appendHeader(StringBuilder asm) {
+        if (target.isWindows()) {
+            WindowsRuntime.appendImports(asm);
+        }
         asm.append("default rel\n");
-        asm.append("section .rodata\n");
+        asm.append(target.isWindows() ? "section .rdata\n" : "section .rodata\n");
         appendRuntimeMessage(asm, "__null_pointer_message", new NullPointerException());
         appendRuntimeMessage(asm, "__invalid_reference_message", new InvalidReferenceException());
         appendRuntimeMessage(asm, "__array_bounds_message", new IndexOutOfBoundsException());
@@ -178,6 +193,10 @@ public class NasmGenerator {
         }
         asm.append("__f64_scale: dq 0x412e848000000000\n");
         asm.append("__f64_round: dq 0x3fe0000000000000\n\n");
+        if (target.isWindows()) {
+            asm.append("__jvs_empty_args_array_type: db \"String[]\", 0\n")
+                    .append("__jvs_empty_args_element_type: db \"String\", 0\n");
+        }
         appendVirtualTables(asm);
         asm.append("section .data\n");
         asm.append("__jvs_array_vtable: dq 0\n");
@@ -200,6 +219,10 @@ public class NasmGenerator {
         appendStaticStorage(asm);
         asm.append("__heap_start: resq 1\n");
         asm.append("__heap_end: resq 1\n");
+        if (target.isWindows()) {
+            asm.append("__heap_commit_end: resq 1\n")
+                    .append("__heap_reserved_end: resq 1\n");
+        }
         asm.append("__jvs_exception_ptr: resq 1\n");
         asm.append("__jvs_handler_depth: resq 1\n");
         asm.append("__jvs_handler_labels: resq 1024\n");
@@ -525,6 +548,10 @@ public class NasmGenerator {
     }
 
     private void emitEntryPoint(StringBuilder asm, String entryFunction) {
+        if (target.isWindows()) {
+            emitWindowsEntryPoint(asm, entryFunction);
+            return;
+        }
         asm.append("global _start\n");
         asm.append("_start:\n");
         asm.append("    xor ebp, ebp\n");
@@ -548,6 +575,37 @@ public class NasmGenerator {
         asm.append("    mov edi, 1\n");
         asm.append("    syscall\n");
         asm.append("    ud2\n");
+    }
+
+    private void emitWindowsEntryPoint(StringBuilder asm, String entryFunction) {
+        asm.append("global start\n")
+                .append("start:\n")
+                .append("    xor ebp, ebp\n")
+                .append("    and rsp, -16\n");
+        WindowsRuntime.appendConsoleCodePageSetup(asm);
+        asm.append("    call __JVS.static_init__void__ret_void\n");
+        if (entryFunction.endsWith(".main__String_array__ret_void")) {
+            asm.append("    mov edi, 32\n")
+                    .append("    call __heap_alloc\n")
+                    .append("    lea rdx, [rel __jvs_array_vtable]\n")
+                    .append("    mov qword [rax], rdx\n")
+                    .append("    mov qword [rax+8], 0\n")
+                    .append("    lea rdx, [rel __jvs_empty_args_array_type]\n")
+                    .append("    mov qword [rax+16], rdx\n")
+                    .append("    lea rdx, [rel __jvs_empty_args_element_type]\n")
+                    .append("    mov qword [rax+24], rdx\n")
+                    .append("    mov rdi, rax\n");
+        }
+        asm.append("    call ").append(entryFunction).append('\n')
+                .append("    cmp qword [rel __jvs_exception_ptr], 0\n")
+                .append("    jne __uncaught_exception\n")
+                .append("    xor edi, edi\n")
+                .append("    call __jvs_exit\n")
+                .append("__uncaught_exception:\n")
+                .append("    call __jvs_print_uncaught\n")
+                .append("    mov edi, 1\n")
+                .append("    call __jvs_exit\n")
+                .append("    ud2\n");
     }
 
     private void emitFunction(
@@ -1056,9 +1114,14 @@ public class NasmGenerator {
         asm.append("    test rdx, rdx\n");
         asm.append("    jz .write_done\n");
         asm.append(".write_loop:\n");
-        asm.append("    mov eax, 1\n");
-        asm.append("    mov edi, 1\n");
-        asm.append("    syscall\n");
+        if (target.isWindows()) {
+            asm.append("    mov edi, 1\n")
+                    .append("    call __jvs_write_once\n");
+        } else {
+            asm.append("    mov eax, 1\n")
+                    .append("    mov edi, 1\n")
+                    .append("    syscall\n");
+        }
         asm.append("    test rax, rax\n");
         asm.append("    jle .write_error\n");
         asm.append("    add rsi, rax\n");
@@ -1087,22 +1150,45 @@ public class NasmGenerator {
         asm.append("    jmp __write_all\n");
 
         asm.append("__heap_alloc:\n");
+        if (target.isWindows()) {
+            asm.append("    push rbp\n")
+                    .append("    mov rbp, rsp\n")
+                    .append("    sub rsp, 16\n");
+        }
         asm.append("    mov r8, rdi\n"); // tamanho solicitado
         asm.append("    add r8, 15\n"); // arredonda o payload
         asm.append("    jc .heap_alloc_failed\n");
         asm.append("    and r8, -16\n"); // alinhamento de 16 bytes
         asm.append("    add r8, 16\n"); // espaço do cabeçalho
         asm.append("    jc .heap_alloc_failed\n");
+        if (target.isWindows()) {
+            // VirtualAlloc takes r8 as PAGE_*; keep the requested block size across that call.
+            asm.append("    mov qword [rbp-16], r8\n");
+        }
 
         asm.append("    mov r9, qword [rel __heap_start]\n");
         asm.append("    test r9, r9\n");
         asm.append("    jnz .heap_search\n");
-        asm.append("    xor edi, edi\n"); // consulta o break atual
-        asm.append("    mov eax, 12\n"); // syscall brk
-        asm.append("    syscall\n");
-        asm.append("    add rax, 15\n");
-        asm.append("    jc .heap_alloc_failed\n");
-        asm.append("    and rax, -16\n");
+        if (target.isWindows()) {
+            asm.append("    xor edi, edi\n")
+                    .append("    mov esi, 0x40000000\n")
+                    .append("    mov edx, 0x2000\n") // MEM_RESERVE
+                    .append("    mov r8d, 1\n") // PAGE_NOACCESS
+                    .append("    call __jvs_virtual_alloc\n")
+                    .append("    test rax, rax\n")
+                    .append("    jz .heap_alloc_failed\n")
+                    .append("    mov r8, qword [rbp-16]\n")
+                    .append("    lea rdx, [rax + 0x40000000]\n")
+                    .append("    mov qword [rel __heap_reserved_end], rdx\n")
+                    .append("    mov qword [rel __heap_commit_end], rax\n");
+        } else {
+            asm.append("    xor edi, edi\n"); // consulta o break atual
+            asm.append("    mov eax, 12\n"); // syscall brk
+            asm.append("    syscall\n");
+            asm.append("    add rax, 15\n");
+            asm.append("    jc .heap_alloc_failed\n");
+            asm.append("    and rax, -16\n");
+        }
         asm.append("    mov qword [rel __heap_start], rax\n");
         asm.append("    mov qword [rel __heap_end], rax\n");
         asm.append("    mov r9, rax\n");
@@ -1136,11 +1222,35 @@ public class NasmGenerator {
         asm.append("    mov r10, r9\n");
         asm.append("    add r10, r8\n"); // novo break
         asm.append("    jc .heap_alloc_failed\n");
-        asm.append("    mov rdi, r10\n");
-        asm.append("    mov eax, 12\n");
-        asm.append("    syscall\n");
-        asm.append("    cmp rax, r10\n");
-        asm.append("    jb .heap_alloc_failed\n");
+        if (target.isWindows()) {
+            asm.append("    cmp r10, qword [rel __heap_reserved_end]\n")
+                    .append("    ja .heap_alloc_failed\n")
+                    .append("    mov rax, r10\n")
+                    .append("    add rax, 4095\n")
+                    .append("    jc .heap_alloc_failed\n")
+                    .append("    and rax, -4096\n")
+                    .append("    cmp rax, qword [rel __heap_commit_end]\n")
+                    .append("    jbe .heap_commit_ready\n")
+                    .append("    mov qword [rbp-8], rax\n")
+                    .append("    mov rdi, qword [rel __heap_commit_end]\n")
+                    .append("    mov rsi, rax\n")
+                    .append("    sub rsi, rdi\n")
+                    .append("    mov edx, 0x1000\n") // MEM_COMMIT
+                    .append("    mov r8d, 4\n") // PAGE_READWRITE
+                    .append("    call __jvs_virtual_alloc\n")
+                    .append("    test rax, rax\n")
+                    .append("    jz .heap_alloc_failed\n")
+                    .append("    mov r8, qword [rbp-16]\n")
+                    .append("    mov rax, qword [rbp-8]\n")
+                    .append("    mov qword [rel __heap_commit_end], rax\n")
+                    .append(".heap_commit_ready:\n");
+        } else {
+            asm.append("    mov rdi, r10\n");
+            asm.append("    mov eax, 12\n");
+            asm.append("    syscall\n");
+            asm.append("    cmp rax, r10\n");
+            asm.append("    jb .heap_alloc_failed\n");
+        }
         asm.append("    mov qword [rel __heap_end], r10\n");
         asm.append("    mov qword [r9], r8\n");
         asm.append("    mov qword [r9 + 8], 1\n");
@@ -1155,7 +1265,7 @@ public class NasmGenerator {
         asm.append("    cld\n");
         asm.append("    rep stosq\n");
         asm.append("    lea rax, [r9 + 16]\n");
-        asm.append("    ret\n");
+        asm.append(target.isWindows() ? "    leave\n    ret\n" : "    ret\n");
 
         asm.append(".heap_alloc_failed:\n");
         asm.append("    jmp __runtime_out_of_memory\n");
@@ -1330,7 +1440,10 @@ public class NasmGenerator {
         asm.append("    jmp __print_u64\n");
 
         appendFloatPrinter(asm);
-        ScannerRuntime.append(asm);
+        if (target.isWindows()) {
+            WindowsRuntime.appendIoSupport(asm);
+        }
+        ScannerRuntime.append(asm, target.isWindows());
     }
 
     private void appendUncaughtTracePrinter(StringBuilder asm) {
@@ -1339,8 +1452,12 @@ public class NasmGenerator {
                 .append(".write_cstr_length:\n")
                 .append("    cmp byte [rsi+rdx], 0\n    je .write_cstr_done\n")
                 .append("    inc rdx\n    jmp .write_cstr_length\n")
-                .append(".write_cstr_done:\n")
-                .append("    mov eax, 1\n    mov edi, 2\n    syscall\n    ret\n");
+                .append(".write_cstr_done:\n");
+        if (target.isWindows()) {
+            asm.append("    mov edi, 2\n    call __jvs_write_once\n    ret\n");
+        } else {
+            asm.append("    mov eax, 1\n    mov edi, 2\n    syscall\n    ret\n");
+        }
         asm.append("__jvs_write_u64:\n")
                 .append("    lea r8, [rel __number_buffer+32]\n")
                 .append("    mov r9d, 10\n")
@@ -1348,8 +1465,12 @@ public class NasmGenerator {
                 .append("    xor edx, edx\n    div r9\n    dec r8\n")
                 .append("    add dl, '0'\n    mov byte [r8], dl\n")
                 .append("    test rax, rax\n    jnz .write_u64_digits\n")
-                .append("    mov rsi, r8\n    lea rdx, [rel __number_buffer+32]\n    sub rdx, r8\n")
-                .append("    mov eax, 1\n    mov edi, 2\n    syscall\n    ret\n");
+                .append("    mov rsi, r8\n    lea rdx, [rel __number_buffer+32]\n    sub rdx, r8\n");
+        if (target.isWindows()) {
+            asm.append("    mov edi, 2\n    call __jvs_write_once\n    ret\n");
+        } else {
+            asm.append("    mov eax, 1\n    mov edi, 2\n    syscall\n    ret\n");
+        }
         asm.append("__jvs_print_uncaught:\n")
                 .append("    mov r12, qword [rel __jvs_exception_ptr]\n")
                 .append("    test r12, r12\n    jz .uncaught_no_object\n");

@@ -6,14 +6,18 @@ final class ScannerRuntime {
     }
 
     static void append(StringBuilder asm) {
-        appendScannerFunctions(asm);
-        appendTokenReader(asm);
+        append(asm, false);
+    }
+
+    static void append(StringBuilder asm, boolean windows) {
+        appendScannerFunctions(asm, windows);
+        appendTokenReader(asm, windows);
         appendIntegerParser(asm);
         appendDoubleParser(asm);
         appendInputError(asm);
     }
 
-    private static void appendScannerFunctions(StringBuilder asm) {
+    private static void appendScannerFunctions(StringBuilder asm, boolean windows) {
         asm.append("jvs.io.Scanner.readInt__void__ret_int:\n")
                 .append("    call __scanner_parse_signed\n")
                 .append("    movsxd rcx, eax\n")
@@ -105,7 +109,7 @@ final class ScannerRuntime {
                 .append("    xor edi, edi\n")
                 .append("    lea rsi, [rel __scanner_byte]\n")
                 .append("    mov edx, 1\n")
-                .append("    syscall\n")
+                .append(windows ? "    call __jvs_read_once\n" : "    syscall\n")
                 .append("    test rax, rax\n")
                 .append("    js __runtime_io_error\n")
                 .append("    jz .scanner_line_eof\n")
@@ -137,7 +141,7 @@ final class ScannerRuntime {
                 .append("    ret\n\n");
     }
 
-    private static void appendTokenReader(StringBuilder asm) {
+    private static void appendTokenReader(StringBuilder asm, boolean windows) {
         asm.append("__scanner_read_token:\n")
                 .append("    xor r8d, r8d\n")
                 .append(".scanner_skip_whitespace:\n")
@@ -145,7 +149,7 @@ final class ScannerRuntime {
                 .append("    xor edi, edi\n")
                 .append("    lea rsi, [rel __scanner_byte]\n")
                 .append("    mov edx, 1\n")
-                .append("    syscall\n")
+                .append(windows ? "    call __jvs_read_once\n" : "    syscall\n")
                 .append("    test rax, rax\n")
                 .append("    js __runtime_io_error\n")
                 .append("    jz __runtime_no_such_element\n")
@@ -165,7 +169,7 @@ final class ScannerRuntime {
                 .append("    xor edi, edi\n")
                 .append("    lea rsi, [rel __scanner_byte]\n")
                 .append("    mov edx, 1\n")
-                .append("    syscall\n")
+                .append(windows ? "    call __jvs_read_once\n" : "    syscall\n")
                 .append("    test rax, rax\n")
                 .append("    js __runtime_io_error\n")
                 .append("    jz .scanner_token_done\n")

@@ -17,23 +17,52 @@ import compiler.semantic.SemanticAnalyzer;
 
 public class ProgramAnalyzer {
     public Path build(Path sourceFile) throws IOException {
+        return build(sourceFile, TargetPlatform.LINUX_X64);
+    }
+
+    public Path build(Path sourceFile, TargetPlatform target) throws IOException {
         Path normalizedSource = sourceFile.toAbsolutePath().normalize();
-        analyze(normalizedSource);
-        Path outputDirectory = findProjectDirectory(normalizedSource).resolve("out");
+        analyze(normalizedSource, target);
+        Path outputDirectory = outputDirectory(normalizedSource, target);
         String baseName = baseName(sourceFile);
         Path assembly = outputDirectory.resolve(baseName + ".asm");
-        Path object = outputDirectory.resolve(baseName + ".o");
-        Path executable = outputDirectory.resolve(baseName);
+        Path object = outputDirectory.resolve(baseName + target.objectExtension());
+        Path executable = outputDirectory.resolve(baseName + target.executableExtension());
 
-        runTool(List.of("nasm", "-f", "elf64", assembly.toString(), "-o", object.toString()),
+        runTool(List.of("nasm", "-f", target.nasmFormat(), assembly.toString(), "-o", object.toString()),
                 executable, "NASM");
-        runTool(List.of("ld", "-o", executable.toString(), object.toString()),
-                executable, "ld");
+        runLinker(target, object, executable);
         return executable;
     }
 
     public int run(Path sourceFile) throws IOException, InterruptedException {
-        Path executable = build(sourceFile);
+        return run(sourceFile, TargetPlatform.LINUX_X64);
+    }
+
+    public int run(Path sourceFile, TargetPlatform target) throws IOException, InterruptedException {
+        build(sourceFile, target);
+        return execute(sourceFile, target);
+    }
+
+    public int execute(Path sourceFile, TargetPlatform target) throws IOException, InterruptedException {
+        Path normalizedSource = sourceFile.toAbsolutePath().normalize();
+        Path executable = outputDirectory(normalizedSource, target)
+                .resolve(baseName(normalizedSource) + target.executableExtension());
+        if (!Files.isRegularFile(executable)) {
+            throw new OutputException("Executável não encontrado. Compile primeiro com jvsc.", executable, null);
+        }
+        boolean windowsHost = System.getProperty("os.name", "")
+                .toLowerCase(java.util.Locale.ROOT).startsWith("windows");
+        if (target.isWindows() && !windowsHost) {
+            throw new OutputException(
+                    "O executável Windows foi criado, mas só pode ser executado no Windows ou via Wine.",
+                    executable, null);
+        }
+        if (!target.isWindows() && windowsHost) {
+            throw new OutputException(
+                    "O executável Linux foi criado, mas precisa ser executado em Linux ou WSL.",
+                    executable, null);
+        }
         Process process = new ProcessBuilder(executable.toAbsolutePath().toString())
                 .inheritIO()
                 .start();
@@ -41,19 +70,51 @@ public class ProgramAnalyzer {
     }
 
     public void analyze(Path sourceFile) throws IOException {
+        analyze(sourceFile, TargetPlatform.LINUX_X64);
+    }
+
+    public void analyze(Path sourceFile, TargetPlatform target) throws IOException {
         ProgramRecord program = Frontend.loadProject(sourceFile);
-        String asm = analyzeProgram(program);
+        String asm = analyzeProgram(program, target);
 
         String baseName = baseName(sourceFile);
         Path normalizedSource = sourceFile.toAbsolutePath().normalize();
-        Path projectDirectory = findProjectDirectory(normalizedSource);
-        Path outputDirectory = projectDirectory.resolve("out");
+        Path outputDirectory = outputDirectory(normalizedSource, target);
         Path asmFile = outputDirectory.resolve(baseName + ".asm");
         try {
             Files.createDirectories(outputDirectory);
             Files.writeString(asmFile, asm);
         } catch (IOException cause) {
             throw new OutputException("Não foi possível gravar o assembly gerado.", asmFile, cause);
+        }
+    }
+
+    private Path outputDirectory(Path sourceFile, TargetPlatform target) {
+        Path root = findProjectDirectory(sourceFile).resolve("out");
+        return target == TargetPlatform.LINUX_X64
+                ? root
+                : root.resolve(target.directoryName());
+    }
+
+    private void runLinker(TargetPlatform target, Path object, Path executable) throws IOException {
+        if (target == TargetPlatform.LINUX_X64) {
+            runTool(List.of("ld", "-o", executable.toString(), object.toString()), executable, "ld");
+            return;
+        }
+
+        boolean windowsHost = System.getProperty("os.name", "")
+                .toLowerCase(java.util.Locale.ROOT).startsWith("windows");
+        String configuredLinker = System.getenv("JAVASSEMBLY_WINDOWS_LINKER");
+        if (windowsHost) {
+            String linker = configuredLinker == null || configuredLinker.isBlank()
+                    ? "link.exe" : configuredLinker;
+            runTool(List.of(linker, "/nologo", "/entry:start", "/subsystem:console", "/nodefaultlib",
+                    "/out:" + executable, object.toString(), "kernel32.lib"), executable, "link.exe");
+        } else {
+            String linker = configuredLinker == null || configuredLinker.isBlank()
+                    ? "x86_64-w64-mingw32-ld" : configuredLinker;
+            runTool(List.of(linker, "-e", "start", "--subsystem", "console", "-o",
+                    executable.toString(), object.toString(), "-lkernel32"), executable, linker);
         }
     }
 
@@ -109,6 +170,10 @@ public class ProgramAnalyzer {
     }
 
     private String analyzeProgram(ProgramRecord program) {
+        return analyzeProgram(program, TargetPlatform.LINUX_X64);
+    }
+
+    private String analyzeProgram(ProgramRecord program, TargetPlatform target) {
         SemanticAnalyzer semantic = new SemanticAnalyzer();
         semantic.visit(program);
         EntryPointValidator.validate(program);
@@ -116,6 +181,6 @@ public class ProgramAnalyzer {
 
         var ir = new IRGenerator(classLayouts).generate(program);
         ir = new IROptimizer().optimize(ir);
-        return new NasmGenerator(program).generate(ir);
+        return new NasmGenerator(program, target).generate(ir);
     }
 }

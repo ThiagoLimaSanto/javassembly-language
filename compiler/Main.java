@@ -13,9 +13,23 @@ public class Main {
 
     public static void main(String[] args) {
         String command;
+        TargetPlatform target;
         String source;
-        if (args.length == 2 && (args[0].equals("build") || args[0].equals("run"))) {
+        if (args.length == 3 && (args[0].equals("build") || args[0].equals("run")
+                || args[0].equals("exec"))) {
             command = args[0];
+            try {
+                target = TargetPlatform.fromFlag(args[1]);
+            } catch (CommandLineException exception) {
+                printError(exception);
+                System.exit(2);
+                return;
+            }
+            source = args[2];
+        } else if (args.length == 2 && (args[0].equals("build") || args[0].equals("run")
+                || args[0].equals("exec"))) {
+            command = args[0];
+            target = TargetPlatform.LINUX_X64;
             source = args[1];
         } else {
             printError(new CommandLineException("Comando interno inválido. Use jvsc para compilar."));
@@ -33,10 +47,13 @@ public class Main {
         try {
             ProgramAnalyzer analyzer = new ProgramAnalyzer();
             if (command.equals("build")) {
-                Path executable = analyzer.build(sourcePath);
+                Path executable = analyzer.build(sourcePath, target);
                 System.out.println("Executável criado: " + executable.toAbsolutePath());
+            } else if (command.equals("exec")) {
+                int status = analyzer.execute(sourcePath, target);
+                if (status != 0) System.exit(status);
             } else {
-                int status = analyzer.run(sourcePath);
+                int status = analyzer.run(sourcePath, target);
                 if (status != 0)
                     System.exit(status);
             }

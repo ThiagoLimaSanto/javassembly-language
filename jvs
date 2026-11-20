@@ -2,13 +2,31 @@
 set -euo pipefail
 
 if (($# == 0)) || [[ "$1" == "help" || "$1" == "--help" || "$1" == "-h" ]]; then
-    printf 'Uso: jvs <caminho-do-programa> [argumentos...]\n'
-    printf 'Executa o binário já criado em projects/nomeProjeto/out.\n'
+    printf 'Uso: jvs [-l|-w] <caminho-do-programa> [argumentos...]\n'
+    printf 'Executa o binário já criado para Linux ou Windows.\n'
     exit 0
+fi
+
+target_flag="-l"
+if [[ "$1" == "-l" || "$1" == "-w" ]]; then
+    target_flag="$1"
+    shift
+    if (($# == 0)); then
+        printf 'Erro: informe o caminho do programa após %s.\n' "$target_flag" >&2
+        exit 2
+    fi
 fi
 
 requested="$1"
 shift
+if [[ "$requested" == *.exe && -f "$requested" ]]; then
+    if command -v wine >/dev/null 2>&1; then
+        exec wine "$requested" "$@"
+    fi
+    printf 'O executável Windows foi encontrado, mas Wine não está instalado. Execute o .exe no Windows.\n' >&2
+    exit 1
+fi
+
 without_extension="${requested%.jvs}"
 
 if [[ -x "$requested" && ! -d "$requested" ]]; then
@@ -20,6 +38,10 @@ if [[ -x "$without_extension" && ! -d "$without_extension" ]]; then
 fi
 
 program_name="$(basename "$without_extension")"
+if [[ "$program_name" == *.exe ]]; then
+    program_name="${program_name%.exe}"
+    target_flag="-w"
+fi
 source_path=""
 if [[ -f "$requested" && "$requested" == *.jvs ]]; then
     source_path="$(realpath -- "$requested")"
@@ -40,20 +62,44 @@ done
 
 if [[ "$(basename "$search_dir")" == "src" ]]; then
     project_dir="$(dirname "$search_dir")"
-    executable="$project_dir/out/$program_name"
-    if [[ -x "$executable" ]]; then
-        exec "$executable" "$@"
-    fi
+    output_dir="$project_dir/out"
 elif [[ -n "$source_path" ]]; then
-    executable="$(dirname "$source_path")/out/$program_name"
+    output_dir="$(dirname "$source_path")/out"
+else
+    output_dir="out"
+fi
+
+if [[ "$target_flag" == "-w" ]]; then
+    output_dir="$output_dir/windows-x64"
+    executable="$output_dir/$program_name.exe"
+    if [[ -f "$executable" ]]; then
+        if command -v wine >/dev/null 2>&1; then
+            exec wine "$executable" "$@"
+        fi
+        printf 'O executável Windows foi encontrado, mas Wine não está instalado. Execute o .exe no Windows.\n' >&2
+        exit 1
+    fi
+else
+    executable="$output_dir/$program_name"
     if [[ -x "$executable" ]]; then
         exec "$executable" "$@"
     fi
 fi
 
 if [[ "$requested" != */* ]]; then
-    mapfile -t matches < <(find projects -type f -path "*/out/$program_name" -perm -u+x -print 2>/dev/null | sort)
+    if [[ "$target_flag" == "-w" ]]; then
+        mapfile -t matches < <(find projects -type f -path "*/out/windows-x64/$program_name.exe" -print 2>/dev/null | sort)
+    else
+        mapfile -t matches < <(find projects -type f -path "*/out/$program_name" -perm -u+x -print 2>/dev/null | sort)
+    fi
     if ((${#matches[@]} == 1)); then
+        if [[ "$target_flag" == "-w" ]]; then
+            if command -v wine >/dev/null 2>&1; then
+                exec wine "${matches[0]}" "$@"
+            fi
+            printf 'O executável Windows foi encontrado, mas Wine não está instalado. Execute o .exe no Windows.\n' >&2
+            exit 1
+        fi
         exec "${matches[0]}" "$@"
     elif ((${#matches[@]} > 1)); then
         printf "Erro: há mais de um executável chamado '%s'; informe o caminho do projeto.\n" "$program_name" >&2

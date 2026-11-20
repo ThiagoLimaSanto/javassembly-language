@@ -2,15 +2,24 @@
 set -euo pipefail
 
 if (($# == 0)) || [[ "$1" == "help" || "$1" == "--help" || "$1" == "-h" ]]; then
-    printf 'Uso: jvsc <caminhoArquivo.jvs>\n'
-    printf 'Compila o arquivo e grava os artefatos em out/ ao lado do projeto ou arquivo.\n'
+    printf 'Uso: jvsc -l|-w <caminhoArquivo.jvs>\n'
+    printf '  -l  compila para Linux x86-64\n'
+    printf '  -w  compila para Windows x86-64\n'
     exit 0
 fi
 
-if (($# != 1)) || [[ "$1" != *.jvs ]]; then
-    printf 'Erro: informe um único arquivo-fonte com extensão .jvs.\n' >&2
+if (($# != 2)) || [[ "$2" != *.jvs ]]; then
+    printf 'Erro: use jvsc -l|-w caminhoArquivo.jvs.\n' >&2
     exit 2
 fi
+
+case "$1" in
+    -l|-w) target_flag="$1" ;;
+    *)
+        printf "Erro: destino inválido '%s'. Use -l (Linux) ou -w (Windows).\n" "$1" >&2
+        exit 2
+        ;;
+esac
 
 script_path="$(readlink -f -- "${BASH_SOURCE[0]}")"
 script_dir="$(cd -- "$(dirname -- "$script_path")" && pwd)"
@@ -43,4 +52,4 @@ fi
 
 javac -d "$compiler_classes" "${java_sources[@]}"
 exec java -Djavassembly.libraryRoot="$repo_root/lib" \
-    -cp "$compiler_classes" compiler.Main build "$1"
+    -cp "$compiler_classes" compiler.Main build "$target_flag" "$2"

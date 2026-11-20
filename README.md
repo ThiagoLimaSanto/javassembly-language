@@ -1,84 +1,93 @@
 # JavaAssembly
 
-JavaAssembly compila arquivos `.jvs` para executáveis Linux x86-64. Os comandos `jvsc`
-e `jvs` permitem compilar e executar programas a partir de qualquer pasta.
+JavaAssembly compila arquivos `.jvs` para programas Linux x86-64 ou Windows x86-64.
+O frontend, a IR e as otimizações são compartilhados; o destino é escolhido na compilação.
 
 ## Requisitos
 
-- Linux x86-64
-- JDK com `javac`
-- NASM
-- GNU `ld` (fornecido pelo pacote Binutils)
+Em qualquer sistema, instale um JDK com `javac` e o NASM.
 
-## Instalação global
+Para compilar para Linux, também é necessário GNU `ld`.
 
-Esta opção instala os comandos para todos os usuários. Na pasta do JavaAssembly, execute:
+Para compilar para Windows, é necessário `link.exe` com o Windows SDK e `kernel32.lib`
+no Windows. No Linux, instale o linker cruzado MinGW-w64 x86-64 e sua biblioteca
+`kernel32` (`x86_64-w64-mingw32-ld`).
+
+## Instalação no Linux
+
+Instalação global para todos os usuários:
 
 ```bash
 sudo bash install.sh --system
 ```
 
-O compilador é instalado em `/opt/javassembly`; os comandos ficam em `/usr/local/bin`.
-Abra um terminal novo após a instalação. Não é necessário adicionar caminhos ao perfil
-do shell.
-
-## Instalação somente para o usuário atual
+Instalação somente para o usuário atual:
 
 ```bash
 bash install.sh
 source ~/.profile
 ```
 
-Se o terminal interativo não carregar `~/.profile` e disser que `jvsc` não foi encontrado,
-adicione `export PATH="$HOME/.local/bin:$PATH"` ao `~/.bashrc` e execute `source ~/.bashrc`.
+## Instalação no Windows
+
+Na pasta do JavaAssembly, execute no PowerShell:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+O instalador adiciona JavaAssembly ao `PATH` do usuário. Abra um terminal novo para usar
+`jvsc` e `jvs`.
 
 ## Compilar e executar
 
-Passe o caminho do arquivo `.jvs`; ele pode estar fora da pasta onde o compilador foi
-instalado:
+Informe o destino explicitamente: `-l` para Linux ou `-w` para Windows.
 
 ```bash
-jvsc /home/usuario/Downloads/teste/Teste.jvs
-jvs /home/usuario/Downloads/teste/Teste.jvs
+jvsc -l /caminho/para/Teste.jvs
+jvs -l /caminho/para/Teste.jvs
 ```
 
-`jvsc` compila e cria o assembly, o arquivo objeto e o executável. `jvs` executa o
-programa compilado. Também aceita um caminho relativo à pasta atual:
+Para gerar um `.exe`:
 
 ```bash
-jvsc exemplos/Teste.jvs
-jvs exemplos/Teste.jvs
+jvsc -w /caminho/para/Teste.jvs
 ```
 
-É possível passar argumentos ao programa:
+No Windows, use os mesmos comandos no terminal:
 
-```bash
-jvs /home/usuario/Downloads/teste/Teste.jvs argumento1 argumento2
+```bat
+jvsc -w C:\Projetos\Teste\src\Teste.jvs
+jvs -w C:\Projetos\Teste\src\Teste.jvs
 ```
 
-## Pasta de saída
+`jvsc` compila e informa o caminho do executável. `jvs` executa o programa. No Linux,
+`jvs -w` usa Wine se estiver instalado; sem Wine, execute o `.exe` no Windows.
 
-Em um projeto com uma pasta `src/`, os arquivos gerados ficam em `out/` na raiz do
-projeto:
+## Arquivos gerados
+
+Para projetos com uma pasta `src/`, os arquivos ficam na raiz do projeto. A saída Linux
+mantém `out/`; a saída Windows usa `out/windows-x64/` para não sobrescrever a saída Linux:
 
 ```text
 MeuProjeto/
 ├── src/
-│   └── Main.jvs
+│   └── Teste.jvs
 └── out/
-    ├── Main.asm
-    ├── Main.o
-    └── Main
+    ├── Teste.asm
+    ├── Teste.o
+    ├── Teste
+    └── windows-x64/
+        ├── Teste.asm
+        ├── Teste.obj
+        └── Teste.exe
 ```
 
-Para um arquivo `.jvs` fora de uma pasta `src/`, `out/` é criada ao lado do arquivo.
-Por exemplo, `Downloads/teste/Teste.jvs` gera os artefatos em
-`Downloads/teste/out/`. Imports da biblioteca padrão, como `jvs.io.Scanner`, são
-resolvidos a partir da instalação do compilador.
+Para um arquivo fora de `src/`, a pasta `out/` é criada ao lado dele. Imports da
+biblioteca padrão, como `jvs.io.Scanner`, são resolvidos a partir da instalação do
+compilador.
 
-## Comandos
+## Limitação atual do destino Windows
 
-```bash
-jvsc --help
-jvs --help
-```
+O método `main(String[] args)` recebe um array vazio no Windows; os argumentos passados
+na linha de comando ainda não são convertidos para esse array.
