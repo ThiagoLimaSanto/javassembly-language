@@ -8,8 +8,10 @@ public class Teste{
         String name = Scanner.readLine();
         print "Digite a sua idade: ";
         int idade = Scanner.readInt();
+        print "Digite o seu cargo: ";
+        String cargo = Scanner.readLine();
 
-        Funcionario funcionario = new Funcionario(idade, name, "TI");
+        Funcionario funcionario = new Funcionario(idade, name, cargo);
 
         printfLn "O seu nome é %s e tem %d anos e trabalho com %s.", funcionario.name, funcionario.idade, funcionario.cargo;
     }

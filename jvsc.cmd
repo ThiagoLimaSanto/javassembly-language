@@ -29,13 +29,9 @@ if not exist "%SOURCE%" (
 )
 
 set "OUTPUT_DIR=%JVS_HOME%build\compiler"
-set "SOURCES_FILE=%TEMP%\javassembly-sources-%RANDOM%.txt"
 if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
-for /r "%JVS_HOME%compiler" %%S in (*.java) do echo "%%~fS">>"%SOURCES_FILE%"
-javac -d "%OUTPUT_DIR%" @"%SOURCES_FILE%"
-set "JAVAC_STATUS=%ERRORLEVEL%"
-del /q "%SOURCES_FILE%" >nul 2>&1
-if not "%JAVAC_STATUS%"=="0" exit /b %JAVAC_STATUS%
+javac -d "%OUTPUT_DIR%" -sourcepath "%JVS_HOME%" "%JVS_HOME%compiler\Main.java"
+if errorlevel 1 exit /b %ERRORLEVEL%
 
 java -Djavassembly.libraryRoot="%JVS_HOME%lib" -cp "%OUTPUT_DIR%" compiler.Main %COMMAND% "%TARGET%" "%SOURCE%"
 exit /b %ERRORLEVEL%
