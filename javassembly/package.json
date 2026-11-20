@@ -1,0 +1,25 @@
+{
+  "name": "javassembly",
+  "displayName": "JavaAssembly",
+  "description": "Syntax highlighting and basic editor support for the JavaAssembly language (.jvs).",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.146.0"
+  },
+  "categories": [
+    "Programming Languages"
+  ],
+  "contributes": {
+    "languages": [{
+      "id": "javassembly",
+      "aliases": ["JavAssembly", "javassembly"],
+      "extensions": [".jvs"],
+      "configuration": "./language-configuration.json"
+    }],
+    "grammars": [{
+      "language": "javassembly",
+      "scopeName": "source.jvs",
+      "path": "./syntaxes/javassembly.tmLanguage.json"
+    }]
+  }
+}

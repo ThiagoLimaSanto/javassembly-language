@@ -1,0 +1,117 @@
+{
+  "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+  "name": "JavaAssembly",
+  "scopeName": "source.jvs",
+  "patterns": [
+    { "include": "#comments" },
+    { "include": "#strings" },
+    { "include": "#class-declaration" },
+    { "include": "#function-declaration" },
+    { "include": "#constructor-declaration" },
+    { "include": "#modifiers" },
+    { "include": "#control-keywords" },
+    { "include": "#types" },
+    { "include": "#constants" },
+    { "include": "#numbers" },
+    { "include": "#word-operators" },
+    { "include": "#output-functions" },
+    { "include": "#function-calls" },
+    { "include": "#class-names" },
+    { "include": "#punctuation" }
+  ],
+  "repository": {
+    "comments": {
+      "patterns": [
+        {
+          "name": "comment.line.double-slash.java",
+          "begin": "//",
+          "end": "$"
+        },
+        {
+          "name": "comment.block.java",
+          "begin": "/\\*",
+          "end": "\\*/"
+        }
+      ]
+    },
+    "strings": {
+      "name": "string.quoted.double.java",
+      "begin": "\"",
+      "end": "\"",
+      "patterns": [
+        {
+          "name": "constant.character.escape.java",
+          "match": "\\\\."
+        },
+        {
+          "name": "constant.other.placeholder.jvs",
+          "match": "%[-+#0 ]*[0-9]*(?:\\.[0-9]+)?(?:l)?[diufbsc]"
+        }
+      ]
+    },
+    "class-declaration": {
+      "name": "meta.class.jvs",
+      "match": "\\b(class|interface)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+      "captures": {
+        "1": { "name": "storage.type.class.java" },
+        "2": { "name": "entity.name.type.class.java" }
+      }
+    },
+    "function-declaration": {
+      "name": "meta.function.jvs",
+      "match": "\\b(func)\\s+([A-Za-z_][A-Za-z0-9_]*(?:\\[\\])?)\\s+([A-Za-z_][A-Za-z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "keyword.control.java" },
+        "2": { "name": "storage.type.java" },
+        "3": { "name": "entity.name.function.java" }
+      }
+    },
+    "constructor-declaration": {
+      "name": "meta.function.constructor.jvs",
+      "match": "\\b([A-Z][A-Za-z0-9_]*)\\s*(?=\\()",
+      "captures": {
+        "1": { "name": "entity.name.function.constructor.java" }
+      }
+    },
+    "modifiers": {
+      "name": "storage.modifier.java",
+      "match": "\\b(?:public|private|protected|static|final|abstract|native|default)\\b"
+    },
+    "control-keywords": {
+      "name": "keyword.control.java",
+      "match": "\\b(?:package|import|extends|implements|if|else|while|for|return|throw|throws|try|catch|finally|new|this|super|register)\\b"
+    },
+    "types": {
+      "name": "storage.type.primitive.java",
+      "match": "\\b(?:int|long|double|boolean|void)\\b"
+    },
+    "constants": {
+      "name": "constant.language.java",
+      "match": "\\b(?:True|False|null|NaN|POSITIVE_INFINITY|NEGATIVE_INFINITY|MIN_VALUE|MAX_VALUE)\\b"
+    },
+    "numbers": {
+      "name": "constant.numeric.java",
+      "match": "\\b(?:0[xX][0-9A-Fa-f]+|[0-9]+(?:\\.[0-9]+)?(?:[eE][+-]?[0-9]+)?[lL]?)\\b"
+    },
+    "word-operators": {
+      "name": "keyword.operator.word.jvs",
+      "match": "\\b(?:add|sub|mul|div|mod|neg|mov|cmp|eq|ne|lt|le|gt|ge|and|or)\\b"
+    },
+    "output-functions": {
+      "name": "support.function.jvs",
+      "match": "\\b(?:print|printf|printLn|printfLn|free)\\b"
+    },
+    "function-calls": {
+      "name": "entity.name.function.java",
+      "match": "\\b[a-zA-Z_][A-Za-z0-9_]*(?=\\s*\\()"
+    },
+    "class-names": {
+      "name": "entity.name.type.class.java",
+      "match": "\\b[A-Z][A-Za-z0-9_]*\\b"
+    },
+    "punctuation": {
+      "name": "punctuation.separator.java",
+      "match": "[{}\\[\\]();,.]"
+    }
+  }
+}
