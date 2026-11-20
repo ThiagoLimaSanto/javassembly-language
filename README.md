@@ -5,28 +5,31 @@ O frontend, a IR e as otimizações são compartilhados; o destino é escolhido 
 
 ## Requisitos
 
-O compilador JavaAssembly precisa de JDK 17 ou superior e do NASM. Para gerar um
-executável, também precisa do linker do sistema de destino.
+O pacote de uma Release precisa de Java Runtime (JRE) 17 ou superior e do NASM.
+Para gerar um executável, também precisa do linker do sistema de destino. O JDK só é
+necessário para compilar o JavaAssembly a partir do código-fonte.
 
 ## Tutorial: instalar os requisitos
 
 ### Ubuntu ou Debian: compilar para Linux
 
-Abra o terminal e instale o JDK, o NASM e o GNU linker:
+Abra o terminal e instale o Java Runtime, o NASM e o GNU linker:
 
 ```bash
 sudo apt update
-sudo apt install openjdk-17-jdk nasm binutils
+sudo apt install openjdk-17-jre-headless nasm binutils
 ```
 
 Confirme que os comandos estão disponíveis:
 
 ```bash
 java -version
-javac -version
 nasm -v
 ld --version
 ```
+
+Se você for instalar diretamente do repositório de código-fonte, instale o JDK no
+lugar do JRE (`openjdk-17-jdk`). O pacote baixado em **Releases** já inclui o JAR.
 
 Com esses requisitos, o Linux pode gerar executáveis Linux usando `jvsc -l`.
 
@@ -52,7 +55,8 @@ Depois use `jvsc -w`. O arquivo `.exe` gerado pode ser executado no Windows; no 
 
 ### Windows: compilar para Windows
 
-1. Instale um JDK 17 ou superior. Com WinGet, por exemplo:
+1. Instale Java 17 ou superior. O pacote de uma Release precisa apenas do Java Runtime;
+   para instalar a partir do código-fonte, instale um JDK. Com WinGet, por exemplo:
 
    ```powershell
    winget install --id Microsoft.OpenJDK.25 --exact
@@ -78,7 +82,6 @@ Depois use `jvsc -w`. O arquivo `.exe` gerado pode ser executado no Windows; no 
 
    ```powershell
    java -version
-   javac -version
    nasm -v
    where.exe link
    ```
@@ -95,6 +98,10 @@ passo do MSVC segue a documentação de instalação dos
 
 ## Instalação no Linux
 
+Baixe e extraia o arquivo ZIP mais recente na página **Releases** do GitHub. O pacote
+inclui `javassembly.jar`, as bibliotecas da linguagem e os lançadores. Não é necessário
+ter `javac` para instalar uma Release.
+
 Instalação global para todos os usuários:
 
 ```bash
@@ -110,14 +117,16 @@ source ~/.profile
 
 ## Instalação no Windows
 
-Na pasta do JavaAssembly, execute no PowerShell:
+Baixe e extraia o ZIP da Release. Na pasta extraída, execute no PowerShell:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-O instalador adiciona JavaAssembly ao `PATH` do usuário. Abra um terminal novo para usar
-`jvsc` e `jvs`.
+O instalador copia o JAR e a biblioteca padrão, e adiciona JavaAssembly ao `PATH` do
+usuário. Abra um terminal novo para usar `jvsc` e `jvs`. Não é necessário instalar o
+JDK ao usar uma Release; o Java Runtime, NASM e ferramentas de linkedição continuam
+necessários.
 
 ## Compilar e executar
 

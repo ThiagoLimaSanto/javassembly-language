@@ -24,32 +24,22 @@ esac
 script_path="$(readlink -f -- "${BASH_SOURCE[0]}")"
 script_dir="$(cd -- "$(dirname -- "$script_path")" && pwd)"
 
-# In a checkout, the launcher lives at the compiler root. After installation,
-# it lives in ~/.local/bin and the compiler is stored in ~/.local/lib.
-if [[ -d "$script_dir/compiler" ]]; then
+# Release packages keep the launcher, JAR, and libraries together. Per-user
+# installs keep the launcher in ~/.local/bin and the JAR in ~/.local/lib.
+if [[ -f "$script_dir/javassembly.jar" ]]; then
     repo_root="$script_dir"
-elif [[ -n "${JAVASSEMBLY_HOME:-}" && -d "$JAVASSEMBLY_HOME/compiler" ]]; then
+elif [[ -n "${JAVASSEMBLY_HOME:-}" && -f "$JAVASSEMBLY_HOME/javassembly.jar" ]]; then
     repo_root="$(cd -- "$JAVASSEMBLY_HOME" && pwd)"
-elif [[ -d "${HOME}/.local/lib/javassembly/compiler" ]]; then
+elif [[ -f "${HOME}/.local/lib/javassembly/javassembly.jar" ]]; then
     repo_root="${HOME}/.local/lib/javassembly"
 else
-    printf 'Erro: não encontrei a instalação do JavaAssembly. Reinstale com install.sh.\n' >&2
+    printf 'Erro: não encontrei javassembly.jar. Instale o pacote de uma Release ou execute install.sh a partir do código-fonte.\n' >&2
     exit 1
 fi
-if [[ -w "$repo_root" ]]; then
-    compiler_classes="$repo_root/build/compiler"
-else
-    cache_root="${XDG_CACHE_HOME:-${HOME}/.cache}/javassembly"
-    compiler_classes="$cache_root/compiler"
-fi
-mkdir -p "$compiler_classes"
-
-mapfile -t java_sources < <(find "$repo_root/compiler" -type f -name '*.java' -print | sort)
-if ((${#java_sources[@]} == 0)); then
-    printf 'Erro: não encontrei fontes Java em %s/compiler.\n' "$repo_root" >&2
+if [[ ! -d "$repo_root/lib" ]]; then
+    printf 'Erro: a pasta de bibliotecas não foi encontrada em %s/lib. Reinstale o JavaAssembly.\n' "$repo_root" >&2
     exit 1
 fi
 
-javac -d "$compiler_classes" "${java_sources[@]}"
-exec java -Djavassembly.libraryRoot="$repo_root/lib" \
-    -cp "$compiler_classes" compiler.Main build "$target_flag" "$2"
+exec java "-Djavassembly.libraryRoot=$repo_root/lib" \
+    -jar "$repo_root/javassembly.jar" build "$target_flag" "$2"

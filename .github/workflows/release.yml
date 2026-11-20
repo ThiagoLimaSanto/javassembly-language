@@ -1,0 +1,47 @@
+name: Build JavaAssembly release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Compile compiler JAR
+        run: |
+          mkdir -p build/release-classes build/package/lib
+          find compiler -type f -name '*.java' -print0 | xargs -0 javac -d build/release-classes
+          jar --create \
+            --file build/package/javassembly.jar \
+            --main-class compiler.Main \
+            -C build/release-classes .
+
+      - name: Assemble distribution package
+        run: |
+          cp jvsc jvs jvsc.cmd jvs.cmd install.sh install.ps1 README.md build/package/
+          cp -R lib/. build/package/lib/
+          (cd build/package && zip -qr "../javassembly-${GITHUB_REF_NAME}.zip" .)
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            "build/javassembly-${GITHUB_REF_NAME}.zip" \
+            --title "$GITHUB_REF_NAME" \
+            --generate-notes

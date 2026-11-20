@@ -3,6 +3,19 @@ set -euo pipefail
 
 repo_root="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
+compiler_jar="$repo_root/javassembly.jar"
+if [[ ! -f "$compiler_jar" ]]; then
+    if [[ ! -f "$repo_root/compiler/Main.java" ]] || ! command -v javac >/dev/null 2>&1 || ! command -v jar >/dev/null 2>&1; then
+        printf 'Erro: javassembly.jar não está no pacote. Baixe uma Release ou instale um JDK para compilar do código-fonte.\n' >&2
+        exit 1
+    fi
+    build_dir="$repo_root/build/jar-install"
+    mkdir -p "$build_dir/classes"
+    javac -d "$build_dir/classes" -sourcepath "$repo_root" "$repo_root/compiler/Main.java"
+    jar --create --file "$build_dir/javassembly.jar" --main-class compiler.Main -C "$build_dir/classes" .
+    compiler_jar="$build_dir/javassembly.jar"
+fi
+
 if [[ "${1:-}" == "--system" ]]; then
     if ((EUID != 0)); then
         printf 'Instalação global requer privilégios administrativos. Use: sudo bash install.sh --system\n' >&2
@@ -11,8 +24,8 @@ if [[ "${1:-}" == "--system" ]]; then
 
     install_root="/opt/javassembly"
     bin_dir="/usr/local/bin"
-    mkdir -p "$install_root/compiler" "$install_root/lib" "$bin_dir"
-    cp -R "$repo_root/compiler/." "$install_root/compiler/"
+    mkdir -p "$install_root/lib" "$bin_dir"
+    install -m 644 "$compiler_jar" "$install_root/javassembly.jar"
     cp -R "$repo_root/lib/." "$install_root/lib/"
     install -m 755 "$repo_root/jvsc" "$install_root/jvsc"
     install -m 755 "$repo_root/jvs" "$install_root/jvs"
@@ -44,8 +57,8 @@ fi
 install_root="${HOME}/.local/lib/javassembly"
 bin_dir="${HOME}/.local/bin"
 
-mkdir -p "$install_root/compiler" "$install_root/lib" "$bin_dir"
-cp -R "$repo_root/compiler/." "$install_root/compiler/"
+mkdir -p "$install_root/lib" "$bin_dir"
+install -m 644 "$compiler_jar" "$install_root/javassembly.jar"
 cp -R "$repo_root/lib/." "$install_root/lib/"
 install -m 755 "$repo_root/jvsc" "$bin_dir/jvsc"
 install -m 755 "$repo_root/jvs" "$bin_dir/jvs"

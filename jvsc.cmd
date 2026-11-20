@@ -2,9 +2,9 @@
 setlocal EnableExtensions
 
 set "JVS_HOME=%~dp0"
-if not exist "%JVS_HOME%compiler" if defined JAVASSEMBLY_HOME set "JVS_HOME=%JAVASSEMBLY_HOME%\"
-if not exist "%JVS_HOME%compiler" (
-    echo Erro: nao encontrei os arquivos do JavaAssembly. 1>&2
+if not exist "%JVS_HOME%javassembly.jar" if defined JAVASSEMBLY_HOME set "JVS_HOME=%JAVASSEMBLY_HOME%\"
+if not exist "%JVS_HOME%javassembly.jar" (
+    echo Erro: nao encontrei javassembly.jar. Instale o pacote de uma Release. 1>&2
     exit /b 1
 )
 
@@ -28,12 +28,7 @@ if not exist "%SOURCE%" (
     exit /b 1
 )
 
-set "OUTPUT_DIR=%JVS_HOME%build\compiler"
-if not exist "%OUTPUT_DIR%" mkdir "%OUTPUT_DIR%"
-javac -d "%OUTPUT_DIR%" -sourcepath "%JVS_HOME%" "%JVS_HOME%compiler\Main.java"
-if errorlevel 1 exit /b %ERRORLEVEL%
-
-java -Djavassembly.libraryRoot="%JVS_HOME%lib" -cp "%OUTPUT_DIR%" compiler.Main %COMMAND% "%TARGET%" "%SOURCE%"
+java "-Djavassembly.libraryRoot=%JVS_HOME%lib" -jar "%JVS_HOME%javassembly.jar" %COMMAND% "%TARGET%" "%SOURCE%"
 exit /b %ERRORLEVEL%
 
 :usage

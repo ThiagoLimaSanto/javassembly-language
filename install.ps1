@@ -2,11 +2,27 @@ $ErrorActionPreference = "Stop"
 
 $sourceRoot = $PSScriptRoot
 $installRoot = Join-Path $env:LOCALAPPDATA "Programs\JavaAssembly"
-$compilerTarget = Join-Path $installRoot "compiler"
+$jarSource = Join-Path $sourceRoot "javassembly.jar"
 $libraryTarget = Join-Path $installRoot "lib"
 
-New-Item -ItemType Directory -Force -Path $compilerTarget, $libraryTarget | Out-Null
-Copy-Item -Path (Join-Path $sourceRoot "compiler\*") -Destination $compilerTarget -Recurse -Force
+if (-not (Test-Path $jarSource)) {
+    $mainSource = Join-Path $sourceRoot "compiler\Main.java"
+    if (-not (Test-Path $mainSource) -or -not (Get-Command javac -ErrorAction SilentlyContinue) -or -not (Get-Command jar -ErrorAction SilentlyContinue)) {
+        throw "javassembly.jar nao encontrado. Baixe o pacote de uma Release ou instale um JDK para compilar do codigo-fonte."
+    }
+
+    $buildRoot = Join-Path $sourceRoot "build\jar-install"
+    $classes = Join-Path $buildRoot "classes"
+    New-Item -ItemType Directory -Force -Path $classes | Out-Null
+    & javac -d $classes -sourcepath $sourceRoot $mainSource
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    & jar --create --file (Join-Path $buildRoot "javassembly.jar") --main-class compiler.Main -C $classes .
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    $jarSource = Join-Path $buildRoot "javassembly.jar"
+}
+
+New-Item -ItemType Directory -Force -Path $installRoot, $libraryTarget | Out-Null
+Copy-Item -Path $jarSource -Destination (Join-Path $installRoot "javassembly.jar") -Force
 Copy-Item -Path (Join-Path $sourceRoot "lib\*") -Destination $libraryTarget -Recurse -Force
 Copy-Item -Path (Join-Path $sourceRoot "jvsc.cmd") -Destination $installRoot -Force
 Copy-Item -Path (Join-Path $sourceRoot "jvs.cmd") -Destination $installRoot -Force
