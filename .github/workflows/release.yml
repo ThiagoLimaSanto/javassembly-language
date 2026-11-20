@@ -1,16 +1,131 @@
-name: Build JavaAssembly release
+name: Validate and release JavaAssembly
 
 on:
   push:
+    branches:
+      - main
     tags:
       - "v*"
+  pull_request:
+    branches:
+      - main
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-and-release:
+  validate:
+    name: Validate (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Install Linux native tools
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y nasm binutils
+
+      - name: Install Windows native tools
+        if: runner.os == 'Windows'
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            nasm
+            mingw-w64-ucrt-x86_64-binutils
+            mingw-w64-ucrt-x86_64-crt
+
+      - name: Compile compiler and test sources
+        shell: bash
+        run: |
+          mkdir -p build/test-classes build/package/lib
+          find compiler test -type f -name '*.java' -print0 \
+            | xargs -0 javac --release 17 -d build/test-classes
+          jar --create \
+            --file build/package/javassembly.jar \
+            --main-class compiler.Main \
+            -C build/test-classes compiler
+          cp -R lib/. build/package/lib/
+
+      - name: Run cross-platform Java tests
+        shell: bash
+        run: |
+          java -cp build/test-classes test.RuleFixtureTests
+          java -cp build/test-classes test.DiagnosticRendererTests
+          java -cp build/test-classes test.EntryPointValidatorTests
+          java -cp build/test-classes test.IROptimizerStaticFieldTests
+          java -cp build/test-classes test.RuntimeExceptionHierarchyTests
+
+      - name: Run Linux backend fixture suite
+        if: runner.os == 'Linux'
+        shell: bash
+        run: java -cp build/test-classes test.BackendFixtureTests
+
+      - name: Assemble compiler distribution for smoke test
+        shell: bash
+        run: cp build/package/javassembly.jar javassembly.jar
+
+      - name: Compile and execute Linux smoke program
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          smoke_source="$RUNNER_TEMP/JvsCiSmoke.jvs"
+          cat > "$smoke_source" <<'EOF'
+          public class JvsCiSmoke {
+              public static func void main(String[] args) {
+                  printLn 42;
+                  return;
+              }
+          }
+          EOF
+          ./jvsc -l "$smoke_source"
+          output="$(./jvs -l "$smoke_source")"
+          test "$output" = "42"
+
+      - name: Compile and execute Windows smoke program
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $smokeSource = Join-Path $env:RUNNER_TEMP 'JvsCiSmoke.jvs'
+          @'
+          public class JvsCiSmoke {
+              public static func void main(String[] args) {
+                  printLn 42;
+                  return;
+              }
+          }
+          '@ | Set-Content -Path $smokeSource
+          & .\jvsc.cmd -w $smokeSource
+          if ($LASTEXITCODE -ne 0) { throw 'jvsc falhou ao compilar o smoke test para Windows.' }
+          $output = & .\jvs.cmd -w $smokeSource
+          if ($LASTEXITCODE -ne 0) { throw 'jvs falhou ao executar o smoke test para Windows.' }
+          if (($output -join "`n").Trim() -ne '42') {
+            throw "Saída inesperada do smoke test: $output"
+          }
+
+  publish-release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: validate
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
       - name: Check out repository
@@ -25,7 +140,7 @@ jobs:
       - name: Compile compiler JAR
         run: |
           mkdir -p build/release-classes build/package/lib
-          find compiler -type f -name '*.java' -print0 | xargs -0 javac -d build/release-classes
+          find compiler -type f -name '*.java' -print0 | xargs -0 javac --release 17 -d build/release-classes
           jar --create \
             --file build/package/javassembly.jar \
             --main-class compiler.Main \
