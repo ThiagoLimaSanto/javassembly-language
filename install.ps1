@@ -26,6 +26,7 @@ Copy-Item -Path $jarSource -Destination (Join-Path $installRoot "javassembly.jar
 Copy-Item -Path (Join-Path $sourceRoot "lib\*") -Destination $libraryTarget -Recurse -Force
 Copy-Item -Path (Join-Path $sourceRoot "jvsc.cmd") -Destination $installRoot -Force
 Copy-Item -Path (Join-Path $sourceRoot "jvs.cmd") -Destination $installRoot -Force
+Copy-Item -Path (Join-Path $sourceRoot "jvs.ps1") -Destination $installRoot -Force
 
 $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
 $pathEntries = @($userPath -split ";" | Where-Object { $_ })

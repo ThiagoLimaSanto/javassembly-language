@@ -102,10 +102,17 @@ public final class BackendFixtureTests {
 
             boolean closeStdout = Files.isRegularFile(replaceExtension(fixture, ".closed_stdout"));
             boolean limitData = Files.isRegularFile(replaceExtension(fixture, ".low_data_limit"));
-            List<String> executionCommand = limitData
-                    ? List.of("bash", "-c", "ulimit -d 512; exec \"$1\"", "backend-fixture",
-                            executable.toString())
-                    : List.of(executable.toString());
+            List<String> executionCommand = new ArrayList<>();
+            if (limitData) {
+                executionCommand.addAll(List.of("bash", "-c", "ulimit -d 512; exec \"$1\"",
+                        "backend-fixture", executable.toString()));
+            } else {
+                executionCommand.add(executable.toString());
+            }
+            Path argumentsFile = replaceExtension(fixture, ".args");
+            if (Files.isRegularFile(argumentsFile)) {
+                executionCommand.addAll(Files.readAllLines(argumentsFile));
+            }
             ProcessBuilder execution = new ProcessBuilder(executionCommand)
                     .directory(tempDirectory.toFile())
                     .redirectError(stderrFile.toFile());

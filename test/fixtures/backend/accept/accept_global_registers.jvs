@@ -1,0 +1,17 @@
+R0 = 10;
+R1 = 3000000002L;
+R2 = 2.5;
+R3 = True;
+R4 = "global text";
+
+public class BackendGlobalRegisters {
+    public static func void main(String[] args) {
+        R0 = add R0, 5;
+        printLn R0;
+        printLn R1;
+        printLn R2;
+        printLn R3;
+        printLn R4;
+        return;
+    }
+}

@@ -622,8 +622,7 @@ public class IROptimizer {
                 }
                 boolean removableStore = destination != null
                         && destination.kind() == Operand.Kind.VARIABLE
-                        && (instruction.opCode() == IROpCode.ASSIGN
-                                || instruction.opCode() == IROpCode.PARAM)
+                        && instruction.opCode() == IROpCode.ASSIGN
                         && !live.contains(destination);
                 if (!removableStore) {
                     kept.add(instruction);

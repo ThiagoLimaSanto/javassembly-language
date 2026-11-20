@@ -1,0 +1,43 @@
+class BackendArgumentOverflow {
+    public func int virtualTotal(int a, int b, int c, int d, int e, int f) {
+        int total = add a, b;
+        total = add total, c;
+        total = add total, d;
+        total = add total, e;
+        return add total, f;
+    }
+}
+
+public class BackendCallArgumentOverflow {
+    public static func int directTotal(
+            int a, int b, int c, int d, int e, int f, int g) {
+        int total = add a, b;
+        total = add total, c;
+        total = add total, d;
+        total = add total, e;
+        total = add total, f;
+        return add total, g;
+    }
+
+    public static func double doubleTotal(
+            double a, double b, double c, double d, double e,
+            double f, double g, double h, double i) {
+        double total = add a, b;
+        total = add total, c;
+        total = add total, d;
+        total = add total, e;
+        total = add total, f;
+        total = add total, g;
+        total = add total, h;
+        return add total, i;
+    }
+
+    public static func void main(String[] args) {
+        printLn directTotal(1, 2, 3, 4, 5, 6, 7);
+        BackendArgumentOverflow receiver = new BackendArgumentOverflow();
+        printLn receiver.virtualTotal(1, 2, 3, 4, 5, 6);
+        printLn doubleTotal(1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0);
+        free(receiver);
+        return;
+    }
+}

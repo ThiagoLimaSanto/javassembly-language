@@ -44,11 +44,21 @@ public class ProgramAnalyzer {
     }
 
     public int run(Path sourceFile, TargetPlatform target) throws IOException, InterruptedException {
+        return run(sourceFile, target, new String[0]);
+    }
+
+    public int run(Path sourceFile, TargetPlatform target, String... arguments)
+            throws IOException, InterruptedException {
         build(sourceFile, target);
-        return execute(sourceFile, target);
+        return execute(sourceFile, target, arguments);
     }
 
     public int execute(Path sourceFile, TargetPlatform target) throws IOException, InterruptedException {
+        return execute(sourceFile, target, new String[0]);
+    }
+
+    public int execute(Path sourceFile, TargetPlatform target, String... arguments)
+            throws IOException, InterruptedException {
         Path normalizedSource = sourceFile.toAbsolutePath().normalize();
         Path executable = outputDirectory(normalizedSource, target)
                 .resolve(baseName(normalizedSource) + target.executableExtension());
@@ -67,9 +77,10 @@ public class ProgramAnalyzer {
                     "O executável Linux foi criado, mas precisa ser executado em Linux ou WSL.",
                     executable, null);
         }
-        Process process = new ProcessBuilder(executable.toAbsolutePath().toString())
-                .inheritIO()
-                .start();
+        List<String> command = new ArrayList<>();
+        command.add(executable.toAbsolutePath().toString());
+        command.addAll(List.of(arguments));
+        Process process = new ProcessBuilder(command).inheritIO().start();
         return process.waitFor();
     }
 

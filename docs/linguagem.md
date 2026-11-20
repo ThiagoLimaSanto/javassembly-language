@@ -265,11 +265,11 @@ por tipos compatíveis.
 
 ## Registradores globais
 
-`register` declara um dos registradores globais `R0` a `R9`. O tipo é inferido na
+Os identificadores `R0` a `R9` declaram registradores globais. O tipo é inferido na
 inicialização e não pode mudar:
 
 ```java
-register R0 = 10;
+R0 = 10;
 
 public class RegistradorGlobal {
     public static func void main(String[] args) {

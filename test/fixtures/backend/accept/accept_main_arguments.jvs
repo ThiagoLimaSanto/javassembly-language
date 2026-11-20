@@ -1,0 +1,8 @@
+public class BackendMainArguments {
+    public static func void main(String[] args) {
+        printLn args.length;
+        printLn args[0];
+        printLn args[1];
+        return;
+    }
+}

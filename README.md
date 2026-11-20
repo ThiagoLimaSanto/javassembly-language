@@ -192,6 +192,12 @@ jvsc -w C:\Projetos\Teste\src\Teste.jvs
 jvs -w C:\Projetos\Teste\src\Teste.jvs
 ```
 
+Argumentos adicionais após o arquivo-fonte são entregues a `main(String[] args)`:
+
+```powershell
+jvs -w C:\Projetos\Teste\src\Teste.jvs Thiago "valor com espaços"
+```
+
 `jvsc` compila e informa o caminho do executável. `jvs` executa o programa. No Linux,
 `jvs -w` usa Wine se estiver instalado; sem Wine, execute o `.exe` no Windows.
 

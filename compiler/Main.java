@@ -15,22 +15,36 @@ public class Main {
         String command;
         TargetPlatform target;
         String source;
-        if (args.length == 3 && (args[0].equals("build") || args[0].equals("run")
-                || args[0].equals("exec"))) {
+        String[] programArguments = new String[0];
+        boolean knownCommand = args.length > 0
+                && (args[0].equals("build") || args[0].equals("run") || args[0].equals("exec"));
+        boolean hasTarget = args.length > 1
+                && (args[1].equals("-l") || args[1].equals("-w"));
+        if (knownCommand && hasTarget && args.length >= 3) {
             command = args[0];
-            try {
-                target = TargetPlatform.fromFlag(args[1]);
-            } catch (CommandLineException exception) {
-                printError(exception);
+            target = TargetPlatform.fromFlag(args[1]);
+            source = args[2];
+            if (command.equals("build") && args.length != 3) {
+                printError(new CommandLineException("O comando build não recebe argumentos do programa."));
                 System.exit(2);
                 return;
             }
-            source = args[2];
-        } else if (args.length == 2 && (args[0].equals("build") || args[0].equals("run")
-                || args[0].equals("exec"))) {
+            programArguments = java.util.Arrays.copyOfRange(args, 3, args.length);
+        } else if (knownCommand && args.length >= 2 && !hasTarget) {
             command = args[0];
             target = TargetPlatform.LINUX_X64;
             source = args[1];
+            if (command.equals("build") && args.length != 2) {
+                printError(new CommandLineException("O comando build não recebe argumentos do programa."));
+                System.exit(2);
+                return;
+            }
+            programArguments = java.util.Arrays.copyOfRange(args, 2, args.length);
+        } else if (knownCommand && args.length >= 2) {
+            printError(new CommandLineException("Destino inválido '" + args[1]
+                    + "'. Use -l (Linux x86-64) ou -w (Windows x86-64)."));
+            System.exit(2);
+            return;
         } else {
             printError(new CommandLineException("Comando interno inválido. Use jvsc para compilar."));
             System.exit(2);
@@ -50,10 +64,10 @@ public class Main {
                 Path executable = analyzer.build(sourcePath, target);
                 System.out.println("Executável criado: " + executable.toAbsolutePath());
             } else if (command.equals("exec")) {
-                int status = analyzer.execute(sourcePath, target);
+                int status = analyzer.execute(sourcePath, target, programArguments);
                 if (status != 0) System.exit(status);
             } else {
-                int status = analyzer.run(sourcePath, target);
+                int status = analyzer.run(sourcePath, target, programArguments);
                 if (status != 0)
                     System.exit(status);
             }

@@ -74,4 +74,4 @@ fi
 printf 'JavaAssembly instalado em: %s\n' "$install_root"
 printf 'Comandos instalados em: %s\n' "$bin_dir"
 printf 'Feche e abra o terminal, ou execute: source ~/.profile\n'
-printf 'Depois compile com: jvsc /caminho/para/Arquivo.jvs\n'
+printf 'Depois compile com: jvsc -l /caminho/para/Arquivo.jvs\n'

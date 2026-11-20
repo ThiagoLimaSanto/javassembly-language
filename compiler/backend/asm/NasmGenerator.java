@@ -2434,8 +2434,8 @@ public class NasmGenerator {
         for (Operand argument : arguments) {
             if (argument.type() == Operand.Type.F64) {
                 if (xmmIndex == xmmRegisters.length) {
-                    loadF64(asm, argument, "xmm0");
-                    asm.append("    movsd qword [rsp+").append(stackIndex++ * 8).append("], xmm0\n");
+                    loadF64(asm, argument, "xmm8");
+                    asm.append("    movsd qword [rsp+").append(stackIndex++ * 8).append("], xmm8\n");
                 } else {
                     loadF64(asm, argument, xmmRegisters[xmmIndex]);
                 }

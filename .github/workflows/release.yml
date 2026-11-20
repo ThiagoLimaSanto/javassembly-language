@@ -105,17 +105,29 @@ jobs:
           $smokeSource = Join-Path $env:RUNNER_TEMP 'JvsCiSmoke.jvs'
           @'
           public class JvsCiSmoke {
+              public static func int sum(int a, int b, int c, int d, int e, int f, int g) {
+                  int total = add a, b;
+                  total = add total, c;
+                  total = add total, d;
+                  total = add total, e;
+                  total = add total, f;
+                  return add total, g;
+              }
+
               public static func void main(String[] args) {
-                  printLn 42;
+                  printLn args.length;
+                  printLn args[0];
+                  printLn args[1];
+                  printLn sum(1, 2, 3, 4, 5, 6, 7);
                   return;
               }
           }
           '@ | Set-Content -Path $smokeSource
           & .\jvsc.cmd -w $smokeSource
           if ($LASTEXITCODE -ne 0) { throw 'jvsc falhou ao compilar o smoke test para Windows.' }
-          $output = & .\jvs.cmd -w $smokeSource
+          $output = & .\jvs.cmd -w $smokeSource primeiro 'argumento com espaços'
           if ($LASTEXITCODE -ne 0) { throw 'jvs falhou ao executar o smoke test para Windows.' }
-          if (($output -join "`n").Trim() -ne '42') {
+          if (($output -join "`n").Trim() -ne "2`nprimeiro`nargumento com espaços`n28") {
             throw "Saída inesperada do smoke test: $output"
           }
 
@@ -148,8 +160,9 @@ jobs:
 
       - name: Assemble distribution package
         run: |
-          cp jvsc jvs jvsc.cmd jvs.cmd install.sh install.ps1 README.md build/package/
+          cp jvsc jvs jvsc.cmd jvs.cmd jvs.ps1 install.sh install.ps1 README.md build/package/
           cp -R lib/. build/package/lib/
+          cp -R docs build/package/docs
           (cd build/package && zip -qr "../javassembly-${GITHUB_REF_NAME}.zip" .)
 
       - name: Publish GitHub Release
