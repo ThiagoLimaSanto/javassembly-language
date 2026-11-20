@@ -103,7 +103,10 @@ Depois use `jvsc -w`. O arquivo `.exe` gerado pode ser executado no Windows; no 
    ```
 
    Adicione `C:\msys64\ucrt64\bin` ao `Path` do usuário no Windows. Se instalou o MSYS2
-   em outro local, use o caminho correspondente à pasta `ucrt64\bin`.
+   em outro local, use o caminho correspondente à pasta `ucrt64\bin`. O compilador procura
+   `libkernel32.a` junto da instalação do `ld.exe` e adiciona o diretório automaticamente.
+   Para uma instalação MinGW fora dos layouts padrão, configure `JAVASSEMBLY_WINDOWS_LIB_DIR`
+   com o diretório que contém `libkernel32.a`.
 
 4. Abra um terminal novo e confirme as ferramentas:
 
@@ -114,7 +117,8 @@ Depois use `jvsc -w`. O arquivo `.exe` gerado pode ser executado no Windows; no 
    ```
 
    O primeiro resultado de `where.exe ld.exe` deve apontar para `ucrt64\bin\ld.exe`.
-   O backend usa esse linker diretamente;
+   O backend usa esse linker diretamente; não precisa instalar GCC, `link.exe` ou o
+   Windows SDK.
 
 Agora instale o pacote da Release conforme a seção [Instalação no Windows](#instalação-no-windows)
 e compile com `jvsc -w caminho\para\Arquivo.jvs`.

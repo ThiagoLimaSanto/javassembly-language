@@ -1,9 +1,13 @@
 package compiler;
 
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import compiler.ast.records.ProgramRecord;
 import compiler.backend.asm.NasmGenerator;
@@ -108,8 +112,74 @@ public class ProgramAnalyzer {
         String linker = configuredLinker == null || configuredLinker.isBlank()
                 ? windowsHost ? "ld.exe" : "x86_64-w64-mingw32-ld"
                 : configuredLinker;
-        runTool(List.of(linker, "-e", "start", "--subsystem", "console", "-o",
-                executable.toString(), object.toString(), "-lkernel32"), executable, linker);
+        List<String> command = new ArrayList<>();
+        if (windowsHost) {
+            WindowsLinkerConfig config = findWindowsLinkerConfig(linker, executable);
+            command.add(config.linker().toString());
+            command.add("-L" + config.libraryDirectory());
+        } else {
+            command.add(linker);
+        }
+        command.addAll(List.of("-e", "start", "--subsystem", "console", "-o",
+                executable.toString(), object.toString(), "-lkernel32"));
+        runTool(command, executable, linker);
+    }
+
+    private WindowsLinkerConfig findWindowsLinkerConfig(String linker, Path outputPath) throws IOException {
+        List<Path> linkerPaths = findExecutablePaths(linker);
+        String configuredLibraryDirectory = System.getenv("JAVASSEMBLY_WINDOWS_LIB_DIR");
+        if (configuredLibraryDirectory != null && !configuredLibraryDirectory.isBlank()) {
+            Path directory = Path.of(configuredLibraryDirectory).toAbsolutePath().normalize();
+            if (Files.isRegularFile(directory.resolve("libkernel32.a"))) {
+                Path executablePath = linkerPaths.isEmpty() ? Path.of(linker) : linkerPaths.get(0);
+                return new WindowsLinkerConfig(executablePath, directory);
+            }
+            throw new OutputException("JAVASSEMBLY_WINDOWS_LIB_DIR não contém libkernel32.a.", outputPath, null);
+        }
+
+        for (Path linkerPath : linkerPaths) {
+            Path binDirectory = linkerPath.getParent();
+            if (binDirectory == null) continue;
+            Path toolchainRoot = binDirectory.getParent();
+            if (toolchainRoot == null) continue;
+
+            List<Path> candidates = List.of(
+                    toolchainRoot.resolve("lib"),
+                    toolchainRoot.resolve("x86_64-w64-mingw32").resolve("lib"),
+                    binDirectory.resolve("..\\lib").normalize(),
+                    binDirectory.resolve("..\\x86_64-w64-mingw32\\lib").normalize());
+            for (Path candidate : candidates) {
+                if (Files.isRegularFile(candidate.resolve("libkernel32.a"))) {
+                    return new WindowsLinkerConfig(linkerPath, candidate.toAbsolutePath().normalize());
+                }
+            }
+        }
+
+        throw new OutputException("Não encontrei libkernel32.a nas pastas padrão do MinGW-w64. "
+                + "Configure JAVASSEMBLY_WINDOWS_LIB_DIR com a pasta que contém esse arquivo.", outputPath, null);
+    }
+
+    private List<Path> findExecutablePaths(String executable) {
+        Path requestedPath = Path.of(executable);
+        if (requestedPath.isAbsolute() || executable.contains("/") || executable.contains("\\")) {
+            return Files.isRegularFile(requestedPath) ? List.of(requestedPath.toAbsolutePath().normalize()) : List.of();
+        }
+
+        Set<Path> matches = new LinkedHashSet<>();
+        String pathValue = System.getenv("PATH");
+        if (pathValue == null) return List.of();
+        for (String entry : pathValue.split(java.util.regex.Pattern.quote(File.pathSeparator))) {
+            if (entry.isBlank()) continue;
+            Path directory = Path.of(entry.replace("\"", ""));
+            Path candidate = directory.resolve(executable);
+            if (Files.isRegularFile(candidate)) {
+                matches.add(candidate.toAbsolutePath().normalize());
+            }
+        }
+        return List.copyOf(matches);
+    }
+
+    private record WindowsLinkerConfig(Path linker, Path libraryDirectory) {
     }
 
     private String baseName(Path sourceFile) {
