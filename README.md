@@ -3,6 +3,11 @@
 JavaAssembly compila arquivos `.jvs` para programas Linux x86-64 ou Windows x86-64.
 O frontend, a IR e as otimizações são compartilhados; o destino é escolhido na compilação.
 
+## Documentação
+
+Veja o [guia da linguagem](docs/linguagem.md) para aprender a escrever programas `.jvs`,
+com exemplos de tipos, funções, classes, arrays, entrada e saída e tratamento de exceções.
+
 ## Requisitos
 
 Para usar o pacote publicado em uma Release, instale:
@@ -25,7 +30,7 @@ sistemas. Os arquivos **Source code** contêm apenas o código-fonte do reposit�
 
 ### Ubuntu ou Debian: compilar para Linux
 
-Abra o terminal e instale o Java Runtime, o NASM e o GNU linker:
+Abra o terminal e instale o Java Runtime (JVM), o NASM e o GNU linker:
 
 ```bash
 sudo apt update
