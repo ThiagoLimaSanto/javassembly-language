@@ -14,6 +14,9 @@ public class Teste{
         Funcionario funcionario = new Funcionario(idade, name, cargo);
 
         printfLn "O seu nome é %s e tem %d anos e trabalho com %s.", funcionario.name, funcionario.idade, funcionario.cargo;
+
+        free(funcionario);
+        funcionario = null;
     }
 }
 
