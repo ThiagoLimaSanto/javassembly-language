@@ -1,0 +1,66 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if (($# == 0)) || [[ "$1" == "help" || "$1" == "--help" || "$1" == "-h" ]]; then
+    printf 'Uso: jvs <caminho-do-programa> [argumentos...]\n'
+    printf 'Executa o binário já criado em projects/nomeProjeto/out.\n'
+    exit 0
+fi
+
+requested="$1"
+shift
+without_extension="${requested%.jvs}"
+
+if [[ -x "$requested" && ! -d "$requested" ]]; then
+    exec "$requested" "$@"
+fi
+
+if [[ -x "$without_extension" && ! -d "$without_extension" ]]; then
+    exec "$without_extension" "$@"
+fi
+
+program_name="$(basename "$without_extension")"
+source_path=""
+if [[ -f "$requested" && "$requested" == *.jvs ]]; then
+    source_path="$(realpath -- "$requested")"
+elif [[ -f "$without_extension.jvs" ]]; then
+    source_path="$(realpath -- "$without_extension.jvs")"
+fi
+
+if [[ -n "$source_path" ]]; then
+    search_dir="$(dirname "$source_path")"
+else
+    search_dir="$(dirname "$(realpath -m -- "$without_extension")")"
+fi
+while [[ "$(basename "$search_dir")" != "src" && "$search_dir" != "." && "$search_dir" != "/" ]]; do
+    parent_dir="$(dirname "$search_dir")"
+    [[ "$parent_dir" == "$search_dir" ]] && break
+    search_dir="$parent_dir"
+done
+
+if [[ "$(basename "$search_dir")" == "src" ]]; then
+    project_dir="$(dirname "$search_dir")"
+    executable="$project_dir/out/$program_name"
+    if [[ -x "$executable" ]]; then
+        exec "$executable" "$@"
+    fi
+elif [[ -n "$source_path" ]]; then
+    executable="$(dirname "$source_path")/out/$program_name"
+    if [[ -x "$executable" ]]; then
+        exec "$executable" "$@"
+    fi
+fi
+
+if [[ "$requested" != */* ]]; then
+    mapfile -t matches < <(find projects -type f -path "*/out/$program_name" -perm -u+x -print 2>/dev/null | sort)
+    if ((${#matches[@]} == 1)); then
+        exec "${matches[0]}" "$@"
+    elif ((${#matches[@]} > 1)); then
+        printf "Erro: há mais de um executável chamado '%s'; informe o caminho do projeto.\n" "$program_name" >&2
+        exit 2
+    fi
+fi
+
+printf "Erro: executável '%s' não encontrado. Compile primeiro com jvsc caminhoArquivo.jvs.\n" \
+    "$program_name" >&2
+exit 1

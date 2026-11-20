@@ -28,6 +28,7 @@ public final class RuleFixtureTests {
 
     public static void main(String[] args) throws IOException {
         runFrontendCoreChecks();
+        runImportedSourcePathCheck();
         Path fixtureRoot = args.length == 0
                 ? Path.of("test/fixtures/frontend/rules")
                 : Path.of(args[0]);
@@ -93,6 +94,20 @@ public final class RuleFixtureTests {
         if (!failures.isEmpty()) {
             throw new AssertionError(
                     failures.size() + " rule fixture(s) failed.");
+        }
+    }
+
+    private static void runImportedSourcePathCheck() throws IOException {
+        Path source = Path.of("test/fixtures/frontend/rules/semantic/packages/import_conflict/q/reject_import_type_collision.jvs")
+                .toAbsolutePath().normalize();
+        try {
+            Frontend.loadProject(source);
+            throw new AssertionError("Expected imported source validation to fail.");
+        } catch (LanguageException expected) {
+            if (expected.getSourcePath() == null
+                    || !expected.getSourcePath().toAbsolutePath().normalize().equals(source)) {
+                throw new AssertionError("Diagnostic should retain the failing source path: " + expected);
+            }
         }
     }
 

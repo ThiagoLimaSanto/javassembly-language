@@ -185,7 +185,6 @@ public final class IRGenerator {
                         Operand.label(currentSourceMethodLabel),
                         null,
                         null));
-                emitSourceLocation(ir, function.line(), function.column());
                 if (!function.isStatic()) {
                     Operand thisOperand = declareVariable("this", Operand.Type.REF);
                     registerReferenceType(thisOperand, new TypeRecord(interfaceNode.name()));
@@ -196,6 +195,7 @@ public final class IRGenerator {
                             null));
                 }
                 emitFunctionParameters(ir, function);
+                emitSourceLocation(ir, function.line(), function.column());
                 emitStatement(ir, function.block());
                 if (function.returnType().name().equals("void")) {
                     ir.add(new IRInstruction(IROpCode.RETURN, null, null, null));
@@ -219,8 +219,6 @@ public final class IRGenerator {
                 pushVariableScope();
                 ir.add(new IRInstruction(IROpCode.LABEL,
                         Operand.label(currentSourceMethodLabel), null, null));
-                emitSourceLocation(ir, function.line(), function.column());
-
                 if (!function.isStatic()) {
                     Operand thisOperand = declareVariable("this", Operand.Type.REF);
                     registerReferenceType(thisOperand, new TypeRecord(classNode.name()));
@@ -230,6 +228,7 @@ public final class IRGenerator {
                 }
 
                 emitFunctionParameters(ir, function);
+                emitSourceLocation(ir, function.line(), function.column());
                 emitStatement(ir, function.block());
 
                 if (function.returnType().name().equals("void")) {
@@ -359,8 +358,6 @@ public final class IRGenerator {
                 Operand.label(constructorLabel(owner, constructor)),
                 null,
                 null));
-        emitSourceLocation(ir, constructor == null ? owner.line() : constructor.line(),
-                constructor == null ? owner.column() : constructor.column());
         ir.add(new IRInstruction(
                 IROpCode.PARAM,
                 thisOperand,
@@ -377,6 +374,9 @@ public final class IRGenerator {
                     Operand.constant(index, Operand.Type.I32),
                     null));
         }
+
+        emitSourceLocation(ir, constructor == null ? owner.line() : constructor.line(),
+                constructor == null ? owner.column() : constructor.column());
 
         ConstructorInvocationRecord invocation = constructor == null ? null : constructor.invocation();
         boolean delegatesToThis = invocation != null && invocation.delegatesToThis();

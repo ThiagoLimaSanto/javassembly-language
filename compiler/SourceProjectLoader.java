@@ -17,11 +17,13 @@ import compiler.ast.records.InterfaceRecord;
 import compiler.ast.records.ProgramRecord;
 import compiler.ast.records.RegisterDeclarationRecord;
 import compiler.exceptions.ImportException;
+import compiler.exceptions.LanguageException;
 import compiler.exceptions.SourceProjectException;
 import compiler.lexer.TokenType;
 
 final class SourceProjectLoader {
-    private final Path libraryRoot = Path.of("lib").toAbsolutePath().normalize();
+    private final Path libraryRoot = Path.of(System.getProperty(
+            "javassembly.libraryRoot", "lib")).toAbsolutePath().normalize();
     private final Set<Path> loadedFiles = new HashSet<>();
     private final Map<Path, ProgramRecord> parsedFiles = new HashMap<>();
     private final List<ClassRecord> classes = new ArrayList<>();
@@ -135,7 +137,7 @@ final class SourceProjectLoader {
         classes.addAll(unit.classes());
         interfaces.addAll(unit.interfaces());
         registers.addAll(unit.registers());
-        String sourceName = normalizedFile.getFileName().toString();
+        String sourceName = normalizedFile.toString();
         unit.classes().forEach(type -> sourceFiles.put(type.name(), sourceName));
         unit.interfaces().forEach(type -> sourceFiles.put(type.name(), sourceName));
     }
@@ -151,12 +153,16 @@ final class SourceProjectLoader {
         }
 
         String source = readSource(file);
-        ProgramRecord preliminary = parse(source);
-        Path sourceRoot = findSourceRoot(file, preliminary.packageName());
-        Set<String> knownTypes = indexVisibleSourceTypes(sourceRoot, preliminary, source);
-        ProgramRecord resolved = Frontend.parse(source, knownTypes);
-        parsedFiles.put(file, resolved);
-        return resolved;
+        try {
+            ProgramRecord preliminary = parse(source);
+            Path sourceRoot = findSourceRoot(file, preliminary.packageName());
+            Set<String> knownTypes = indexVisibleSourceTypes(sourceRoot, preliminary, source);
+            ProgramRecord resolved = Frontend.parse(source, knownTypes);
+            parsedFiles.put(file, resolved);
+            return resolved;
+        } catch (LanguageException exception) {
+            throw (LanguageException) exception.atSource(file);
+        }
     }
 
     private Set<String> indexVisibleSourceTypes(

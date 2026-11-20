@@ -1,9 +1,12 @@
 package compiler.exceptions;
 
+import java.nio.file.Path;
+
 public abstract class LanguageException extends RuntimeException {
     private final String stage;
     private final int line;
     private final int column;
+    private Path sourcePath;
 
     protected LanguageException(String stage, String message, int line, int column) {
         super(formatMessage(stage, message, line, column));
@@ -39,5 +42,14 @@ public abstract class LanguageException extends RuntimeException {
 
     public int getColumn() {
         return column;
+    }
+
+    public Path getSourcePath() {
+        return sourcePath;
+    }
+
+    public LanguageException atSource(Path path) {
+        if (sourcePath == null) sourcePath = path;
+        return this;
     }
 }

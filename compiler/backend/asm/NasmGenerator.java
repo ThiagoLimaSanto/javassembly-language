@@ -565,9 +565,31 @@ public class NasmGenerator {
         if (frameSize > 0) {
             asm.append("    sub rsp, ").append(frameSize).append("\n");
         }
-        asm.append("    mov qword [rbp-8], 0\n")
-                .append("    mov rax, qword [rel __jvs_trace_depth]\n")
-                .append("    cmp rax, 1024\n    jae ..@trace_frame_full_").append(nextFreeLabel).append("\n")
+        asm.append("    mov qword [rbp-8], 0\n");
+
+        nextGpParameter = 0;
+        nextXmmParameter = 0;
+        int instructionIndex = 1;
+        while (instructionIndex < instructions.size()
+                && instructions.get(instructionIndex).opCode() == IROpCode.PARAM) {
+            emitInstruction(asm, instructions.get(instructionIndex++));
+        }
+        emitFunctionTraceEntry(asm, name);
+        for (int i = instructionIndex; i < instructions.size(); i++) {
+            emitInstruction(asm, instructions.get(i));
+        }
+
+        if (instructions.get(instructions.size() - 1).opCode() != IROpCode.RETURN) {
+            emitFunctionReturn(asm);
+        }
+
+        asm.append('\n');
+    }
+
+    private void emitFunctionTraceEntry(StringBuilder asm, String name) {
+        String full = "..@trace_frame_full_" + nextFreeLabel++;
+        asm.append("    mov rax, qword [rel __jvs_trace_depth]\n")
+                .append("    cmp rax, 1024\n    jae ").append(full).append('\n')
                 .append("    mov r10, rax\n    shl r10, 3\n")
                 .append("    lea r11, [rel __jvs_trace_method]\n")
                 .append("    lea rcx, [rel ").append(stringLabels.get(name)).append("]\n")
@@ -583,19 +605,7 @@ public class NasmGenerator {
                 .append("    mov qword [r11+r10], rcx\n")
                 .append("    inc qword [rel __jvs_trace_depth]\n")
                 .append("    mov qword [rbp-8], 1\n")
-                .append("..@trace_frame_full_").append(nextFreeLabel++).append(":\n");
-
-        nextGpParameter = 0;
-        nextXmmParameter = 0;
-        for (int i = 1; i < instructions.size(); i++) {
-            emitInstruction(asm, instructions.get(i));
-        }
-
-        if (instructions.get(instructions.size() - 1).opCode() != IROpCode.RETURN) {
-            emitFunctionReturn(asm);
-        }
-
-        asm.append('\n');
+                .append(full).append(":\n");
     }
 
     private void emitFunctionReturn(StringBuilder asm) {

@@ -3,6 +3,7 @@ package compiler;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import compiler.ast.records.ProgramRecord;
 import compiler.backend.asm.NasmGenerator;
@@ -15,19 +16,37 @@ import compiler.semantic.EntryPointValidator;
 import compiler.semantic.SemanticAnalyzer;
 
 public class ProgramAnalyzer {
+    public Path build(Path sourceFile) throws IOException {
+        Path normalizedSource = sourceFile.toAbsolutePath().normalize();
+        analyze(normalizedSource);
+        Path outputDirectory = findProjectDirectory(normalizedSource).resolve("out");
+        String baseName = baseName(sourceFile);
+        Path assembly = outputDirectory.resolve(baseName + ".asm");
+        Path object = outputDirectory.resolve(baseName + ".o");
+        Path executable = outputDirectory.resolve(baseName);
+
+        runTool(List.of("nasm", "-f", "elf64", assembly.toString(), "-o", object.toString()),
+                executable, "NASM");
+        runTool(List.of("ld", "-o", executable.toString(), object.toString()),
+                executable, "ld");
+        return executable;
+    }
+
+    public int run(Path sourceFile) throws IOException, InterruptedException {
+        Path executable = build(sourceFile);
+        Process process = new ProcessBuilder(executable.toAbsolutePath().toString())
+                .inheritIO()
+                .start();
+        return process.waitFor();
+    }
+
     public void analyze(Path sourceFile) throws IOException {
         ProgramRecord program = Frontend.loadProject(sourceFile);
         String asm = analyzeProgram(program);
 
-        String fileName = sourceFile.getFileName().toString();
-        int extension = fileName.lastIndexOf('.');
-        String baseName = extension < 0 ? fileName : fileName.substring(0, extension);
-        Path projectDirectory = findProjectDirectory(sourceFile);
-        if (projectDirectory == null) {
-            throw new OutputException(
-                    "O arquivo-fonte deve estar dentro de 'projects/nomeProjeto/src'.",
-                    sourceFile, null);
-        }
+        String baseName = baseName(sourceFile);
+        Path normalizedSource = sourceFile.toAbsolutePath().normalize();
+        Path projectDirectory = findProjectDirectory(normalizedSource);
         Path outputDirectory = projectDirectory.resolve("out");
         Path asmFile = outputDirectory.resolve(baseName + ".asm");
         try {
@@ -35,6 +54,32 @@ public class ProgramAnalyzer {
             Files.writeString(asmFile, asm);
         } catch (IOException cause) {
             throw new OutputException("Não foi possível gravar o assembly gerado.", asmFile, cause);
+        }
+    }
+
+    private String baseName(Path sourceFile) {
+        String fileName = sourceFile.getFileName().toString();
+        int extension = fileName.lastIndexOf('.');
+        return extension < 0 ? fileName : fileName.substring(0, extension);
+    }
+
+    private void runTool(List<String> command, Path outputPath, String tool) throws IOException {
+        Process process;
+        try {
+            process = new ProcessBuilder(command).inheritIO().start();
+        } catch (IOException cause) {
+            throw new OutputException("Não foi possível iniciar '" + tool
+                    + "'. Verifique se a ferramenta está instalada.", outputPath, cause);
+        }
+        try {
+            int status = process.waitFor();
+            if (status != 0) {
+                throw new OutputException("'" + tool + "' terminou com código " + status + ".",
+                        outputPath, null);
+            }
+        } catch (InterruptedException interrupted) {
+            Thread.currentThread().interrupt();
+            throw new IOException("A compilação foi interrompida.", interrupted);
         }
     }
 
@@ -47,7 +92,8 @@ public class ProgramAnalyzer {
             }
             directory = directory.getParent();
         }
-        return null;
+        // Standalone .jvs files use an out directory beside the source file.
+        return sourceFile.toAbsolutePath().normalize().getParent();
     }
 
     public void analyze(String source) {

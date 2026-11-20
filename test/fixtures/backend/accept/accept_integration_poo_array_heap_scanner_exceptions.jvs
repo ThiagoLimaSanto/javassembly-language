@@ -1,0 +1,62 @@
+import jvs.io.Scanner;
+
+class IntegrationCheckedException extends Exception {}
+
+class IntegrationItem {
+    int value;
+
+    public IntegrationItem(int value) {
+        this.value = value;
+    }
+
+    public func int read() {
+        return this.value;
+    }
+}
+
+class IntegrationBonusItem extends IntegrationItem {
+    int bonus;
+
+    public IntegrationBonusItem(int value, int bonus) {
+        super(value);
+        this.bonus = bonus;
+    }
+
+    public func int read() {
+        return add super.read(), this.bonus;
+    }
+}
+
+public class IntegrationPooArrayHeapScannerExceptions {
+    public static func void fail() throws IntegrationCheckedException {
+        throw new IntegrationCheckedException();
+    }
+
+    public static func void main(String[] args) throws IOException {
+        int base = Scanner.readInt();
+        int bonus = Scanner.readInt();
+
+        IntegrationItem[] items = new IntegrationBonusItem[1];
+        items[0] = new IntegrationBonusItem(base, bonus);
+        IntegrationItem alias = items[0];
+        printLn alias.read();
+
+        try {
+            IntegrationItem stale = alias;
+            free(alias);
+            printLn stale.read();
+        } catch (InvalidReferenceException error) {
+            printLn error.getType();
+        } finally {
+            free(items);
+            printLn "heap cleanup complete";
+        }
+
+        try {
+            fail();
+        } catch (IntegrationCheckedException error) {
+            printLn "checked exception caught";
+        }
+        return;
+    }
+}

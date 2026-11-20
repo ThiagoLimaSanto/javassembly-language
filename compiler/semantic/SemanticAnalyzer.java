@@ -1,5 +1,7 @@
 package compiler.semantic;
 
+import java.nio.file.Path;
+
 import java.util.ArrayList;
 import java.util.ArrayDeque;
 import java.util.Deque;
@@ -14,6 +16,7 @@ import compiler.ast.StatementInterface;
 import compiler.ast.records.*;
 import compiler.ast.visitor.ASTVisitor;
 import compiler.exceptions.CompilerInvariantException;
+import compiler.exceptions.LanguageException;
 import compiler.exceptions.SemanticException;
 import compiler.lexer.TokenType;
 
@@ -51,6 +54,16 @@ public class SemanticAnalyzer implements ASTVisitor {
     private Map<String, String> constructorDelegations = new HashMap<>();
 
     private final TypeChecker typeChecker = new TypeChecker();
+
+    private void withSource(ProgramRecord program, String typeName, Runnable action) {
+        try {
+            action.run();
+        } catch (LanguageException exception) {
+            String sourcePath = program.sourceFiles().get(typeName);
+            if (sourcePath != null) exception.atSource(Path.of(sourcePath));
+            throw exception;
+        }
+    }
 
 
     private void enterScope() {
@@ -3117,43 +3130,31 @@ public class SemanticAnalyzer implements ASTVisitor {
         activeTryExceptionTypes.clear();
 
         for (InterfaceRecord interfaceNode : node.interfaces()) {
-
-            if (interfaceNode.name().equals("Object")) {
-                throw new SemanticException(
-                        "'Object' é um tipo predefinido e não pode ser redeclarado.",
-                        interfaceNode.line(),
-                        interfaceNode.column());
-            }
-
-            if (interfaces.containsKey(interfaceNode.name())) {
-                throw new SemanticException(
-                        "Interface '" + interfaceNode.name()
-                                + "' já declarada.",
-                        interfaceNode.line(),
-                        interfaceNode.column());
-            }
-
-            interfaces.put(interfaceNode.name(), interfaceNode);
+            withSource(node, interfaceNode.name(), () -> {
+                if (interfaceNode.name().equals("Object")) {
+                    throw new SemanticException("'Object' é um tipo predefinido e não pode ser redeclarado.",
+                            interfaceNode.line(), interfaceNode.column());
+                }
+                if (interfaces.containsKey(interfaceNode.name())) {
+                    throw new SemanticException("Interface '" + interfaceNode.name() + "' já declarada.",
+                            interfaceNode.line(), interfaceNode.column());
+                }
+                interfaces.put(interfaceNode.name(), interfaceNode);
+            });
         }
 
         for (ClassRecord classNode : node.classes()) {
-
-            if (classNode.name().equals("Object")) {
-                throw new SemanticException(
-                        "'Object' é um tipo predefinido e não pode ser redeclarado.",
-                        classNode.line(),
-                        classNode.column());
-            }
-
-            if (classes.containsKey(classNode.name())) {
-                throw new SemanticException(
-                        "Classe '" + classNode.name()
-                                + "' já declarada.",
-                        classNode.line(),
-                        classNode.column());
-            }
-
-            classes.put(classNode.name(), classNode);
+            withSource(node, classNode.name(), () -> {
+                if (classNode.name().equals("Object")) {
+                    throw new SemanticException("'Object' é um tipo predefinido e não pode ser redeclarado.",
+                            classNode.line(), classNode.column());
+                }
+                if (classes.containsKey(classNode.name())) {
+                    throw new SemanticException("Classe '" + classNode.name() + "' já declarada.",
+                            classNode.line(), classNode.column());
+                }
+                classes.put(classNode.name(), classNode);
+            });
         }
 
         for (RegisterDeclarationRecord register : node.registers()) {
@@ -3161,33 +3162,32 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         for (InterfaceRecord interfaceNode : node.interfaces()) {
-            validateInterfaceInheritance(interfaceNode);
+            withSource(node, interfaceNode.name(), () -> validateInterfaceInheritance(interfaceNode));
         }
 
         for (ClassRecord classNode : node.classes()) {
-
-            if (interfaces.containsKey(classNode.name())) {
-                throw new SemanticException(
-                        "Já existe uma interface com o nome '"
-                                + classNode.name() + "'.",
-                        classNode.line(),
-                        classNode.column());
-            }
+            withSource(node, classNode.name(), () -> {
+                if (interfaces.containsKey(classNode.name())) {
+                    throw new SemanticException("Já existe uma interface com o nome '"
+                            + classNode.name() + "'.", classNode.line(), classNode.column());
+                }
+            });
         }
 
         for (ClassRecord classNode : node.classes()) {
-
-            validateClassInheritance(classNode);
-            validateImplementedInterfaces(classNode);
-            validateAbstractMethods(classNode);
+            withSource(node, classNode.name(), () -> {
+                validateClassInheritance(classNode);
+                validateImplementedInterfaces(classNode);
+                validateAbstractMethods(classNode);
+            });
         }
 
         for (InterfaceRecord interfaceNode : node.interfaces()) {
-            interfaceNode.accept(this);
+            withSource(node, interfaceNode.name(), () -> interfaceNode.accept(this));
         }
 
         for (ClassRecord classNode : node.classes()) {
-            classNode.accept(this);
+            withSource(node, classNode.name(), () -> classNode.accept(this));
         }
     }
 

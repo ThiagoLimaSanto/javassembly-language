@@ -3,7 +3,7 @@ package projects.exemplo.src;
 import jvs.io.Scanner;
 
 public class Teste{
-    public static func void main(String[] args) {
+    public static func void main(String[] args) throws IOException {
         print "Digite o seu nome: ";
         String name = Scanner.readLine();
         print "Digite a sua idade: ";

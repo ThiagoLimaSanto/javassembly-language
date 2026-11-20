@@ -1,39 +1,69 @@
 package compiler;
 
+import java.io.IOException;
 import java.nio.file.Path;
 
 import compiler.exceptions.CommandLineException;
 import compiler.exceptions.LanguageException;
 import compiler.exceptions.OutputException;
 
-import java.io.IOException;
-
 public class Main {
+    private Main() {
+    }
 
-    public static void main(String[] args) throws Exception {
-        String fileName = args.length > 0 ? args[0] : "./projects/exemplo/src/Teste.jvs";
+    public static void main(String[] args) {
+        String command;
+        String source;
+        if (args.length == 2 && (args[0].equals("build") || args[0].equals("run"))) {
+            command = args[0];
+            source = args[1];
+        } else {
+            printError(new CommandLineException("Comando interno inválido. Use jvsc para compilar."));
+            System.exit(2);
+            return;
+        }
+
+        Path sourcePath = Path.of(source);
+        if (!source.endsWith(".jvs")) {
+            printError(new CommandLineException("Informe um arquivo-fonte com extensão .jvs."));
+            System.exit(2);
+            return;
+        }
 
         try {
-            if (!fileName.endsWith(".jvs")) {
-                throw new CommandLineException(
-                        "Tipo de arquivo não reconhecido. Informe um arquivo com extensão .jvs.");
-            }
-            if (args.length > 1) {
-                throw new CommandLineException("Informe somente um arquivo-fonte por execução.");
-            }
             ProgramAnalyzer analyzer = new ProgramAnalyzer();
-            analyzer.analyze(Path.of(fileName));
-        } catch (LanguageException e) {
-            System.err.println(
-                    "[" + e.getClass().getSimpleName() + "] "
-                            + e.getMessage());
+            if (command.equals("build")) {
+                Path executable = analyzer.build(sourcePath);
+                System.out.println("Executável criado: " + executable.toAbsolutePath());
+            } else {
+                int status = analyzer.run(sourcePath);
+                if (status != 0)
+                    System.exit(status);
+            }
+        } catch (LanguageException exception) {
+            printError(exception, exception.getSourcePath() == null
+                    ? sourcePath
+                    : exception.getSourcePath());
             System.exit(1);
-        } catch (OutputException e) {
-            System.err.println("[OutputException] " + e.getMessage());
+        } catch (OutputException exception) {
+            System.err.println("[OutputException] " + exception.getMessage());
             System.exit(1);
-        } catch (IOException e) {
-            System.err.println("[IO] " + e.getMessage());
+        } catch (IOException exception) {
+            System.err.println("[IO] " + exception.getMessage());
             System.exit(1);
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            System.err.println("[IO] A execução foi interrompida.");
+            System.exit(130);
         }
     }
+
+    private static void printError(LanguageException exception) {
+        System.err.println("[" + exception.getClass().getSimpleName() + "] " + exception.getMessage());
+    }
+
+    private static void printError(LanguageException exception, Path sourcePath) {
+        System.err.println(DiagnosticRenderer.render(sourcePath, exception));
+    }
+
 }
