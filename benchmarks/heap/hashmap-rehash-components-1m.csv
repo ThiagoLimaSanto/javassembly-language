@@ -1,0 +1,26 @@
+old_capacity,new_capacity,active_entries,repeat,phase,elapsed_ns,elapsed_ms,timing_scope
+1048576,2097152,786432,1,allocate_four_arrays,23169622,23.170,phase plus scanner barrier and marker write
+1048576,2097152,786432,1,scan_old_states,6852074,6.852,phase plus scanner barrier and marker write
+1048576,2097152,786432,1,scan_and_reinsert_entries,29942768,29.943,phase plus scanner barrier and marker write
+1048576,2097152,786432,1,verify_reinserted_entries,15638924,15.639,phase plus scanner barrier and marker write
+1048576,2097152,786432,1,free_four_old_arrays,15789,0.016,phase plus scanner barrier and marker write
+1048576,2097152,786432,2,allocate_four_arrays,23212802,23.213,phase plus scanner barrier and marker write
+1048576,2097152,786432,2,scan_old_states,7277607,7.278,phase plus scanner barrier and marker write
+1048576,2097152,786432,2,scan_and_reinsert_entries,32014087,32.014,phase plus scanner barrier and marker write
+1048576,2097152,786432,2,verify_reinserted_entries,14838541,14.839,phase plus scanner barrier and marker write
+1048576,2097152,786432,2,free_four_old_arrays,24737,0.025,phase plus scanner barrier and marker write
+1048576,2097152,786432,3,allocate_four_arrays,23704156,23.704,phase plus scanner barrier and marker write
+1048576,2097152,786432,3,scan_old_states,7094677,7.095,phase plus scanner barrier and marker write
+1048576,2097152,786432,3,scan_and_reinsert_entries,31370499,31.370,phase plus scanner barrier and marker write
+1048576,2097152,786432,3,verify_reinserted_entries,15284372,15.284,phase plus scanner barrier and marker write
+1048576,2097152,786432,3,free_four_old_arrays,24716,0.025,phase plus scanner barrier and marker write
+1048576,2097152,786432,4,allocate_four_arrays,23057403,23.057,phase plus scanner barrier and marker write
+1048576,2097152,786432,4,scan_old_states,7307292,7.307,phase plus scanner barrier and marker write
+1048576,2097152,786432,4,scan_and_reinsert_entries,30586728,30.587,phase plus scanner barrier and marker write
+1048576,2097152,786432,4,verify_reinserted_entries,14915225,14.915,phase plus scanner barrier and marker write
+1048576,2097152,786432,4,free_four_old_arrays,24305,0.024,phase plus scanner barrier and marker write
+1048576,2097152,786432,5,allocate_four_arrays,22643261,22.643,phase plus scanner barrier and marker write
+1048576,2097152,786432,5,scan_old_states,6923677,6.924,phase plus scanner barrier and marker write
+1048576,2097152,786432,5,scan_and_reinsert_entries,29998011,29.998,phase plus scanner barrier and marker write
+1048576,2097152,786432,5,verify_reinserted_entries,14515942,14.516,phase plus scanner barrier and marker write
+1048576,2097152,786432,5,free_four_old_arrays,17764,0.018,phase plus scanner barrier and marker write

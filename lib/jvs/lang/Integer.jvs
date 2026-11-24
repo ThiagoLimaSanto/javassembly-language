@@ -6,7 +6,7 @@ public final class Integer {
 
     private int value;
 
-    public Integer(int value) {
+    private Integer(int value) {
         this.value = value;
     }
 

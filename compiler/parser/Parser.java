@@ -2,6 +2,7 @@ package compiler.parser;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -47,6 +48,7 @@ import compiler.ast.records.ThisRecord;
 import compiler.ast.records.ThrowRecord;
 import compiler.ast.records.TryRecord;
 import compiler.ast.records.TypeRecord;
+import compiler.ast.records.TypeNames;
 import compiler.ast.records.UnaryExpressionRecord;
 import compiler.ast.records.VariableRecord;
 import compiler.ast.records.WhileRecord;
@@ -65,6 +67,7 @@ public class Parser {
         private String packageName = "";
         private final Map<String, String> importedTypes = new HashMap<>();
         private final List<String> imports = new ArrayList<>();
+        private Set<String> activeTypeParameters = new HashSet<>();
 
         public Parser(List<Token> tokens) {
                 this(tokens, Set.of());
@@ -214,6 +217,9 @@ public class Parser {
         }
 
         private String resolveTypeName(String name) {
+                if (activeTypeParameters.contains(name)) {
+                        return name;
+                }
                 if (name.equals("Object")) {
                         return "jvs.lang.Object";
                 }
@@ -339,8 +345,13 @@ public class Parser {
                                 "Esperado 'class'");
 
                 Token name = consumeTypeIdentifier("Esperado o nome da classe");
+                List<String> typeParameters = typeParameters();
+                Set<String> previousTypeParameters = activeTypeParameters;
+                activeTypeParameters = new HashSet<>(previousTypeParameters);
+                activeTypeParameters.addAll(typeParameters);
 
                 String superClass = null;
+                String genericSuperType = null;
 
                 if (tokens.verify(TokenType.EXTENDS)) {
 
@@ -348,10 +359,11 @@ public class Parser {
                                         TokenType.EXTENDS,
                                         "Esperado 'extends'");
 
-                        superClass = resolveTypeName(tokens.consume(
-                                        TokenType.IDENTIFIER,
-                                        "Esperado o nome da classe pai").getLexeme());
+                        genericSuperType = type(false).name();
+                        superClass = TypeNames.rawName(genericSuperType);
                 }
+
+                List<String> genericInterfaceTypes = new ArrayList<>();
 
                 if (tokens.verify(TokenType.IMPLEMENTS)) {
 
@@ -361,11 +373,9 @@ public class Parser {
 
                         do {
 
-                                Token interfaceName = tokens.consume(
-                                                TokenType.IDENTIFIER,
-                                                "Esperado o nome da interface");
-
-                                interfaces.add(resolveTypeName(interfaceName.getLexeme()));
+                                String interfaceType = type(false).name();
+                                genericInterfaceTypes.add(interfaceType);
+                                interfaces.add(TypeNames.rawName(interfaceType));
 
                                 if (!tokens.verify(TokenType.COMMA)) {
                                         break;
@@ -419,14 +429,18 @@ public class Parser {
                                 TokenType.CLOSE_BRACE,
                                 "Esperado '}' para fechar a classe");
 
+                activeTypeParameters = previousTypeParameters;
                 return new ClassRecord(
                                 visibility,
                                 declaredTypeName(name.getLexeme()),
                                 superClass,
                                 interfaces,
+                                genericSuperType,
+                                genericInterfaceTypes,
                                 attributes,
                                 functions,
                                 constructors,
+                                typeParameters,
                                 isAbstract,
                                 isFinal,
                                 name.getLine(),
@@ -468,15 +482,19 @@ public class Parser {
                 Token name = tokens.consume(
                                 TokenType.IDENTIFIER,
                                 "Esperado o nome da interface");
+                List<String> typeParameters = typeParameters();
+                Set<String> previousTypeParameters = activeTypeParameters;
+                activeTypeParameters = new HashSet<>(previousTypeParameters);
+                activeTypeParameters.addAll(typeParameters);
 
                 List<String> superInterfaces = new ArrayList<>();
+                List<String> genericSuperInterfaceTypes = new ArrayList<>();
                 if (tokens.verify(TokenType.EXTENDS)) {
                         tokens.consume(TokenType.EXTENDS, "Esperado 'extends'");
                         do {
-                                Token parent = tokens.consume(
-                                                TokenType.IDENTIFIER,
-                                                "Esperado nome da interface pai");
-                                superInterfaces.add(resolveTypeName(parent.getLexeme()));
+                                String superInterfaceType = type(false).name();
+                                genericSuperInterfaceTypes.add(superInterfaceType);
+                                superInterfaces.add(TypeNames.rawName(superInterfaceType));
                                 if (!tokens.verify(TokenType.COMMA)) {
                                         break;
                                 }
@@ -511,10 +529,13 @@ public class Parser {
                                 TokenType.CLOSE_BRACE,
                                 "Esperado '}' para fechar a interface");
 
+                activeTypeParameters = previousTypeParameters;
                 return new InterfaceRecord(
                                 visibility,
                                 declaredTypeName(name.getLexeme()),
+                        typeParameters,
                         superInterfaces,
+                        genericSuperInterfaceTypes,
                                 functions,
                                 name.getLine(),
                                 name.getColumn());
@@ -586,11 +607,14 @@ public class Parser {
                                 TokenType.FUNC,
                                 "Esperado 'func' para declarar uma função");
 
+                List<String> methodTypeParameters = typeParameters();
+                Set<String> previousTypeParameters = activeTypeParameters;
+                activeTypeParameters = new HashSet<>(previousTypeParameters);
+                activeTypeParameters.addAll(methodTypeParameters);
+
                 TypeRecord returnType = returnType();
 
-                Token name = tokens.consume(
-                                TokenType.IDENTIFIER,
-                                "Esperado nome da função");
+                Token name = functionName();
 
                 tokens.consume(
                                 TokenType.OPEN_PARENTHESIS,
@@ -621,6 +645,8 @@ public class Parser {
                         throw syntacticError("Método private de interface precisa ter corpo.");
                 }
 
+                activeTypeParameters = previousTypeParameters;
+
                 return new FunctionRecord(
                                 visibility == null ? TokenType.PUBLIC : visibility,
                                 isStatic,
@@ -634,7 +660,8 @@ public class Parser {
                                 isDefault,
                                 false,
                                 name.getLine(),
-                                name.getColumn());
+                                name.getColumn(),
+                                methodTypeParameters);
         }
 
         private ModifiersRecord modifiers() {
@@ -748,6 +775,10 @@ public class Parser {
         }
 
         private TypeRecord type(boolean allowArray) {
+                return type(allowArray, false);
+        }
+
+        private TypeRecord type(boolean allowArray, boolean allowDiamond) {
 
                 Token token = tokens.current();
 
@@ -775,8 +806,37 @@ public class Parser {
                                         }
                                 }
                                 String typeName = token.getType() == TokenType.IDENTIFIER
-                                                ? resolveTypeName(rawTypeName)
+                                                ? (activeTypeParameters.contains(rawTypeName)
+                                                        ? rawTypeName
+                                                        : resolveTypeName(rawTypeName))
                                                 : rawTypeName;
+                                if (tokens.verify(TokenType.TYPE_PARAMETER_OPEN)) {
+                                        if (token.getType() != TokenType.IDENTIFIER) {
+                                                throw new SyntacticException(
+                                                                "Tipos primitivos não podem receber argumentos genéricos.",
+                                                                token.getLine(),
+                                                                token.getColumn());
+                                        }
+                                        tokens.consume(TokenType.TYPE_PARAMETER_OPEN,
+                                                        "Esperado '<' após o tipo genérico");
+                                        List<String> arguments = new ArrayList<>();
+                                        if (tokens.verify(TokenType.TYPE_PARAMETER_CLOSE)) {
+                                                if (!allowDiamond) {
+                                                        throw syntacticError(
+                                                                        "'<> só pode ser usado na criação de objetos.");
+                                                }
+                                        } else {
+                                                do {
+                                                        arguments.add(typeArgument());
+                                                        if (!tokens.verify(TokenType.COMMA)) break;
+                                                        tokens.consume(TokenType.COMMA,
+                                                                        "Esperado ',' entre argumentos genéricos");
+                                                } while (true);
+                                        }
+                                        tokens.consume(TokenType.TYPE_PARAMETER_CLOSE,
+                                                        "Esperado '>' após os argumentos genéricos");
+                                        typeName += "<" + String.join(",", arguments) + ">";
+                                }
                                 while (allowArray && tokens.verify(TokenType.OPEN_BRACKET)) {
                                         tokens.consume(
                                                         TokenType.OPEN_BRACKET,
@@ -794,6 +854,52 @@ public class Parser {
                                                 token.getLine(),
                                                 token.getColumn());
                 }
+        }
+
+        private String typeArgument() {
+                if (!tokens.verify(TokenType.QUESTION)) return type().name();
+                Token question = tokens.consume(TokenType.QUESTION, "Esperado '?' para wildcard");
+                if (tokens.verify(TokenType.EXTENDS)) {
+                        tokens.consume(TokenType.EXTENDS, "Esperado 'extends'");
+                        return "?extends:" + type().name();
+                }
+                if (tokens.verify(TokenType.SUPER)) {
+                        tokens.consume(TokenType.SUPER, "Esperado 'super'");
+                        return "?super:" + type().name();
+                }
+                if (tokens.verify(TokenType.TYPE_PARAMETER_CLOSE)
+                                || tokens.verify(TokenType.COMMA)) {
+                        return "?";
+                }
+                throw new SyntacticException(
+                                "Esperado 'extends', 'super' ou o fim do wildcard.",
+                                question.getLine(), question.getColumn());
+        }
+
+        private List<String> typeParameters() {
+                if (!tokens.verify(TokenType.TYPE_PARAMETER_OPEN)) {
+                        return List.of();
+                }
+
+                tokens.consume(TokenType.TYPE_PARAMETER_OPEN, "Esperado '<'");
+                List<String> parameters = new ArrayList<>();
+                Set<String> seen = new HashSet<>();
+                do {
+                        Token parameter = tokens.consume(
+                                        TokenType.IDENTIFIER,
+                                        "Esperado o nome do parâmetro genérico");
+                        if (!seen.add(parameter.getLexeme())) {
+                                throw new SyntacticException(
+                                                "Parâmetro genérico duplicado '" + parameter.getLexeme() + "'.",
+                                                parameter.getLine(),
+                                                parameter.getColumn());
+                        }
+                        parameters.add(parameter.getLexeme());
+                        if (!tokens.verify(TokenType.COMMA)) break;
+                        tokens.consume(TokenType.COMMA, "Esperado ',' entre parâmetros genéricos");
+                } while (true);
+                tokens.consume(TokenType.TYPE_PARAMETER_CLOSE, "Esperado '>' após os parâmetros genéricos");
+                return List.copyOf(parameters);
         }
 
         private TypeRecord returnType() {
@@ -857,11 +963,14 @@ public class Parser {
                                 TokenType.FUNC,
                                 "Esperado 'func'");
 
+                List<String> methodTypeParameters = typeParameters();
+                Set<String> previousTypeParameters = activeTypeParameters;
+                activeTypeParameters = new HashSet<>(previousTypeParameters);
+                activeTypeParameters.addAll(methodTypeParameters);
+
                 TypeRecord returnType = returnType();
 
-                Token name = tokens.consume(
-                                TokenType.IDENTIFIER,
-                                "Esperado nome da função");
+                Token name = functionName();
 
                 tokens.consume(
                                 TokenType.OPEN_PARENTHESIS,
@@ -903,6 +1012,8 @@ public class Parser {
                         block = block();
                 }
 
+                activeTypeParameters = previousTypeParameters;
+
                 return new FunctionRecord(
                                 visibility,
                                 modifiers.isStatic(),
@@ -916,7 +1027,8 @@ public class Parser {
                                 false,
                                 modifiers.isNative(),
                                 name.getLine(),
-                                name.getColumn());
+                                name.getColumn(),
+                                methodTypeParameters);
         }
 
         private ConstructorRecord constructorDeclaration(TokenType visibility) {
@@ -973,6 +1085,17 @@ public class Parser {
                 Token token = tokens.current();
                 if (token.getType() == TokenType.STRING && token.getLexeme().equals("String")) {
                         return tokens.consume(TokenType.STRING, message);
+                }
+                return tokens.consume(TokenType.IDENTIFIER, message);
+        }
+
+        private Token functionName() {
+                return memberName("Esperado nome da função");
+        }
+
+        private Token memberName(String message) {
+                if (tokens.verify(TokenType.ADD)) {
+                        return tokens.consume(TokenType.ADD, message);
                 }
                 return tokens.consume(TokenType.IDENTIFIER, message);
         }
@@ -1222,9 +1345,7 @@ public class Parser {
                                 TokenType.DOT,
                                 "Esperado '.' após this");
 
-                Token member = tokens.consume(
-                                TokenType.IDENTIFIER,
-                                "Esperado nome de atributo ou método após this.");
+                Token member = memberName("Esperado nome de atributo ou método após this.");
 
                 ExpressionInterface expression;
                 if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
@@ -1713,9 +1834,7 @@ public class Parser {
                                         TokenType.DOT,
                                         "Esperado '.' após this");
 
-                        Token attribute = tokens.consume(
-                                        TokenType.IDENTIFIER,
-                                        "Esperado nome de atributo ou método");
+                        Token attribute = memberName("Esperado nome de atributo ou método");
 
                         if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
                                 tokens.consume(
@@ -1756,9 +1875,7 @@ public class Parser {
                                 TokenType.DOT,
                                 "Esperado '.' após super");
 
-                Token member = tokens.consume(
-                                TokenType.IDENTIFIER,
-                                "Esperado nome do atributo ou método");
+                Token member = memberName("Esperado nome do atributo ou método");
 
                 if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
 
@@ -1945,9 +2062,15 @@ public class Parser {
 
         private ExpressionInterface newObjectExpression() {
                 Token newToken = tokens.consume(TokenType.NEW, "Esperado 'new'");
-                TypeRecord objectType = type(false);
+                TypeRecord objectType = type(false, true);
 
                 if (tokens.verify(TokenType.OPEN_BRACKET)) {
+                        if (objectType.name().endsWith("<>")) {
+                                throw new SyntacticException(
+                                                "Diamond '<>' não pode ser usado para criar arrays genéricos.",
+                                                newToken.getLine(),
+                                                newToken.getColumn());
+                        }
                         List<ExpressionInterface> dimensions = new ArrayList<>();
                         boolean sawEmptyDimension = false;
                         int dimensionCount = 0;
@@ -2000,6 +2123,7 @@ public class Parser {
                 return new NewObjectRecord(
                                 objectType,
                                 constructorArguments,
+                        objectType.name().endsWith("<>"),
                                 newToken.getLine(),
                                 newToken.getColumn());
         }
@@ -2009,9 +2133,7 @@ public class Parser {
                                 TokenType.DOT,
                                 "Esperado '.' antes do membro");
 
-                Token member = tokens.consume(
-                                TokenType.IDENTIFIER,
-                                "Esperado nome do atributo ou método");
+                Token member = memberName("Esperado nome do atributo ou método");
 
                 if (tokens.verify(TokenType.OPEN_PARENTHESIS)) {
                         tokens.consume(
@@ -2064,20 +2186,33 @@ public class Parser {
         }
 
         private boolean isVariableDeclarationStart() {
-                if (tokens.peekNext().getType() == TokenType.IDENTIFIER) {
-                        return true;
-                }
+                if (!tokens.verify(TokenType.IDENTIFIER)) return false;
+
                 int offset = 1;
                 while (tokens.peek(offset).getType() == TokenType.DOT
                                 && tokens.peek(offset + 1).getType() == TokenType.IDENTIFIER) {
                         offset += 2;
                 }
+
+                if (tokens.peek(offset).getType() == TokenType.TYPE_PARAMETER_OPEN) {
+                        int depth = 0;
+                        do {
+                                TokenType type = tokens.peek(offset++).getType();
+                                if (type == TokenType.TYPE_PARAMETER_OPEN) {
+                                        depth++;
+                                } else if (type == TokenType.TYPE_PARAMETER_CLOSE) {
+                                        depth--;
+                                } else if (type == TokenType.EOF) {
+                                        return false;
+                                }
+                        } while (depth > 0);
+                }
+
                 while (tokens.peek(offset).getType() == TokenType.OPEN_BRACKET
                                 && tokens.peek(offset + 1).getType() == TokenType.CLOSE_BRACKET) {
                         offset += 2;
                 }
-                return offset > 1
-                                && tokens.peek(offset).getType() == TokenType.IDENTIFIER;
+                return tokens.peek(offset).getType() == TokenType.IDENTIFIER;
         }
 
         private ExpressionInterface registerExpression() {

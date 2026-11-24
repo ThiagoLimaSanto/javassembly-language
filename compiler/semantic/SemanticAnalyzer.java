@@ -40,6 +40,12 @@ public class SemanticAnalyzer implements ASTVisitor {
     private final Map<String, Set<String>> assignableTypes = new HashMap<>();
     private final Map<String, List<InterfaceRecord>> interfaceHierarchies = new HashMap<>();
     private final Map<String, SemanticType> convertedTypes = new HashMap<>();
+    private final Map<ExpressionInterface, SemanticType> resolvedGenericCallTypes = new java.util.IdentityHashMap<>();
+    private final Map<ExpressionInterface, FunctionRecord> resolvedGenericCallFunctions = new java.util.IdentityHashMap<>();
+    private final Map<ExpressionInterface, Map<String, String>> callArgumentInferredSubstitutions = new java.util.IdentityHashMap<>();
+    private final Map<FunctionRecord, Map<String, String>> candidateTypeSubstitutions = new java.util.IdentityHashMap<>();
+    private final Map<MemberAccessRecord, SemanticType> resolvedGenericAccessTypes = new HashMap<>();
+    private final Map<NewObjectRecord, SemanticType> inferredDiamondTypes = new java.util.IdentityHashMap<>();
     private final Deque<Set<String>> activeCatchTypes = new ArrayDeque<>();
     private final Deque<List<ThrownTypeCandidate>> activeTryExceptionTypes = new ArrayDeque<>();
 
@@ -56,6 +62,8 @@ public class SemanticAnalyzer implements ASTVisitor {
     private Map<String, String> constructorDelegations = new HashMap<>();
 
     private final TypeChecker typeChecker = new TypeChecker();
+    private Set<String> currentTypeParameters = Set.of();
+    private Set<String> currentClassTypeParameters = Set.of();
 
     private void withSource(ProgramRecord program, String typeName, Runnable action) {
         try {
@@ -82,10 +90,28 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private SemanticType convertType(String type) {
-        return convertedTypes.computeIfAbsent(type, this::convertTypeUncached);
+        SemanticType converted = convertedTypes.get(type);
+        if (converted != null) return converted;
+
+        converted = convertTypeUncached(type);
+        convertedTypes.put(type, converted);
+        return converted;
     }
 
     private SemanticType convertTypeUncached(String type) {
+        if (type.equals("?")) {
+            return SemanticType.wildcard(SemanticType.WildcardKind.UNBOUNDED, null);
+        }
+        if (type.startsWith("?extends:")) {
+            return SemanticType.wildcard(
+                    SemanticType.WildcardKind.EXTENDS,
+                    convertType(type.substring("?extends:".length())));
+        }
+        if (type.startsWith("?super:")) {
+            return SemanticType.wildcard(
+                    SemanticType.WildcardKind.SUPER,
+                    convertType(type.substring("?super:".length())));
+        }
         int dimensions = 0;
         String elementType = type;
         while (elementType.endsWith("[]")) {
@@ -93,7 +119,13 @@ public class SemanticAnalyzer implements ASTVisitor {
             elementType = elementType.substring(0, elementType.length() - 2);
         }
 
-        SemanticType baseType = switch (elementType) {
+        List<String> argumentNames = TypeNames.arguments(elementType);
+        String rawName = TypeNames.rawName(elementType);
+        List<SemanticType> arguments = argumentNames.stream()
+                .map(this::convertType)
+                .toList();
+
+        SemanticType baseType = switch (rawName) {
 
             case "int" ->
                 SemanticType.primitive(TokenType.INT);
@@ -117,14 +149,15 @@ public class SemanticAnalyzer implements ASTVisitor {
                 SemanticType.primitive(TokenType.VOID);
 
             default ->
-                SemanticType.classType(elementType);
+                SemanticType.classType(rawName, arguments);
         };
         return dimensions == 0
                 ? baseType
                 : SemanticType.array(
                         baseType.primitiveType(),
                         baseType.className(),
-                        dimensions);
+                        dimensions,
+                        baseType.typeArguments());
     }
 
     private SemanticType convertType(TokenType type) {
@@ -135,6 +168,37 @@ public class SemanticAnalyzer implements ASTVisitor {
             return SemanticType.classType("jvs.lang.String");
         }
         return SemanticType.primitive(type);
+    }
+
+    private String typeName(SemanticType type) {
+        if (type.isWildcard()) {
+            return switch (type.wildcardKind()) {
+                case UNBOUNDED -> "?";
+                case EXTENDS -> "?extends:" + typeName(type.wildcardBound());
+                case SUPER -> "?super:" + typeName(type.wildcardBound());
+                case NONE -> throw new CompilerInvariantException("Wildcard sem tipo wildcard.");
+            };
+        }
+        String name;
+        if (type.isPrimitive()) {
+            name = switch (type.primitiveType()) {
+                case INT -> "int";
+                case LONG -> "long";
+                case DOUBLE -> "double";
+                case BOOLEAN -> "boolean";
+                case VOID -> "void";
+                default -> throw new CompilerInvariantException(
+                        "Tipo primitivo inesperado ao reconstruir um tipo genérico.");
+            };
+        } else {
+            name = type.className();
+            if (!type.typeArguments().isEmpty()) {
+                name += "<" + type.typeArguments().stream()
+                        .map(this::typeName)
+                        .collect(java.util.stream.Collectors.joining(",")) + ">";
+            }
+        }
+        return name + "[]".repeat(type.arrayDimensions());
     }
 
 
@@ -345,9 +409,8 @@ public class SemanticAnalyzer implements ASTVisitor {
             methods.addAll(objectClass.functions());
         }
 
-        // These methods belong to java.lang.Object conceptually, but their runtime
-        // implementations are not part of the current JVS runtime yet. Keeping
-        // their signatures here lets the frontend apply Java's inheritance rules.
+        // Model Java's final Object methods so overrides are rejected consistently.
+        // Calls to wait/notify are separately rejected until the runtime supports monitors.
         methods.add(builtinObjectMethod("Class", "getClass", true));
         methods.add(builtinObjectMethod("void", "notify", true));
         methods.add(builtinObjectMethod("void", "notifyAll", true));
@@ -383,6 +446,50 @@ public class SemanticAnalyzer implements ASTVisitor {
                 true,
                 0,
                 0);
+    }
+
+    private boolean isMonitorMethodCall(String name, List<SemanticType> arguments) {
+        if ((name.equals("notify") || name.equals("notifyAll")) && arguments.isEmpty()) {
+            return true;
+        }
+        if (!name.equals("wait")) {
+            return false;
+        }
+        if (arguments.isEmpty()) {
+            return true;
+        }
+        if (arguments.size() == 1) {
+            return arguments.get(0).isPrimitive()
+                    && arguments.get(0).primitiveType() == TokenType.LONG;
+        }
+        return arguments.size() == 2
+                && arguments.get(0).isPrimitive()
+                && arguments.get(0).primitiveType() == TokenType.LONG
+                && arguments.get(1).isPrimitive()
+                && arguments.get(1).primitiveType() == TokenType.INT;
+    }
+
+    private void rejectMonitorCall(String name, List<SemanticType> arguments, int line, int column) {
+        if (isMonitorMethodCall(name, arguments)) {
+            throw new SemanticException(
+                    "A chamada a '" + name
+                            + "' exige suporte a threads e monitores, ainda não disponível no runtime.",
+                    line,
+                    column);
+        }
+    }
+
+    private void rejectUnsupportedMonitorMethod(
+            FunctionRecord method,
+            int line,
+            int column) {
+        if (method.isNative()
+                && (method.name().equals("wait")
+                        || method.name().equals("notify")
+                        || method.name().equals("notifyAll"))) {
+            rejectMonitorCall(method.name(), method.parameters().stream()
+                    .map(parameter -> convertType(parameter.type())).toList(), line, column);
+        }
     }
 
     private List<FunctionRecord> mostSpecificInterfaceDeclarations(
@@ -602,7 +709,9 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private ConstructorRecord resolveConstructor(NewObjectRecord creation) {
-        SemanticType type = convertType(creation.type());
+        inferDiamondType(creation, null);
+        SemanticType type = inferredDiamondTypes.getOrDefault(
+                creation, convertType(creation.type()));
         if (!type.isClass()) {
             throw new SemanticException(
                     "Só é possível instanciar uma classe concreta.",
@@ -649,8 +758,9 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         List<ConstructorRecord> candidates = new ArrayList<>();
+        Map<String, String> constructorTypeArguments = genericSubstitutions(type, classNode.name());
         for (ConstructorRecord constructor : classNode.constructors()) {
-            if (parametersAccept(constructor.parameters(), argumentTypes)) {
+            if (parametersAccept(constructor.parameters(), argumentTypes, constructorTypeArguments)) {
                 candidates.add(constructor);
             }
         }
@@ -678,6 +788,94 @@ public class SemanticAnalyzer implements ASTVisitor {
                 noSuitableConstructorMessage(classNode, argumentTypes),
                 creation.line(),
                 creation.column());
+    }
+
+    private void inferDiamondType(NewObjectRecord creation, SemanticType targetType) {
+        if (!creation.diamond()
+                || (targetType == null && inferredDiamondTypes.containsKey(creation))) return;
+        String rawName = TypeNames.rawName(creation.type().name());
+        ClassRecord classNode = classes.get(rawName);
+        if (classNode == null || classNode.typeParameters().isEmpty()) {
+            throw new SemanticException(
+                    "O operador diamond '<>' exige uma classe genérica declarada.",
+                    creation.line(),
+                    creation.column());
+        }
+
+        Set<String> variables = Set.copyOf(classNode.typeParameters());
+        Map<String, String> inferred = new HashMap<>();
+        if (targetType != null && targetType.isClass()) {
+            SemanticType template = genericSelfType(classNode);
+            SemanticType targetView = findGenericSupertype(
+                    template, targetType.className(), new HashSet<>());
+            if (targetView != null) {
+                inferTypeArguments(targetView, targetType, variables, inferred);
+            }
+        }
+
+        List<SemanticType> actualArguments = getArgumentTypes(
+                creation.arguments(), creation.line(), creation.column());
+        for (ConstructorRecord constructor : classNode.constructors()) {
+            if (constructor.parameters().size() != actualArguments.size()) continue;
+            Map<String, String> candidate = new HashMap<>(inferred);
+            boolean compatible = true;
+            for (int index = 0; index < actualArguments.size(); index++) {
+                SemanticType parameter = convertType(constructor.parameters().get(index).type());
+                if (!inferTypeArguments(parameter, actualArguments.get(index), variables, candidate)) {
+                    compatible = false;
+                    break;
+                }
+            }
+            if (compatible) {
+                inferred = candidate;
+                break;
+            }
+        }
+
+        List<SemanticType> arguments = new ArrayList<>();
+        for (String parameter : classNode.typeParameters()) {
+            arguments.add(inferred.containsKey(parameter)
+                    ? convertType(inferred.get(parameter))
+                    : SemanticType.classType("jvs.lang.Object"));
+        }
+        inferredDiamondTypes.put(creation, SemanticType.classType(rawName, arguments));
+    }
+
+    private boolean inferTypeArguments(
+            SemanticType template,
+            SemanticType actual,
+            Set<String> variables,
+            Map<String, String> inferred) {
+        if (template.isClass() && variables.contains(template.className())
+                && template.typeArguments().isEmpty()) {
+            SemanticType inferredType = actual;
+            if (actual.isNull()) {
+                inferredType = SemanticType.classType("jvs.lang.Object");
+            } else if (!isReferenceType(actual) && !actual.isWildcard()) {
+                return false;
+            } else if (actual.isWildcard()) {
+                inferredType = actual.wildcardBound() == null
+                        ? SemanticType.classType("jvs.lang.Object")
+                        : actual.wildcardBound();
+            }
+            String previous = inferred.putIfAbsent(template.className(), typeName(inferredType));
+            return previous == null || previous.equals(typeName(inferredType));
+        }
+        if (template.isWildcard() || actual.isWildcard()) return true;
+        if (template.isArray() || actual.isArray()) {
+            if (!template.isArray() || !actual.isArray()
+                    || template.arrayDimensions() != actual.arrayDimensions()) return true;
+            return inferTypeArguments(componentType(template), componentType(actual), variables, inferred);
+        }
+        if (template.isClass() && actual.isClass()
+                && template.className().equals(actual.className())
+                && template.typeArguments().size() == actual.typeArguments().size()) {
+            for (int index = 0; index < template.typeArguments().size(); index++) {
+                if (!inferTypeArguments(template.typeArguments().get(index),
+                        actual.typeArguments().get(index), variables, inferred)) return false;
+            }
+        }
+        return true;
     }
 
     private String noSuitableConstructorMessage(
@@ -1104,6 +1302,12 @@ public class SemanticAnalyzer implements ASTVisitor {
                 access.line(),
                 access.column());
 
+        Map<String, String> substitutions = declaringClass == null
+                ? Map.of()
+                : genericSubstitutions(receiverType, declaringClass.name());
+        resolvedGenericAccessTypes.put(access,
+                readableWildcardType(substituteType(attribute.type(), substitutions)));
+
         return attribute;
     }
 
@@ -1119,6 +1323,15 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         SemanticType receiverType = getExpressionType(call.receiver());
 
+        if (receiverType != null && receiverType.isArray()) {
+            List<SemanticType> arrayArguments = getArgumentTypes(
+                    call.arguments(), call.line(), call.column());
+            rejectMonitorCall(call.name(), arrayArguments, call.line(), call.column());
+            if (call.name().equals("getClass") && arrayArguments.isEmpty()) {
+                return builtinObjectMethod("Class", "getClass", true);
+            }
+        }
+
         if (receiverType == null || !receiverType.isClass()) {
             throw new SemanticException(
                     "Chamada de método exige um objeto de classe.",
@@ -1128,13 +1341,21 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         List<SemanticType> argumentTypes = getArgumentTypes(
                 call.arguments(), call.line(), call.column());
+        rejectMonitorCall(call.name(), argumentTypes, call.line(), call.column());
+
+        if ("Class".equals(receiverType.className())
+                && call.name().equals("getName")
+                && argumentTypes.isEmpty()) {
+            return builtinObjectMethod("String", "getName", true);
+        }
 
         InterfaceRecord interfaceNode = interfaces.get(receiverType.className());
 
         if (interfaceNode != null) {
             List<FunctionRecord> candidates = new ArrayList<>();
             for (FunctionRecord function : inheritedInterfaceMethods(interfaceNode.name())) {
-                if (matchesCall(function, call.name(), argumentTypes)) {
+                if (matchesCall(function, call.name(), argumentTypes,
+                        genericSubstitutionsForFunction(receiverType, function), call.arguments())) {
                     candidates.add(function);
                 }
             }
@@ -1145,13 +1366,17 @@ public class SemanticAnalyzer implements ASTVisitor {
             for (FunctionRecord function : objectMethods()) {
                 if (function.visibility() == TokenType.PUBLIC
                         && !interfaceSignatures.contains(methodSignature(function))
-                        && matchesCall(function, call.name(), argumentTypes)) {
+                        && matchesCall(function, call.name(), argumentTypes, Map.of(), call.arguments())) {
                     candidates.add(function);
                 }
             }
+            candidates = preferLowestConversionCost(candidates, argumentTypes);
             candidates = coalesceEquivalentMethods(candidates);
             FunctionRecord bestMatch = mostSpecificMethod(candidates);
             if (bestMatch != null) {
+                rejectUnsupportedMonitorMethod(bestMatch, call.line(), call.column());
+                recordResolvedGenericCallType(call, bestMatch,
+                        genericSubstitutionsForFunction(receiverType, bestMatch));
                 return bestMatch;
             }
             if (candidates.size() > 1) {
@@ -1197,7 +1422,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                 }
                 matchingArityFound = true;
 
-                if (matchesCall(function, call.name(), argumentTypes)) {
+                if (matchesCall(function, call.name(), argumentTypes,
+                        genericSubstitutionsForFunction(receiverType, function), call.arguments())) {
                     candidates.add(function);
                 }
             }
@@ -1207,7 +1433,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         for (FunctionRecord function : objectMethods()) {
             if (shadowedSignatures.add(methodSignature(function))
-                    && matchesCall(function, call.name(), argumentTypes)) {
+                    && matchesCall(function, call.name(), argumentTypes, Map.of(), call.arguments())) {
                 methodNameFound = true;
                 matchingArityFound = true;
                 candidates.add(function);
@@ -1221,14 +1447,17 @@ public class SemanticAnalyzer implements ASTVisitor {
         for (FunctionRecord function : implementedInterfaceMethods(receiverType.className())) {
             if (function.name().equals(call.name())
                     && !classSignatures.contains(methodSignature(function))
-                    && matchesCall(function, call.name(), argumentTypes)) {
+                    && matchesCall(function, call.name(), argumentTypes,
+                            genericSubstitutionsForFunction(receiverType, function), call.arguments())) {
                 candidates.add(function);
             }
         }
 
+        candidates = preferLowestConversionCost(candidates, argumentTypes);
         candidates = coalesceEquivalentMethods(candidates);
         FunctionRecord bestMatch = mostSpecificMethod(candidates);
         if (bestMatch != null) {
+            rejectUnsupportedMonitorMethod(bestMatch, call.line(), call.column());
             ClassRecord declaringClass = findDeclaringClassForMethod(
                     receiverType.className(),
                     bestMatch);
@@ -1239,6 +1468,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                     receiverType.className(),
                     call.line(),
                     call.column());
+            recordResolvedGenericCallType(call, bestMatch,
+                    genericSubstitutionsForFunction(receiverType, bestMatch));
             return bestMatch;
         }
         if (!candidates.isEmpty()) {
@@ -1348,12 +1579,15 @@ public class SemanticAnalyzer implements ASTVisitor {
                     && !java.util.Objects.equals(currentClass, receiverInterface.name())) {
                 continue;
             }
-            if (matchesCall(function, call.name(), argumentTypes)) {
+            if (matchesCall(function, call.name(), argumentTypes, Map.of(), call.arguments())) {
                 candidates.add(function);
             }
         }
         FunctionRecord bestMatch = mostSpecificMethod(candidates);
-        if (bestMatch != null) return bestMatch;
+        if (bestMatch != null) {
+            recordResolvedGenericCallType(call, bestMatch, Map.of());
+            return bestMatch;
+        }
         if (candidates.size() > 1) {
             throw new SemanticException(
                     "Chamada ambígua do método static '" + call.name() + "'.",
@@ -1420,7 +1654,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                 if (!function.isStatic()) {
                     instanceMethodFound = true;
                 } else if (isMemberAccessibleFromCurrentClass(function.visibility(), owner.name())
-                        && matchesCall(function, call.name(), argumentTypes)) {
+                        && matchesCall(function, call.name(), argumentTypes, Map.of(), call.arguments())) {
                     staticCandidates.add(function);
                 }
             }
@@ -1437,6 +1671,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                     receiverClass.name(),
                     call.line(),
                     call.column());
+            recordResolvedGenericCallType(call, bestMatch, Map.of());
             return bestMatch;
         }
         if (instanceMethodFound) {
@@ -1481,25 +1716,231 @@ public class SemanticAnalyzer implements ASTVisitor {
             FunctionRecord function,
             String name,
             List<SemanticType> argumentTypes) {
-        return function.name().equals(name)
-                && parametersAccept(function.parameters(), argumentTypes);
+        return matchesCall(function, name, argumentTypes, Map.of(), null);
+    }
+
+    private boolean matchesCall(
+            FunctionRecord function,
+            String name,
+            List<SemanticType> argumentTypes,
+            Map<String, String> substitutions) {
+        return matchesCall(function, name, argumentTypes, substitutions, null);
+    }
+
+    private boolean matchesCall(
+            FunctionRecord function,
+            String name,
+            List<SemanticType> argumentTypes,
+            Map<String, String> substitutions,
+            List<ExpressionInterface> argumentExpressions) {
+        if (!function.name().equals(name)) return false;
+        List<SemanticType> effectiveArguments = new ArrayList<>(argumentTypes);
+        Map<String, String> preliminary = inferMethodTypeSubstitutions(
+                function, effectiveArguments, substitutions);
+        if (preliminary == null) return false;
+        if (argumentExpressions != null) {
+            for (int index = 0; index < argumentExpressions.size()
+                    && index < function.parameters().size(); index++) {
+                ExpressionInterface argument = argumentExpressions.get(index);
+                if (!isGenericCallExpression(argument)) continue;
+                SemanticType expected = substituteType(
+                        function.parameters().get(index).type(), preliminary);
+                if (argument instanceof NewObjectRecord creation && creation.diamond()) {
+                    inferDiamondType(creation, expected);
+                } else {
+                    inferGenericCallFromTarget(argument, expected);
+                }
+                effectiveArguments.set(index, getExpressionType(argument));
+            }
+        }
+        Map<String, String> inferred = inferMethodTypeSubstitutions(
+                function, effectiveArguments, substitutions);
+        if (inferred == null || !parametersAccept(function.parameters(), effectiveArguments, inferred)) {
+            return false;
+        }
+        candidateTypeSubstitutions.put(function, inferred);
+        return true;
+    }
+
+    private boolean isGenericCallExpression(ExpressionInterface expression) {
+        return expression instanceof CallRecord
+                || expression instanceof MemberCallRecord
+                || expression instanceof ThisCallRecord
+                || expression instanceof SuperCallRecord
+                || (expression instanceof NewObjectRecord creation && creation.diamond());
+    }
+
+    private Map<String, String> inferMethodTypeSubstitutions(
+            FunctionRecord function,
+            List<SemanticType> argumentTypes,
+            Map<String, String> ownerSubstitutions) {
+        if (function.typeParameters().isEmpty()) return ownerSubstitutions;
+        if (function.parameters().size() != argumentTypes.size()) return null;
+
+        Set<String> methodVariables = Set.copyOf(function.typeParameters());
+        Map<String, String> applicableOwnerSubstitutions = new HashMap<>(ownerSubstitutions);
+        methodVariables.forEach(applicableOwnerSubstitutions::remove);
+        Map<String, String> inferred = new HashMap<>(applicableOwnerSubstitutions);
+        for (int index = 0; index < argumentTypes.size(); index++) {
+            String parameterName = TypeNames.substitute(
+                    function.parameters().get(index).type().name(), applicableOwnerSubstitutions);
+            if (!inferTypeArguments(convertType(parameterName), argumentTypes.get(index),
+                    methodVariables, inferred)) {
+                return null;
+            }
+        }
+        return Map.copyOf(inferred);
+    }
+
+    private void recordResolvedGenericCallType(
+            ExpressionInterface call,
+            FunctionRecord function,
+            Map<String, String> ownerSubstitutions) {
+        Map<String, String> substitutions = new HashMap<>(candidateTypeSubstitutions.getOrDefault(
+                function, ownerSubstitutions));
+        callArgumentInferredSubstitutions.putIfAbsent(call, Map.copyOf(substitutions));
+        List<ExpressionInterface> arguments = callArguments(call);
+        List<SemanticType> argumentTypes = new ArrayList<>(arguments.size());
+        for (ExpressionInterface argument : arguments) {
+            argumentTypes.add(getExpressionType(argument));
+        }
+        for (int index = 0; index < Math.min(arguments.size(), function.parameters().size()); index++) {
+            if (!isGenericCallExpression(arguments.get(index))) continue;
+            SemanticType expected = substituteType(
+                    function.parameters().get(index).type(), substitutions);
+            if (arguments.get(index) instanceof NewObjectRecord creation && creation.diamond()) {
+                inferDiamondType(creation, expected);
+            } else {
+                inferGenericCallFromTarget(arguments.get(index), expected);
+            }
+            argumentTypes.set(index, getExpressionType(arguments.get(index)));
+        }
+        Map<String, String> finalInference = inferMethodTypeSubstitutions(
+                function, argumentTypes, substitutions);
+        if (finalInference != null) substitutions.putAll(finalInference);
+        substitutions = Map.copyOf(substitutions);
+        candidateTypeSubstitutions.put(function, substitutions);
+        resolvedGenericCallFunctions.put(call, function);
+        resolvedGenericCallTypes.put(call,
+                readableWildcardType(substituteType(function.returnType(), substitutions)));
+    }
+
+    private List<ExpressionInterface> callArguments(ExpressionInterface call) {
+        if (call instanceof CallRecord direct) return direct.arguments();
+        if (call instanceof MemberCallRecord member) return member.arguments();
+        if (call instanceof ThisCallRecord thisCall) return thisCall.arguments();
+        if (call instanceof SuperCallRecord superCall) return superCall.arguments();
+        return List.of();
+    }
+
+    private void inferGenericCallFromTarget(
+            ExpressionInterface call,
+            SemanticType targetType) {
+        FunctionRecord function = resolvedGenericCallFunctions.get(call);
+        if (function == null && call instanceof CallRecord directCall) {
+            function = resolveFunctionCall(directCall);
+            validateCalledExceptions(function, directCall.line(), directCall.column());
+        } else if (function == null && call instanceof MemberCallRecord memberCall) {
+            function = resolveObjectMethod(memberCall);
+            validateCalledExceptions(function, memberCall.line(), memberCall.column());
+        } else if (function == null && call instanceof ThisCallRecord thisCall) {
+            function = resolveFunctionCall(new CallRecord(
+                    thisCall.name(), thisCall.arguments(), thisCall.line(), thisCall.column()));
+            recordResolvedGenericCallType(thisCall, function, Map.of());
+        } else if (function == null && call instanceof SuperCallRecord superCall) {
+            function = resolveSuperCall(superCall);
+            recordResolvedGenericCallType(superCall, function, Map.of());
+        }
+        if (function == null || function.typeParameters().isEmpty()) return;
+
+        Map<String, String> substitutions = new HashMap<>(
+                callArgumentInferredSubstitutions.getOrDefault(call,
+                        candidateTypeSubstitutions.getOrDefault(function, Map.of())));
+        Set<String> methodVariables = Set.copyOf(function.typeParameters());
+        String returnPattern = TypeNames.substitute(
+                function.returnType().name(), substitutions);
+        Map<String, String> inferred = new HashMap<>();
+        if (!inferTypeArguments(convertType(returnPattern), targetType, methodVariables, inferred)) {
+            return;
+        }
+        for (Map.Entry<String, String> entry : inferred.entrySet()) {
+            String existing = substitutions.get(entry.getKey());
+            if (existing == null || existing.equals("jvs.lang.Object")) {
+                substitutions.put(entry.getKey(), entry.getValue());
+            }
+        }
+        candidateTypeSubstitutions.put(function, Map.copyOf(substitutions));
+        resolvedGenericCallTypes.put(call,
+                readableWildcardType(substituteType(function.returnType(), substitutions)));
     }
 
     private boolean parametersAccept(
             List<ParameterRecord> parameters,
             List<SemanticType> argumentTypes) {
+        return parametersAccept(parameters, argumentTypes, Map.of());
+    }
+
+    private boolean parametersAccept(
+            List<ParameterRecord> parameters,
+            List<SemanticType> argumentTypes,
+            Map<String, String> substitutions) {
         if (parameters.size() != argumentTypes.size()) {
             return false;
         }
 
         for (int i = 0; i < argumentTypes.size(); i++) {
-            SemanticType expected = convertType(parameters.get(i).type());
+            SemanticType expected = substituteType(parameters.get(i).type(), substitutions);
             if (!isAssignable(expected, argumentTypes.get(i))) {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private SemanticType substituteType(TypeRecord type, Map<String, String> substitutions) {
+        return convertType(TypeNames.substitute(type.name(), substitutions));
+    }
+
+    private Map<String, String> genericSubstitutions(
+            SemanticType receiverType,
+            String ownerName) {
+        SemanticType ownerType = findGenericSupertype(receiverType, ownerName, new HashSet<>());
+        if (ownerType == null) return Map.of();
+
+        ClassRecord classNode = classes.get(ownerName);
+        InterfaceRecord interfaceNode = interfaces.get(ownerName);
+        List<String> parameters = classNode != null
+                ? classNode.typeParameters()
+                : interfaceNode != null ? interfaceNode.typeParameters() : List.of();
+        Map<String, String> substitutions = new HashMap<>();
+        int count = Math.min(parameters.size(), ownerType.typeArguments().size());
+        for (int index = 0; index < count; index++) {
+            substitutions.put(parameters.get(index), typeName(ownerType.typeArguments().get(index)));
+        }
+        return Map.copyOf(substitutions);
+    }
+
+    private Map<String, String> genericSubstitutionsForFunction(
+            SemanticType receiverType,
+            FunctionRecord function) {
+        ClassRecord classOwner = findDeclaringClassForMethod(receiverType.className(), function);
+        if (classOwner != null) {
+            return genericSubstitutions(receiverType, classOwner.name());
+        }
+
+        for (InterfaceRecord interfaceNode : interfaces.values()) {
+            SemanticType interfaceView = findGenericSupertype(
+                    receiverType, interfaceNode.name(), new HashSet<>());
+            if (interfaceView == null) continue;
+            boolean declaresFunction = interfaceHierarchy(interfaceNode.name()).stream()
+                    .anyMatch(parent -> parent.functions().stream()
+                            .anyMatch(candidate -> candidate == function));
+            if (declaresFunction) {
+                return genericSubstitutions(receiverType, interfaceNode.name());
+            }
+        }
+        return Map.of();
     }
 
     private List<SemanticType> getArgumentTypes(
@@ -1541,21 +1982,86 @@ public class SemanticAnalyzer implements ASTVisitor {
         return best;
     }
 
+    private List<FunctionRecord> preferLowestConversionCost(
+            List<FunctionRecord> candidates,
+            List<SemanticType> argumentTypes) {
+        if (candidates.size() < 2) return candidates;
+        int bestCost = Integer.MAX_VALUE;
+        List<FunctionRecord> best = new ArrayList<>();
+        for (FunctionRecord candidate : candidates) {
+            if (candidate.parameters().size() != argumentTypes.size()) continue;
+            Map<String, String> substitutions = candidateTypeSubstitutions.getOrDefault(candidate, Map.of());
+            int cost = 0;
+            boolean applicable = true;
+            for (int index = 0; index < argumentTypes.size(); index++) {
+                SemanticType expected = substituteType(candidate.parameters().get(index).type(), substitutions);
+                int conversionCost = invocationConversionCost(expected, argumentTypes.get(index));
+                if (conversionCost == Integer.MAX_VALUE) {
+                    applicable = false;
+                    break;
+                }
+                cost += conversionCost;
+            }
+            if (!applicable) continue;
+            if (cost < bestCost) {
+                bestCost = cost;
+                best.clear();
+                best.add(candidate);
+            } else if (cost == bestCost) {
+                best.add(candidate);
+            }
+        }
+        return best.isEmpty() ? candidates : best;
+    }
+
+    private int invocationConversionCost(SemanticType expected, SemanticType received) {
+        if (expected.equals(received)) return 0;
+
+        if (expected.isPrimitive() && received.isPrimitive()) {
+            if (expected.primitiveType() == TokenType.LONG
+                    && received.primitiveType() == TokenType.INT) return 1;
+            if (expected.primitiveType() == TokenType.DOUBLE) {
+                if (received.primitiveType() == TokenType.LONG) return 1;
+                if (received.primitiveType() == TokenType.INT) return 2;
+            }
+            return Integer.MAX_VALUE;
+        }
+
+        if (expected.isClass() && received.isPrimitive()) {
+            String boxedType = primitiveWrapperName(expected.className());
+            if (boxedType.isEmpty()) return Integer.MAX_VALUE;
+            SemanticType primitive = convertType(boxedType);
+            int wideningCost = invocationConversionCost(primitive, received);
+            return wideningCost == Integer.MAX_VALUE ? wideningCost : 3 + wideningCost;
+        }
+        if (expected.isPrimitive() && received.isClass()) {
+            String unboxedType = primitiveWrapperName(received.className());
+            if (unboxedType.isEmpty()) return Integer.MAX_VALUE;
+            int wideningCost = invocationConversionCost(expected, convertType(unboxedType));
+            return wideningCost == Integer.MAX_VALUE ? wideningCost : 3 + wideningCost;
+        }
+
+        return isAssignable(expected, received) ? 1 : Integer.MAX_VALUE;
+    }
+
     private boolean isMoreSpecific(
             FunctionRecord candidate,
             FunctionRecord other) {
         boolean strict = false;
         for (int index = 0; index < candidate.parameters().size(); index++) {
             SemanticType candidateType = convertType(
-                    candidate.parameters().get(index).type());
+                    TypeNames.substitute(candidate.parameters().get(index).type().name(),
+                            candidateTypeSubstitutions.getOrDefault(candidate, Map.of())));
             SemanticType otherType = convertType(
-                    other.parameters().get(index).type());
+                    TypeNames.substitute(other.parameters().get(index).type().name(),
+                            candidateTypeSubstitutions.getOrDefault(other, Map.of())));
             if (!isAssignable(otherType, candidateType)) {
                 return false;
             }
             strict |= !candidateType.equals(otherType);
         }
-        return strict;
+        if (strict) return true;
+        return candidate.typeParameters().size() < other.typeParameters().size();
     }
 
     private void validateMemberVisibility(
@@ -1624,6 +2130,13 @@ public class SemanticAnalyzer implements ASTVisitor {
             int column) {
         SemanticType semanticType = convertType(type);
 
+        if (semanticType.isWildcard()) {
+            throw new SemanticException(
+                    "Wildcard só pode ser usado como argumento de um tipo genérico.",
+                    line,
+                    column);
+        }
+
         if (semanticType.isArray() && semanticType.arrayDimensions() > 255) {
             throw new SemanticException(
                     "Um array não pode ter mais de 255 dimensões.",
@@ -1648,6 +2161,18 @@ public class SemanticAnalyzer implements ASTVisitor {
             return;
         }
 
+        if (semanticType.className() != null
+                && currentTypeParameters.contains(semanticType.className())) {
+            if (!semanticType.typeArguments().isEmpty()) {
+                throw new SemanticException(
+                        "O parâmetro genérico '" + semanticType.className()
+                                + "' não pode receber argumentos genéricos.",
+                        line,
+                        column);
+            }
+            return;
+        }
+
         if (semanticType.isArray()) {
             if (semanticType.primitiveType() == TokenType.VOID) {
                 throw new SemanticException(
@@ -1664,6 +2189,12 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         if (semanticType.isClass() && semanticType.className().equals("Class")) {
+            if (!semanticType.typeArguments().isEmpty()) {
+                throw new SemanticException(
+                        "A classe Class não aceita argumentos genéricos nesta versão.",
+                        line,
+                        column);
+            }
             return;
         }
 
@@ -1672,12 +2203,54 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (classType == null && interfaceType == null) {
             if (semanticType.isClass()
                     && BuiltinExceptionTypes.isBuiltin(semanticType.className())) {
+                if (!semanticType.typeArguments().isEmpty()) {
+                    throw new SemanticException(
+                            "Tipos de exceção nativos não aceitam argumentos genéricos.",
+                            line,
+                            column);
+                }
                 return;
             }
             throw new SemanticException(
                     "Tipo '" + semanticType.className() + "' não declarado.",
                     line,
                     column);
+        }
+
+        int declaredTypeParameterCount = classType != null
+                ? classType.typeParameters().size()
+                : interfaceType.typeParameters().size();
+        if (!semanticType.typeArguments().isEmpty()
+                && semanticType.typeArguments().size() != declaredTypeParameterCount) {
+            throw new SemanticException(
+                    "O tipo '" + semanticType.className() + "' espera "
+                            + declaredTypeParameterCount + " argumento(s) genérico(s), mas recebeu "
+                            + semanticType.typeArguments().size() + ".",
+                    line,
+                    column);
+        }
+        for (SemanticType argument : semanticType.typeArguments()) {
+            if (argument.isWildcard()) {
+                SemanticType bound = argument.wildcardBound();
+                if (bound != null) {
+                    if (!isReferenceType(bound)) {
+                        throw new SemanticException(
+                                "O limite de um wildcard precisa ser um tipo de referência.",
+                                line,
+                                column);
+                    }
+                    validateTypeExists(new TypeRecord(typeName(bound)), false, line, column);
+                }
+                continue;
+            }
+            if (!isReferenceType(argument)) {
+                throw new SemanticException(
+                        "Argumentos genéricos precisam ser tipos de referência; recebeu '"
+                                + argument + "'.",
+                        line,
+                        column);
+            }
+            validateTypeExists(new TypeRecord(typeName(argument)), false, line, column);
         }
 
         TokenType visibility = classType != null
@@ -1733,6 +2306,7 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         List<SemanticType> argumentTypes = getArgumentTypes(
                 call.arguments(), call.line(), call.column());
+        rejectMonitorCall(call.name(), argumentTypes, call.line(), call.column());
 
         String className = currentClass;
         boolean functionFound = false;
@@ -1768,7 +2342,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                 }
 
                 sameParameterCount = true;
-                if (matchesCall(function, call.name(), argumentTypes)) {
+                if (matchesCall(function, call.name(), argumentTypes, Map.of(), call.arguments())) {
                     candidates.add(function);
                 }
             }
@@ -1787,7 +2361,7 @@ public class SemanticAnalyzer implements ASTVisitor {
             }
             if (function.name().equals(call.name())
                     && !declaredSignatures.contains(methodSignature(function))
-                    && matchesCall(function, call.name(), argumentTypes)) {
+                    && matchesCall(function, call.name(), argumentTypes, Map.of(), call.arguments())) {
                 candidates.add(function);
                 functionFound = true;
                 sameParameterCount = true;
@@ -1808,7 +2382,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                         continue;
                     }
                     sameParameterCount = true;
-                    if (matchesCall(function, call.name(), argumentTypes)) {
+                    if (matchesCall(function, call.name(), argumentTypes, Map.of(), call.arguments())) {
                         candidates.add(function);
                     }
                 }
@@ -1832,7 +2406,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                         functionFound = true;
                         if (function.parameters().size() == argumentTypes.size()) {
                             sameParameterCount = true;
-                            if (matchesCall(function, call.name(), argumentTypes)) candidates.add(function);
+                            if (matchesCall(function, call.name(), argumentTypes, Map.of(), call.arguments())) candidates.add(function);
                         }
                     }
                 }
@@ -1852,6 +2426,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                         call.line(),
                         call.column());
             }
+            rejectUnsupportedMonitorMethod(bestMatch, call.line(), call.column());
+            recordResolvedGenericCallType(call, bestMatch, Map.of());
             return bestMatch;
         }
         if (!candidates.isEmpty()) {
@@ -1976,7 +2552,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                 }
 
                 sameParameterCount = true;
-                if (matchesCall(function, call.name(), argumentTypes)) {
+                if (matchesCall(function, call.name(), argumentTypes, Map.of(), call.arguments())) {
                     candidates.add(function);
                 }
             }
@@ -1987,7 +2563,7 @@ public class SemanticAnalyzer implements ASTVisitor {
         for (FunctionRecord function : objectMethods()) {
             if (function.name().equals(call.name())
                     && isMemberAccessibleFromCurrentClass(function.visibility(), "jvs.lang.Object")
-                    && matchesCall(function, call.name(), argumentTypes)) {
+                    && matchesCall(function, call.name(), argumentTypes, Map.of(), call.arguments())) {
                 candidates.add(function);
                 methodFound = true;
                 sameParameterCount = true;
@@ -2005,6 +2581,7 @@ public class SemanticAnalyzer implements ASTVisitor {
                     call.name(),
                     call.line(),
                     call.column());
+            recordResolvedGenericCallType(call, bestMatch, Map.of());
             return bestMatch;
         }
         if (!candidates.isEmpty()) {
@@ -2424,9 +3001,11 @@ public class SemanticAnalyzer implements ASTVisitor {
                 }
 
                 for (FunctionRecord requirement : inheritedInterfaceMethods(interfaceName)) {
-                    FunctionRecord implementation = findClassMethod(
-                            classNode.name(),
-                            requirement);
+                    SemanticType classView = genericSelfType(classNode);
+                    Map<String, String> interfaceSubstitutions =
+                            genericSubstitutionsForFunction(classView, requirement);
+                    FunctionRecord implementation = findClassMethodForInterface(
+                            classView, requirement, interfaceSubstitutions);
 
                     if (implementation == null) {
                         List<FunctionRecord> defaults = implementedInterfaceMethods(classNode.name())
@@ -2471,10 +3050,12 @@ public class SemanticAnalyzer implements ASTVisitor {
                             implementation.line(),
                             implementation.column());
 
-                    SemanticType expectedReturn = convertType(
-                            requirement.returnType());
-                    SemanticType actualReturn = convertType(
-                            implementation.returnType());
+                    SemanticType expectedReturn = substituteType(requirement.returnType(),
+                            withMethodTypeVariables(requirement, interfaceSubstitutions));
+                    SemanticType actualReturn = substituteType(
+                            implementation.returnType(),
+                            withMethodTypeVariables(implementation,
+                                    genericSubstitutionsForFunction(classView, implementation)));
 
                     if (!isValidReturnSubstitution(expectedReturn, actualReturn)) {
                         throw new SemanticException(
@@ -2501,28 +3082,70 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
     }
 
-    private FunctionRecord findClassMethod(
-            String className,
-            FunctionRecord signature) {
-        Set<String> visited = new HashSet<>();
+    private SemanticType genericSelfType(ClassRecord classNode) {
+        List<SemanticType> arguments = classNode.typeParameters().stream()
+                .map(SemanticType::classType)
+                .toList();
+        return SemanticType.classType(classNode.name(), arguments);
+    }
 
+    private FunctionRecord findClassMethodForInterface(
+            SemanticType classView,
+            FunctionRecord requirement,
+            Map<String, String> interfaceSubstitutions) {
+        Map<String, String> requiredSubstitutions =
+                withMethodTypeVariables(requirement, interfaceSubstitutions);
+        List<SemanticType> requiredParameters = requirement.parameters().stream()
+                .map(parameter -> substituteType(parameter.type(), requiredSubstitutions))
+                .toList();
+
+        String className = classView.className();
+        SemanticType currentView = classView;
+        Set<String> visited = new HashSet<>();
         while (className != null && visited.add(className)) {
             ClassRecord classNode = classes.get(className);
+            if (classNode == null) return null;
 
-            if (classNode == null) {
-                return null;
-            }
-
-            for (FunctionRecord function : classNode.functions()) {
-                if (sameSignature(function, signature)) {
-                    return function;
+            Map<String, String> classSubstitutions = genericSubstitutions(
+                    currentView, classNode.name());
+            for (FunctionRecord candidate : classNode.functions()) {
+                if (!candidate.name().equals(requirement.name())
+                        || candidate.parameters().size() != requiredParameters.size()) {
+                    continue;
                 }
+
+                boolean parametersMatch = true;
+                Map<String, String> candidateSubstitutions =
+                        withMethodTypeVariables(candidate, classSubstitutions);
+                for (int index = 0; index < requiredParameters.size(); index++) {
+                    SemanticType candidateParameter = substituteType(
+                            candidate.parameters().get(index).type(), candidateSubstitutions);
+                    if (!candidateParameter.equals(requiredParameters.get(index))) {
+                        parametersMatch = false;
+                        break;
+                    }
+                }
+                if (parametersMatch) return candidate;
             }
 
+            if (classNode.superClass() == null) return null;
+            SemanticType parentView = findGenericSupertype(
+                    currentView, classNode.superClass(), new HashSet<>());
+            if (parentView == null) return null;
             className = classNode.superClass();
+            currentView = parentView;
         }
-
         return null;
+    }
+
+    private Map<String, String> withMethodTypeVariables(
+            FunctionRecord function,
+            Map<String, String> substitutions) {
+        Map<String, String> result = new HashMap<>(substitutions);
+        for (int index = 0; index < function.typeParameters().size(); index++) {
+            result.put(function.typeParameters().get(index), "$M" + index);
+        }
+        return result;
     }
 
 
@@ -2598,30 +3221,24 @@ public class SemanticAnalyzer implements ASTVisitor {
     private boolean sameSignature(
             FunctionRecord first,
             FunctionRecord second) {
-
-        if (!first.name().equals(second.name())) {
-            return false;
-        }
-
-        if (first.parameters().size() != second.parameters().size()) {
-            return false;
-        }
-
-        for (int i = 0; i < first.parameters().size(); i++) {
-
-            TypeRecord firstType = first.parameters().get(i).type();
-            TypeRecord secondType = second.parameters().get(i).type();
-
-            if (!firstType.name().equals(secondType.name())) {
-                return false;
-            }
-        }
-
-        return true;
+        return methodSignature(first).equals(methodSignature(second));
     }
 
 
     private SemanticType getExpressionType(ExpressionInterface expression) {
+
+        SemanticType resolvedCallType = resolvedGenericCallTypes.get(expression);
+        if (resolvedCallType != null) {
+            FunctionRecord function = resolvedGenericCallFunctions.get(expression);
+            if (function != null) {
+                int line = expression instanceof CallRecord call ? call.line()
+                        : expression instanceof MemberCallRecord call ? call.line() : function.line();
+                int column = expression instanceof CallRecord call ? call.column()
+                        : expression instanceof MemberCallRecord call ? call.column() : function.column();
+                validateCalledExceptions(function, line, column);
+            }
+            return resolvedCallType;
+        }
 
         if (expression instanceof LiteralRecord literal) {
             return convertType(literal.getType());
@@ -2630,7 +3247,7 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (expression instanceof CallRecord call) {
             FunctionRecord function = resolveFunctionCall(call);
             validateCalledExceptions(function, call.line(), call.column());
-            return convertType(function.returnType());
+            return resolvedGenericCallTypes.getOrDefault(call, convertType(function.returnType()));
         }
 
         if (expression instanceof VariableRecord variable) {
@@ -2650,7 +3267,8 @@ public class SemanticAnalyzer implements ASTVisitor {
             if (receiverType.isArray() && access.name().equals("length")) {
                 return SemanticType.primitive(TokenType.INT);
             }
-            return convertType(resolveObjectAttribute(access).type());
+            AttributeRecord attribute = resolveObjectAttribute(access);
+            return resolvedGenericAccessTypes.getOrDefault(access, convertType(attribute.type()));
         }
 
         if (expression instanceof ArrayAccessRecord access) {
@@ -2704,15 +3322,16 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (expression instanceof MemberCallRecord call) {
             FunctionRecord function = resolveObjectMethod(call);
             validateCalledExceptions(function, call.line(), call.column());
-            return convertType(function.returnType());
+            return resolvedGenericCallTypes.getOrDefault(call, convertType(function.returnType()));
         }
 
         if (expression instanceof NewObjectRecord creation) {
+            inferDiamondType(creation, null);
             ConstructorRecord constructor = resolveConstructor(creation);
             if (constructor != null) {
                 validateCalledExceptions(constructor.thrownExceptions(), creation.line(), creation.column());
             }
-            return convertType(creation.type());
+            return inferredDiamondTypes.getOrDefault(creation, convertType(creation.type()));
         }
 
         if (expression instanceof ThisRecord record) {
@@ -2761,7 +3380,8 @@ public class SemanticAnalyzer implements ASTVisitor {
                             call.line(),
                             call.column()));
             validateCalledExceptions(function, call.line(), call.column());
-            return convertType(function.returnType());
+            recordResolvedGenericCallType(call, function, Map.of());
+            return resolvedGenericCallTypes.get(call);
         }
 
         if (expression instanceof SuperAttributeRecord attributeExpression) {
@@ -2772,7 +3392,8 @@ public class SemanticAnalyzer implements ASTVisitor {
         if (expression instanceof SuperCallRecord call) {
             FunctionRecord function = resolveSuperCall(call);
             validateCalledExceptions(function, call.line(), call.column());
-            return convertType(function.returnType());
+            return resolvedGenericCallTypes.getOrDefault(call,
+                    convertType(function.returnType()));
         }
 
         if (expression instanceof BinaryExpressionRecord operation) {
@@ -3001,7 +3622,15 @@ public class SemanticAnalyzer implements ASTVisitor {
     }
 
     private boolean isReferenceType(SemanticType type) {
-        return type.isArray() || type.isClass();
+        return type.isArray() || type.isClass() || type.isWildcard();
+    }
+
+    private SemanticType readableWildcardType(SemanticType type) {
+        if (!type.isWildcard()) return type;
+        if (type.wildcardKind() == SemanticType.WildcardKind.EXTENDS) {
+            return type.wildcardBound();
+        }
+        return SemanticType.classType("jvs.lang.Object");
     }
 
     private SemanticType componentType(SemanticType arrayType) {
@@ -3009,11 +3638,13 @@ public class SemanticAnalyzer implements ASTVisitor {
             throw new CompilerInvariantException("componentType recebeu um tipo que não é array.");
         }
         return arrayType.arrayDimensions() == 1
-                ? new SemanticType(arrayType.primitiveType(), arrayType.className(), 0)
+                ? new SemanticType(arrayType.primitiveType(), arrayType.className(), 0,
+                        arrayType.typeArguments())
                 : SemanticType.array(
                         arrayType.primitiveType(),
                         arrayType.className(),
-                        arrayType.arrayDimensions() - 1);
+                        arrayType.arrayDimensions() - 1,
+                        arrayType.typeArguments());
     }
 
     private void validateExpressionAssignable(
@@ -3021,6 +3652,10 @@ public class SemanticAnalyzer implements ASTVisitor {
             ExpressionInterface expression,
             int line,
             int column) {
+        if (expression instanceof NewObjectRecord creation && creation.diamond()) {
+            inferDiamondType(creation, expected);
+        }
+        inferGenericCallFromTarget(expression, expected);
         if (expression instanceof ArrayInitializerRecord initializer) {
             if (!expected.isArray()) {
                 throw new SemanticException(
@@ -3051,8 +3686,29 @@ public class SemanticAnalyzer implements ASTVisitor {
             return isReferenceType(expected);
         }
 
+        if (expected.isWildcard()) {
+            if (expected.wildcardKind() == SemanticType.WildcardKind.SUPER) {
+                return isAssignable(expected.wildcardBound(), received);
+            }
+            return false;
+        }
+        if (received.isWildcard()) {
+            received = readableWildcardType(received);
+        }
+
         if (expected.equals(received)) {
             return true;
+        }
+
+        if (expected.isClass() && received.isPrimitive()) {
+            String boxedPrimitive = primitiveWrapperName(expected.className());
+            return !boxedPrimitive.isEmpty()
+                    && isAssignable(convertType(boxedPrimitive), received);
+        }
+        if (expected.isPrimitive() && received.isClass()) {
+            String unboxedPrimitive = primitiveWrapperName(received.className());
+            return !unboxedPrimitive.isEmpty()
+                    && isAssignable(expected, convertType(unboxedPrimitive));
         }
 
         if (expected.isClass()
@@ -3093,7 +3749,111 @@ public class SemanticAnalyzer implements ASTVisitor {
             return false;
         }
 
+        if (expected.className().equals(received.className())) {
+            return genericArgumentsAccept(expected.typeArguments(), received.typeArguments());
+        }
+
+        SemanticType asExpected = findGenericSupertype(
+                received, expected.className(), new HashSet<>());
+        if (asExpected != null) {
+            return genericArgumentsAccept(expected.typeArguments(), asExpected.typeArguments());
+        }
+
         return isSubclassOf(received.className(), expected.className());
+    }
+
+    private String primitiveWrapperName(String className) {
+        if (className == null) return "";
+        int separator = className.lastIndexOf('.');
+        String simpleName = separator < 0 ? className : className.substring(separator + 1);
+        return switch (simpleName) {
+            case "Integer" -> "int";
+            case "Long" -> "long";
+            case "Double" -> "double";
+            case "Boolean" -> "boolean";
+            default -> "";
+        };
+    }
+
+    private boolean genericArgumentsAccept(
+            List<SemanticType> expectedArguments,
+            List<SemanticType> receivedArguments) {
+        if (expectedArguments.isEmpty()) return true;
+        if (receivedArguments.isEmpty()) return true; // Java raw-type conversion (unchecked).
+        if (expectedArguments.size() != receivedArguments.size()) return false;
+
+        for (int index = 0; index < expectedArguments.size(); index++) {
+            SemanticType expected = expectedArguments.get(index);
+            SemanticType received = receivedArguments.get(index);
+            if (!expected.isWildcard()) {
+                if (!expected.equals(received)) return false;
+                continue;
+            }
+
+            switch (expected.wildcardKind()) {
+                case UNBOUNDED -> { }
+                case EXTENDS -> {
+                    if (received.isWildcard()) {
+                        if (received.wildcardKind() != SemanticType.WildcardKind.EXTENDS
+                                || !isAssignable(expected.wildcardBound(), received.wildcardBound())) {
+                            return false;
+                        }
+                    } else if (!isAssignable(expected.wildcardBound(), received)) {
+                        return false;
+                    }
+                }
+                case SUPER -> {
+                    if (received.isWildcard()) {
+                        if (received.wildcardKind() != SemanticType.WildcardKind.SUPER
+                                || !isAssignable(received.wildcardBound(), expected.wildcardBound())) {
+                            return false;
+                        }
+                    } else if (!isAssignable(received, expected.wildcardBound())) {
+                        return false;
+                    }
+                }
+                case NONE -> { return false; }
+            }
+        }
+        return true;
+    }
+
+    private SemanticType findGenericSupertype(
+            SemanticType actual,
+            String wantedType,
+            Set<String> visited) {
+        if (!actual.isClass() || !visited.add(actual.className())) {
+            return null;
+        }
+        if (actual.className().equals(wantedType)) {
+            return actual;
+        }
+
+        ClassRecord classNode = classes.get(actual.className());
+        InterfaceRecord interfaceNode = interfaces.get(actual.className());
+        List<String> parameters = classNode != null
+                ? classNode.typeParameters()
+                : interfaceNode != null ? interfaceNode.typeParameters() : List.of();
+        List<String> parents = new ArrayList<>();
+        if (classNode != null) {
+            if (classNode.genericSuperType() != null) parents.add(classNode.genericSuperType());
+            parents.addAll(classNode.genericInterfaceTypes());
+        } else if (interfaceNode != null) {
+            parents.addAll(interfaceNode.genericSuperInterfaceTypes());
+        }
+
+        Map<String, String> substitutions = new HashMap<>();
+        int count = Math.min(parameters.size(), actual.typeArguments().size());
+        for (int index = 0; index < count; index++) {
+            substitutions.put(parameters.get(index), typeName(actual.typeArguments().get(index)));
+        }
+
+        for (String parentName : parents) {
+            SemanticType parent = convertType(TypeNames.substitute(parentName, substitutions));
+            SemanticType match = findGenericSupertype(parent, wantedType, visited);
+            if (match != null) return match;
+        }
+        return null;
     }
 
     private boolean isNonReferencePrimitive(SemanticType type) {
@@ -3142,7 +3902,14 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
 
         for (InterfaceRecord interfaceNode : node.interfaces()) {
-            withSource(node, interfaceNode.name(), () -> validateInterfaceInheritance(interfaceNode));
+            withSource(node, interfaceNode.name(), () -> {
+                validateGenericTypeDeclarations(
+                        interfaceNode.typeParameters(),
+                        interfaceNode.genericSuperInterfaceTypes(),
+                        interfaceNode.line(),
+                        interfaceNode.column());
+                validateInterfaceInheritance(interfaceNode);
+            });
         }
 
         for (ClassRecord classNode : node.classes()) {
@@ -3156,6 +3923,14 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         for (ClassRecord classNode : node.classes()) {
             withSource(node, classNode.name(), () -> {
+                List<String> genericParents = new ArrayList<>();
+                if (classNode.genericSuperType() != null) {
+                    genericParents.add(classNode.genericSuperType());
+                }
+                genericParents.addAll(classNode.genericInterfaceTypes());
+                validateGenericTypeDeclarations(
+                        classNode.typeParameters(), genericParents,
+                        classNode.line(), classNode.column());
                 validateClassInheritance(classNode);
                 validateImplementedInterfaces(classNode);
                 validateAbstractMethods(classNode);
@@ -3171,6 +3946,37 @@ public class SemanticAnalyzer implements ASTVisitor {
         }
     }
 
+    private void validateGenericTypeDeclarations(
+            List<String> parameters,
+            List<String> parentTypes,
+            int line,
+            int column) {
+        Set<String> previous = currentTypeParameters;
+        currentTypeParameters = Set.copyOf(parameters);
+        try {
+            for (String parentType : parentTypes) {
+                validateTypeExists(new TypeRecord(parentType), false, line, column);
+            }
+        } finally {
+            currentTypeParameters = previous;
+        }
+    }
+
+    private boolean usesCurrentTypeParameter(TypeRecord type) {
+        return usesTypeParameter(type, currentClassTypeParameters);
+    }
+
+    private boolean usesTypeParameter(TypeRecord type, Set<String> parameters) {
+        String base = type.name();
+        while (base.endsWith("[]")) {
+            base = base.substring(0, base.length() - 2);
+        }
+        String rawName = TypeNames.rawName(base);
+        if (parameters.contains(rawName)) return true;
+        return TypeNames.arguments(base).stream()
+                .anyMatch(argument -> usesTypeParameter(new TypeRecord(argument), parameters));
+    }
+
 
     @Override
     public void visit(ClassRecord node) {
@@ -3178,11 +3984,15 @@ public class SemanticAnalyzer implements ASTVisitor {
         enterScope();
 
         String previousClass = currentClass;
+        Set<String> previousTypeParameters = currentTypeParameters;
+        Set<String> previousClassTypeParameters = currentClassTypeParameters;
         VariableTable previousClassScope = classScope;
         currentClass = node.name();
+        currentTypeParameters = Set.copyOf(node.typeParameters());
+        currentClassTypeParameters = currentTypeParameters;
         classScope = currentScope;
 
-        FunctionTable functionTable = new FunctionTable();
+        FunctionTable functionTable = new FunctionTable(node.typeParameters());
 
         functionTables.put(currentClass, functionTable);
         Map<String, String> previousConstructorDelegations = constructorDelegations;
@@ -3246,6 +4056,8 @@ public class SemanticAnalyzer implements ASTVisitor {
 
             exitScope();
             currentClass = previousClass;
+            currentTypeParameters = previousTypeParameters;
+            currentClassTypeParameters = previousClassTypeParameters;
             classScope = previousClassScope;
             constructorDelegations = previousConstructorDelegations;
         }
@@ -3266,24 +4078,41 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(FunctionRecord node) {
 
-        validateTypeExists(
-                node.returnType(),
-                true,
-                node.line(),
-                node.column());
-
-        validateDeclaredExceptions(node.thrownExceptions(), node.line(), node.column());
+        if (node.isStatic()) {
+            Set<String> unavailableClassParameters = new HashSet<>(currentClassTypeParameters);
+            unavailableClassParameters.removeAll(node.typeParameters());
+            if (usesTypeParameter(node.returnType(), unavailableClassParameters)
+                    || node.parameters().stream()
+                            .anyMatch(parameter -> usesTypeParameter(
+                                    parameter.type(), unavailableClassParameters))) {
+                throw new SemanticException(
+                        "Métodos static não podem usar parâmetros genéricos da classe ou interface.",
+                        node.line(),
+                        node.column());
+            }
+        }
+        Set<String> previousTypeParameters = currentTypeParameters;
+        Set<String> methodTypeParameters = new HashSet<>(previousTypeParameters);
+        methodTypeParameters.addAll(node.typeParameters());
+        if (node.isStatic()) {
+            methodTypeParameters = new HashSet<>(node.typeParameters());
+        }
+        currentTypeParameters = Set.copyOf(methodTypeParameters);
 
         FunctionRecord previousFunction = currentFunction;
         Set<VariableSymbolRecord> previousAssignedVariables =
                 definitelyAssignedVariables;
-
-        currentFunction = node;
-        definitelyAssignedVariables = new HashSet<>();
-
-        enterScope();
+        boolean scopeEntered = false;
 
         try {
+
+            validateTypeExists(node.returnType(), true, node.line(), node.column());
+            validateDeclaredExceptions(node.thrownExceptions(), node.line(), node.column());
+
+            currentFunction = node;
+            definitelyAssignedVariables = new HashSet<>();
+            enterScope();
+            scopeEntered = true;
 
             for (ParameterRecord parameter : node.parameters()) {
                 parameter.accept(this);
@@ -3316,10 +4145,10 @@ public class SemanticAnalyzer implements ASTVisitor {
             }
 
         } finally {
-
-            exitScope();
+            if (scopeEntered) exitScope();
             currentFunction = previousFunction;
             definitelyAssignedVariables = previousAssignedVariables;
+            currentTypeParameters = previousTypeParameters;
         }
     }
 
@@ -3424,6 +4253,13 @@ public class SemanticAnalyzer implements ASTVisitor {
     @Override
     public void visit(AttributeRecord node) {
 
+        if (node.isStatic() && usesCurrentTypeParameter(node.type())) {
+            throw new SemanticException(
+                    "Atributos static não podem usar parâmetros genéricos da classe.",
+                    node.line(),
+                    node.column());
+        }
+
         validateTypeExists(
                 node.type(),
                 false,
@@ -3512,10 +4348,11 @@ public class SemanticAnalyzer implements ASTVisitor {
                     "Objetos String são imutáveis e não podem ser liberados manualmente.",
                     node.line(), node.column());
         }
-        boolean classReference = type.isClass() && classes.containsKey(type.className());
+        boolean classReference = type.isClass()
+                && (classes.containsKey(type.className()) || interfaces.containsKey(type.className()));
         if (!type.isArray() && !classReference) {
             throw new SemanticException(
-                    "free exige uma expressão de tipo classe ou array; não é permitido liberar "
+                    "free exige uma referência a objeto ou array; não é permitido liberar "
                             + "primitivos ou strings.",
                     node.line(),
                     node.column());
@@ -4158,7 +4995,11 @@ public class SemanticAnalyzer implements ASTVisitor {
 
         Set<String> signatures = new HashSet<>();
         String previousClass = currentClass;
+        Set<String> previousTypeParameters = currentTypeParameters;
+        Set<String> previousClassTypeParameters = currentClassTypeParameters;
         currentClass = node.name();
+        currentTypeParameters = Set.copyOf(node.typeParameters());
+        currentClassTypeParameters = currentTypeParameters;
 
         try {
             for (FunctionRecord function : node.functions()) {
@@ -4184,14 +5025,37 @@ public class SemanticAnalyzer implements ASTVisitor {
             }
         } finally {
             currentClass = previousClass;
+            currentTypeParameters = previousTypeParameters;
+            currentClassTypeParameters = previousClassTypeParameters;
         }
     }
 
     private String methodSignature(FunctionRecord function) {
-        StringBuilder signature = new StringBuilder(function.name()).append('(');
+        Map<String, String> methodVariables = new HashMap<>();
+        for (ClassRecord owner : classes.values()) {
+            if (owner.functions().stream().anyMatch(candidate -> candidate == function)) {
+                owner.typeParameters().forEach(parameter -> methodVariables.put(
+                        parameter, "jvs.lang.Object"));
+                break;
+            }
+        }
+        if (methodVariables.isEmpty()) {
+            for (InterfaceRecord owner : interfaces.values()) {
+                if (owner.functions().stream().anyMatch(candidate -> candidate == function)) {
+                    owner.typeParameters().forEach(parameter -> methodVariables.put(
+                            parameter, "jvs.lang.Object"));
+                    break;
+                }
+            }
+        }
+        for (int index = 0; index < function.typeParameters().size(); index++) {
+            methodVariables.put(function.typeParameters().get(index), "jvs.lang.Object");
+        }
+        StringBuilder signature = new StringBuilder(function.name())
+                .append('(');
 
         for (ParameterRecord parameter : function.parameters()) {
-            signature.append(parameter.type().name()).append(';');
+            signature.append(TypeNames.erase(parameter.type().name(), methodVariables)).append(';');
         }
 
         return signature.append(')').toString();

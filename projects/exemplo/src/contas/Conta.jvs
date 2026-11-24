@@ -1,0 +1,12 @@
+package contas;
+
+import pessoas.Pessoa;
+
+public interface Conta {
+    public func int numero();
+    public func Pessoa titular();
+    public func double saldo();
+    public func boolean depositar(double valor);
+    public func boolean sacar(double valor);
+    public func String tipo();
+}

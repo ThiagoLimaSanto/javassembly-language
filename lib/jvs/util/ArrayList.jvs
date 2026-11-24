@@ -1,0 +1,186 @@
+package jvs.util;
+
+public class ArrayList<T> implements List<T> {
+    private T[] elements;
+    private int size;
+    private int capacity;
+
+    public ArrayList() {
+        this(10);
+    }
+
+    public ArrayList(int initialCapacity) {
+        this.capacity = initialCapacity;
+        this.size = 0;
+        this.elements = new T[this.capacity];
+    }
+
+    public func int size() {
+        return this.size;
+    }
+
+    public func boolean isEmpty() {
+        return cmp.eq this.size, 0;
+    }
+
+    public func boolean contains(T value) {
+        return cmp.ge this.indexOf(value), 0;
+    }
+
+    public func int indexOf(T value) {
+        int index = 0;
+        while (cmp.lt index, this.size) {
+            T current = this.elements[index];
+            if (cmp.eq current, null) {
+                if (cmp.eq value, null) {
+                    return index;
+                }
+            } else if (current.equals(value)) {
+                return index;
+            }
+            index = add index, 1;
+        }
+        return neg 1;
+    }
+
+    public func int lastIndexOf(T value) {
+        int index = sub this.size, 1;
+        while (cmp.ge index, 0) {
+            T current = this.elements[index];
+            if (cmp.eq current, null) {
+                if (cmp.eq value, null) {
+                    return index;
+                }
+            } else if (current.equals(value)) {
+                return index;
+            }
+            index = sub index, 1;
+        }
+        return neg 1;
+    }
+
+    public func T get(int index) {
+        this.checkElementIndex(index);
+        return this.elements[index];
+    }
+
+    public func T set(int index, T value) {
+        this.checkElementIndex(index);
+        T previous = this.elements[index];
+        this.elements[index] = value;
+        return previous;
+    }
+
+    public func boolean add(T value) {
+        this.add(this.size, value);
+        return True;
+    }
+
+    public func void add(int index, T value) {
+        this.checkPositionIndex(index);
+        this.ensureCapacity(add this.size, 1);
+
+        int cursor = this.size;
+        while (cmp.gt cursor, index) {
+            int previous = sub cursor, 1;
+            this.elements[cursor] = this.elements[previous];
+            cursor = previous;
+        }
+
+        this.elements[index] = value;
+        this.size = add this.size, 1;
+    }
+
+    public func T remove(int index) {
+        this.checkElementIndex(index);
+        T previous = this.elements[index];
+
+        int cursor = index;
+        int last = sub this.size, 1;
+        while (cmp.lt cursor, last) {
+            int next = add cursor, 1;
+            this.elements[cursor] = this.elements[next];
+            cursor = next;
+        }
+
+        this.elements[last] = null;
+        this.size = last;
+        return previous;
+    }
+
+    public func boolean remove(T value) {
+        int index = this.indexOf(value);
+        if (cmp.lt index, 0) {
+            return False;
+        }
+        this.remove(index);
+        return True;
+    }
+
+    public func void clear() {
+        int index = 0;
+        while (cmp.lt index, this.size) {
+            this.elements[index] = null;
+            index = add index, 1;
+        }
+        this.size = 0;
+    }
+
+    public func void trimToSize() {
+        if (cmp.eq this.size, this.capacity) {
+            return;
+        }
+
+        T[] resized = new T[this.size];
+        int index = 0;
+        while (cmp.lt index, this.size) {
+            resized[index] = this.elements[index];
+            index = add index, 1;
+        }
+        this.elements = resized;
+        this.capacity = this.size;
+    }
+
+    public func void ensureCapacity(int required) {
+        if (cmp.le required, this.capacity) {
+            return;
+        }
+
+        int nextCapacity = this.capacity;
+        while (cmp.lt nextCapacity, required) {
+            int doubled = mul nextCapacity, 2;
+            if (cmp.le doubled, nextCapacity) {
+                nextCapacity = required;
+            } else {
+                nextCapacity = doubled;
+            }
+        }
+
+        T[] resized = new T[nextCapacity];
+        int index = 0;
+        while (cmp.lt index, this.size) {
+            resized[index] = this.elements[index];
+            index = add index, 1;
+        }
+        this.elements = resized;
+        this.capacity = nextCapacity;
+    }
+
+    private func void checkElementIndex(int index) {
+        if (cmp.lt index, 0) {
+            T invalid = this.elements[neg 1];
+        }
+        if (cmp.ge index, this.size) {
+            T invalid = this.elements[this.capacity];
+        }
+    }
+
+    private func void checkPositionIndex(int index) {
+        if (cmp.lt index, 0) {
+            T invalid = this.elements[neg 1];
+        }
+        if (cmp.gt index, this.size) {
+            T invalid = this.elements[this.capacity];
+        }
+    }
+}

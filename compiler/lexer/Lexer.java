@@ -90,6 +90,9 @@ public class Lexer {
             Map.entry(",", TokenType.COMMA),
             Map.entry(".", TokenType.DOT),
             Map.entry("=", TokenType.ASSIGN),
+            Map.entry("<", TokenType.TYPE_PARAMETER_OPEN),
+            Map.entry(">", TokenType.TYPE_PARAMETER_CLOSE),
+            Map.entry("?", TokenType.QUESTION),
             Map.entry("\"", TokenType.QUOTE),
             Map.entry("*", TokenType.MUL));
 
@@ -155,7 +158,6 @@ public class Lexer {
 
         while (!finished()) {
             state.process(this);
-
         }
 
         if (state instanceof StringState) {
@@ -201,7 +203,7 @@ public class Lexer {
 
     public boolean isSymbol(char character) {
         return switch (character) {
-            case '{', '}', '[', ']', '(', ')', ';', ',', '.', '=', '"', '*' -> true;
+            case '{', '}', '[', ']', '(', ')', ';', ',', '.', '=', '<', '>', '?', '"', '*' -> true;
             default -> false;
         };
     }

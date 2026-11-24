@@ -8,11 +8,20 @@ import compiler.ast.visitor.ASTVisitor;
 public record NewObjectRecord(
         TypeRecord type,
         List<ExpressionInterface> arguments,
+        boolean diamond,
         int line,
         int column) implements ExpressionInterface {
 
     public NewObjectRecord {
         arguments = List.copyOf(arguments);
+    }
+
+    public NewObjectRecord(
+            TypeRecord type,
+            List<ExpressionInterface> arguments,
+            int line,
+            int column) {
+        this(type, arguments, false, line, column);
     }
 
     @Override

@@ -1,0 +1,63 @@
+package contas;
+
+import pessoas.Pessoa;
+
+public abstract class ContaBancaria implements Conta {
+    private int numero;
+    private Pessoa pessoaTitular;
+    private double saldoAtual;
+    private String senha;
+
+    public ContaBancaria(int numero, Pessoa pessoaTitular, String senha) {
+        this.numero = numero;
+        this.pessoaTitular = pessoaTitular;
+        this.saldoAtual = 0.0;
+        this.senha = senha;
+    }
+
+    public func int numero() {
+        return this.numero;
+    }
+
+    public func Pessoa titular() {
+        return this.pessoaTitular;
+    }
+
+    public func double saldo() {
+        return this.saldoAtual;
+    }
+
+    public func boolean autenticar(String documento, String senhaInformada) {
+        if (cmp.eq documento, null) {
+            return False;
+        }
+        if (cmp.eq senhaInformada, null) {
+            return False;
+        }
+        if (this.senha.equals(senhaInformada)) {
+            return this.pessoaTitular.documento().equals(documento);
+        }
+        return False;
+    }
+
+    public func boolean depositar(double valor) {
+        if (cmp.le valor, 0.0) {
+            return False;
+        }
+        this.saldoAtual = add this.saldoAtual, valor;
+        return True;
+    }
+
+    public func boolean sacar(double valor) {
+        if (cmp.le valor, 0.0) {
+            return False;
+        }
+        if (cmp.gt valor, this.saldoAtual) {
+            return False;
+        }
+        this.saldoAtual = sub this.saldoAtual, valor;
+        return True;
+    }
+
+    public abstract func String tipo();
+}

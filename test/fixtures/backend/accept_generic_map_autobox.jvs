@@ -1,0 +1,23 @@
+import jvs.lang.Integer;
+import jvs.lang.Long;
+import jvs.util.HashMap;
+import jvs.util.Map;
+
+public class GenericMapAutoboxFixture {
+    public static func void main(String[] args) {
+        Map<Integer, Integer> values = new HashMap<>();
+        values.put(7, 42);
+
+        Integer boxed = 19;
+        int unboxed = boxed;
+        Long widenedBoxed = 23;
+        long widenedUnboxed = widenedBoxed;
+        Integer retrieved = values.get(7);
+
+        printLn values.get(7).intValue();
+        printLn retrieved.intValue();
+        printLn unboxed;
+        printLn widenedUnboxed;
+        return;
+    }
+}

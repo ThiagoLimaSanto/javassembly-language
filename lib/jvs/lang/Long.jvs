@@ -6,7 +6,7 @@ public final class Long {
 
     private long value;
 
-    public Long(long value) {
+    private Long(long value) {
         this.value = value;
     }
 

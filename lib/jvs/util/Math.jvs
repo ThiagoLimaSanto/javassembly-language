@@ -1,0 +1,25 @@
+package jvs.util;
+
+public final class Math {
+    public static final double PI = 3.141592653589793;
+    public static final double E = 2.718281828459045;
+
+    private Math() {
+    }
+
+    public static native func double abs(double value);
+    public static native func double random();
+    public static native func double sqrt(double value);
+    public static native func double cbrt(double value);
+    public static native func double pow(double base, double exponent);
+    public static native func double max(double a, double b);
+    public static native func double min(double a, double b);
+    public static native func long round(double value);
+    public static native func double ceil(double value);
+    public static native func double floor(double value);
+    public static native func double sin(double value);
+    public static native func double cos(double value);
+    public static native func double tan(double value);
+    public static native func double toRadians(double value);
+    public static native func double toDegrees(double value);
+}

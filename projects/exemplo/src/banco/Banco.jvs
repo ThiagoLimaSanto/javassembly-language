@@ -1,0 +1,87 @@
+package banco;
+
+import contas.ContaBancaria;
+import jvs.util.List;
+import jvs.util.ArrayList;
+
+public class Banco {
+    private List<ContaBancaria> contas;
+
+    public Banco() {
+        this.contas = new ArrayList<ContaBancaria>();
+    }
+
+    public func boolean adicionar(ContaBancaria conta) {
+        if (cmp.eq conta, null) {
+            return False;
+        }
+
+        int indice = 0;
+        while (cmp.lt indice, this.contas.size()) {
+            ContaBancaria existente = this.contas.get(indice);
+            if (cmp.eq existente.numero(), conta.numero()) {
+                return False;
+            }
+            indice = add indice, 1;
+        }
+
+        this.contas.add(conta);
+        return True;
+    }
+
+    public func ContaBancaria buscar(int numero) {
+        int indice = 0;
+        while (cmp.lt indice, this.contas.size()) {
+            ContaBancaria conta = this.contas.get(indice);
+            if (cmp.eq conta.numero(), numero) {
+                return conta;
+            }
+            indice = add indice, 1;
+        }
+        return null;
+    }
+
+    public func ContaBancaria autenticar(int numero, String documento, String senha) {
+        ContaBancaria conta = this.buscar(numero);
+        if (cmp.eq conta, null) {
+            return null;
+        }
+        if (conta.autenticar(documento, senha)) {
+            return conta;
+        }
+        return null;
+    }
+
+    public func boolean transferir(int origemNumero, int destinoNumero, double valor) {
+        ContaBancaria origem = this.buscar(origemNumero);
+        ContaBancaria destino = this.buscar(destinoNumero);
+
+        if (cmp.eq origem, null) {
+            return False;
+        }
+        if (cmp.eq destino, null) {
+            return False;
+        }
+        if (cmp.eq origemNumero, destinoNumero) {
+            return False;
+        }
+
+        if (origem.sacar(valor)) {
+            return destino.depositar(valor);
+        }
+        return False;
+    }
+
+    public func void imprimirContas() {
+        printLn "========== CONTAS DO BANCO ==========";
+        int indice = 0;
+        while (cmp.lt indice, this.contas.size()) {
+            ContaBancaria conta = this.contas.get(indice);
+            printfLn "[%s] Conta %d | %s: %s | Documento: %s | Saldo: R$ %f",
+                    conta.tipo(), conta.numero(), conta.titular().tipoPessoa(),
+                    conta.titular().nome(), conta.titular().documento(), conta.saldo();
+            indice = add indice, 1;
+        }
+        printLn "======================================";
+    }
+}

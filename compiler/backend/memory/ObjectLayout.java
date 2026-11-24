@@ -11,6 +11,7 @@ import java.util.stream.Collectors;
 import compiler.ast.records.AttributeRecord;
 import compiler.ast.records.ClassRecord;
 import compiler.ast.records.ProgramRecord;
+import compiler.ast.records.TypeNames;
 import compiler.exceptions.ObjectLayoutException;
 import compiler.semantic.BuiltinExceptionTypes;
 
@@ -49,9 +50,10 @@ public class ObjectLayout {
     }
 
     public ClassLayout calculate(ClassRecord classNode) {
-        if (classNode.superClass() != null
-                && !classNode.superClass().equals("jvs.lang.Object")
-                && !BuiltinExceptionTypes.isBuiltin(classNode.superClass())) {
+        String superName = TypeNames.rawName(classNode.superClass());
+        if (superName != null
+                && !superName.equals("jvs.lang.Object")
+                && !BuiltinExceptionTypes.isBuiltin(superName)) {
             throw new ObjectLayoutException(
                     "Para calcular uma classe com herança, use calculate(ProgramRecord).");
         }
@@ -74,7 +76,7 @@ public class ObjectLayout {
         int currentOffset = 8;
         int classAlignment = 8;
 
-        String parentName = classNode.superClass();
+        String parentName = TypeNames.rawName(classNode.superClass());
         if (parentName != null) {
             ClassRecord parent = classesByName.get(parentName);
             if (parent == null) {
@@ -105,11 +107,14 @@ public class ObjectLayout {
 
             TypeInfo info = types.get(type);
 
-            if (info == null && (classesByName.containsKey(type) || interfaceNames.contains(type))) {
+            String rawType = TypeNames.rawName(type);
+            if (info == null && (classesByName.containsKey(rawType) || interfaceNames.contains(rawType)
+                    || classNode.typeParameters().contains(rawType))) {
                 info = new TypeInfo(8, 8);
             }
 
-            if (info == null && (type.endsWith("[]") || type.equals("String"))) {
+            if (info == null && (type.endsWith("[]") || type.equals("String")
+                    || type.contains("<"))) {
                 info = new TypeInfo(8, 8);
             }
 

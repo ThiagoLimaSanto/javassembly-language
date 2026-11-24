@@ -48,6 +48,7 @@ import compiler.ast.records.ThisRecord;
 import compiler.ast.records.ThrowRecord;
 import compiler.ast.records.TryRecord;
 import compiler.ast.records.TypeRecord;
+import compiler.ast.records.TypeNames;
 import compiler.ast.records.UnaryExpressionRecord;
 import compiler.ast.records.VariableRecord;
 import compiler.ast.records.WhileRecord;
@@ -78,6 +79,7 @@ public final class IRGenerator {
     private final Map<String, ClassLayout> classLayouts;
     private final Map<Operand, String> referenceTypesByOperand = new HashMap<>();
     private final Map<Operand, String> sourceTypesByOperand = new HashMap<>();
+    private final Map<Operand, String> genericTypesByOperand = new HashMap<>();
     private final Map<String, ClassRecord> classes = new HashMap<>();
     private final Map<String, InterfaceRecord> interfaces = new HashMap<>();
     private final Map<String, FunctionRecord> functionsByLabel = new HashMap<>();
@@ -122,12 +124,14 @@ public final class IRGenerator {
         virtualMethodTable = new VirtualMethodTable(ast);
         referenceTypesByOperand.clear();
         sourceTypesByOperand.clear();
+        genericTypesByOperand.clear();
 
         for (RegisterDeclarationRecord declaration : ast.registers()) {
             registerLabels.put(declaration.register().name(), globalRegisterLabel(declaration.register().name()));
         }
 
         for (InterfaceRecord interfaceNode : ast.interfaces()) {
+            currentClassName = interfaceNode.name();
             interfaces.put(interfaceNode.name(), interfaceNode);
             for (FunctionRecord function : interfaceNode.functions()) {
                 boolean supportedStatic = function.isStatic()
@@ -158,6 +162,7 @@ public final class IRGenerator {
         }
 
         for (ClassRecord classNode : ast.classes()) {
+            currentClassName = classNode.name();
             classes.put(classNode.name(), classNode);
 
             for (FunctionRecord function : classNode.functions()) {
@@ -193,6 +198,7 @@ public final class IRGenerator {
                 variableScopes.clear();
                 referenceTypesByOperand.clear();
                 sourceTypesByOperand.clear();
+                genericTypesByOperand.clear();
                 pushVariableScope();
 
                 ir.add(new IRInstruction(
@@ -231,6 +237,7 @@ public final class IRGenerator {
                 variableScopes.clear();
                 referenceTypesByOperand.clear();
                 sourceTypesByOperand.clear();
+                genericTypesByOperand.clear();
                 pushVariableScope();
                 ir.add(new IRInstruction(IROpCode.LABEL,
                         Operand.label(currentSourceMethodLabel), null, null));
@@ -310,7 +317,7 @@ public final class IRGenerator {
                 emitSourceLocation(ir, attribute.line(), attribute.column());
                 Operand value = attribute.value() instanceof ArrayInitializerRecord arrayInitializer
                         ? emitArrayInitializer(ir, attribute.type().name(), arrayInitializer)
-                        : coerce(ir, expression(ir, attribute.value()), typeOf(attribute.type()));
+                        : coerceToSourceType(ir, expression(ir, attribute.value()), attribute.type());
                 ir.add(new IRInstruction(IROpCode.STORE_STATIC, null,
                         Operand.label(StaticFieldSupport.label(classNode.name(), attribute.name())),
                         null, List.of(value)));
@@ -367,6 +374,7 @@ public final class IRGenerator {
         variableScopes.clear();
         referenceTypesByOperand.clear();
         sourceTypesByOperand.clear();
+        genericTypesByOperand.clear();
         pushVariableScope();
 
         Operand thisOperand = declareVariable("this", Operand.Type.REF);
@@ -587,7 +595,8 @@ public final class IRGenerator {
         }
         List<Operand> converted = new ArrayList<>(arguments.size());
         for (int index = 0; index < arguments.size(); index++) {
-            converted.add(coerce(ir, arguments.get(index), typeOf(constructor.parameters().get(index).type())));
+            converted.add(coerceToSourceType(ir, arguments.get(index),
+                    constructor.parameters().get(index).type()));
         }
         return converted;
     }
@@ -633,7 +642,7 @@ public final class IRGenerator {
                 if (declaration.value() instanceof ArrayInitializerRecord initializer) {
                     source = emitArrayInitializer(ir, declaration.type().name(), initializer);
                 } else {
-                    source = coerce(ir, expression(ir, declaration.value()), type);
+                    source = coerceToSourceType(ir, expression(ir, declaration.value()), declaration.type());
                 }
                 ir.add(new IRInstruction(IROpCode.ASSIGN,
                         destination, source, null));
@@ -644,7 +653,7 @@ public final class IRGenerator {
                             ? emitArrayInitializer(ir, currentFunction.returnType().name(), initializer)
                             : expression(ir, returned.value());
             if (value != null) {
-                value = coerce(ir, value, typeOf(currentFunction.returnType()));
+                value = coerceToSourceType(ir, value, currentFunction.returnType());
             }
             List<BlockRecord> cleanups = new ArrayList<>(activeFinallyBlocks);
             for (String handler : runtimeExceptionHandlers) {
@@ -755,7 +764,8 @@ public final class IRGenerator {
                     && literal.value() == null;
             String sourceType = sourceTypesByOperand.get(object);
             boolean arrayReference = sourceType != null && sourceType.endsWith("[]");
-            boolean classReference = referenceTypesByOperand.containsKey(object);
+            boolean classReference = referenceTypesByOperand.containsKey(object)
+                    || (sourceType != null && interfaces.containsKey(sourceType));
             if (object.type() != Operand.Type.REF
                     || (!classReference && !arrayReference && !nullLiteral)) {
                 throw unsupported("free exige uma referência a um objeto ou array.");
@@ -782,8 +792,8 @@ public final class IRGenerator {
                 ResolvedStaticField staticField = destination == null
                         ? resolveStaticField(currentClassName, variable.name()) : null;
                 if (staticField != null) {
-                    Operand value = coerce(
-                            ir, expression(ir, assignment.value()), typeOf(staticField.attribute().type()));
+                    Operand value = coerceToSourceType(
+                            ir, expression(ir, assignment.value()), staticField.attribute().type());
                     ir.add(new IRInstruction(IROpCode.STORE_STATIC, null,
                             Operand.label(staticField.label()), null, List.of(value)));
                 } else if (destination == null && currentFunction != null && !currentFunction.isStatic()) {
@@ -792,10 +802,10 @@ public final class IRGenerator {
                             variable.name(),
                             resolveVariable("this"));
                     FieldLayout field = target.field();
-                    Operand value = coerce(
+                    Operand value = coerceToSourceType(
                             ir,
                             expression(ir, assignment.value()),
-                            typeOf(new TypeRecord(field.type())));
+                            new TypeRecord(field.type()));
                     ir.add(new IRInstruction(
                             IROpCode.STORE_FIELD,
                             null,
@@ -811,7 +821,8 @@ public final class IRGenerator {
                         String expectedArrayType = sourceTypesByOperand.get(destination);
                         value = emitArrayInitializer(ir, expectedArrayType, initializer);
                     } else {
-                        value = coerce(ir, expression(ir, assignment.value()), destination.type());
+                        value = coerceToSourceType(ir, expression(ir, assignment.value()),
+                                new TypeRecord(sourceTypesByOperand.get(destination)));
                     }
                     ir.add(new IRInstruction(IROpCode.ASSIGN, destination, value, null));
                 }
@@ -820,8 +831,8 @@ public final class IRGenerator {
                 ResolvedStaticField staticField = staticOwner == null
                         ? null : resolveStaticField(staticOwner.name(), member.name());
                 if (staticField != null) {
-                    Operand value = coerce(
-                            ir, expression(ir, assignment.value()), typeOf(staticField.attribute().type()));
+                    Operand value = coerceToSourceType(
+                            ir, expression(ir, assignment.value()), staticField.attribute().type());
                     ir.add(new IRInstruction(IROpCode.STORE_STATIC, null,
                             Operand.label(staticField.label()), null, List.of(value)));
                     return;
@@ -830,10 +841,10 @@ public final class IRGenerator {
                 FieldLayout field = target.field();
                 Operand value = assignment.value() instanceof ArrayInitializerRecord initializer
                         ? emitArrayInitializer(ir, field.type(), initializer)
-                        : coerce(
+                        : coerceToSourceType(
                                 ir,
                                 expression(ir, assignment.value()),
-                                typeOf(new TypeRecord(field.type())));
+                                new TypeRecord(field.type()));
                 ir.add(new IRInstruction(
                         IROpCode.STORE_FIELD,
                         null,
@@ -844,10 +855,10 @@ public final class IRGenerator {
                 Operand receiver = resolveVariable("this");
                 ResolvedField target = resolveField(currentClassName, attribute.name(), receiver);
                 FieldLayout field = target.field();
-                Operand value = coerce(
+                Operand value = coerceToSourceType(
                         ir,
                         expression(ir, assignment.value()),
-                        typeOf(new TypeRecord(field.type())));
+                        new TypeRecord(field.type()));
                 ir.add(new IRInstruction(
                         IROpCode.STORE_FIELD,
                         null,
@@ -1016,20 +1027,90 @@ public final class IRGenerator {
     private void registerReferenceType(Operand operand, TypeRecord sourceType) {
         String className = canonicalTypeName(sourceType.name());
         sourceTypesByOperand.put(operand, className);
+        genericTypesByOperand.put(operand, canonicalGenericTypeName(sourceType.name()));
         if (classes.containsKey(className)) {
             referenceTypesByOperand.put(operand, className);
         }
     }
 
+    private String canonicalGenericTypeName(String typeName) {
+        if (typeName == null) return null;
+        int dimensions = 0;
+        String baseType = typeName;
+        while (baseType.endsWith("[]")) {
+            dimensions++;
+            baseType = baseType.substring(0, baseType.length() - 2);
+        }
+
+        List<String> arguments = TypeNames.arguments(baseType);
+        String rawName = canonicalTypeName(TypeNames.rawName(baseType));
+        if (arguments.isEmpty()) return rawName + "[]".repeat(dimensions);
+        String canonicalArguments = arguments.stream()
+                .map(this::canonicalGenericTypeName)
+                .collect(java.util.stream.Collectors.joining(","));
+        return rawName + "<" + canonicalArguments + ">" + "[]".repeat(dimensions);
+    }
+
+    private String resolveReceiverType(
+            Operand receiver,
+            String declaringType,
+            TypeRecord memberType) {
+        String receiverType = genericTypesByOperand.get(receiver);
+        if (receiverType == null) return canonicalGenericTypeName(memberType.name());
+
+        String receiverBase = receiverType;
+        while (receiverBase.endsWith("[]")) {
+            receiverBase = receiverBase.substring(0, receiverBase.length() - 2);
+        }
+        if (!TypeNames.rawName(receiverBase).equals(declaringType)) {
+            return canonicalGenericTypeName(memberType.name());
+        }
+
+        List<String> parameters = typeParameters(declaringType);
+        List<String> arguments = TypeNames.arguments(receiverBase);
+        if (parameters.size() != arguments.size()) {
+            return canonicalGenericTypeName(memberType.name());
+        }
+
+        Map<String, String> substitutions = new HashMap<>();
+        for (int index = 0; index < parameters.size(); index++) {
+            substitutions.put(parameters.get(index), arguments.get(index));
+        }
+        return canonicalGenericTypeName(TypeNames.substitute(memberType.name(), substitutions));
+    }
+
+    private List<String> typeParameters(String typeName) {
+        ClassRecord classNode = classes.get(typeName);
+        if (classNode != null) return classNode.typeParameters();
+        InterfaceRecord interfaceNode = interfaces.get(typeName);
+        return interfaceNode == null ? List.of() : interfaceNode.typeParameters();
+    }
+
     private String canonicalTypeName(String typeName) {
         if (typeName == null) return null;
-        if (typeName.equals("String")) return "jvs.lang.String";
-        if (typeName.equals("Object")) return "jvs.lang.Object";
-        if (typeName.equals("String[]")) return "jvs.lang.String[]";
-        if (typeName.equals("Object[]")) return "jvs.lang.Object[]";
-        if (typeName.startsWith("String[")) return "jvs.lang.String" + typeName.substring("String".length());
-        if (typeName.startsWith("Object[")) return "jvs.lang.Object" + typeName.substring("Object".length());
-        return typeName;
+        int dimensions = 0;
+        String baseType = typeName;
+        while (baseType.endsWith("[]")) {
+            dimensions++;
+            baseType = baseType.substring(0, baseType.length() - 2);
+        }
+        baseType = TypeNames.rawName(baseType);
+        if (baseType.equals("String")) baseType = "jvs.lang.String";
+        if (baseType.equals("Object")) baseType = "jvs.lang.Object";
+        if (isGenericTypeParameter(baseType)) baseType = "jvs.lang.Object";
+        return baseType + "[]".repeat(dimensions);
+    }
+
+    private boolean isGenericTypeParameter(String name) {
+        ClassRecord classNode = classes.get(currentClassName);
+        if (classNode != null && classNode.typeParameters().contains(name)) {
+            return true;
+        }
+        InterfaceRecord interfaceNode = interfaces.get(currentClassName);
+        if (interfaceNode != null && interfaceNode.typeParameters().contains(name)) {
+            return true;
+        }
+        return currentFunction != null && currentFunction.typeParameters().contains(name);
     }
 
     private Operand expression(IRProgram ir, ExpressionInterface expression) {
@@ -1225,7 +1306,7 @@ public final class IRGenerator {
             return result;
         }
         if (expression instanceof NewObjectRecord creation) {
-            String className = creation.type().name();
+            String className = TypeNames.rawName(creation.type().name());
             if (!classes.containsKey(className)) {
                 throw unsupported("Classe não encontrada: " + className + ".");
             }
@@ -1548,6 +1629,11 @@ public final class IRGenerator {
     }
 
     private Operand emitCall(IRProgram ir, CallRecord call, boolean keepResult) {
+        if (call.name().equals("getClass") && call.arguments().isEmpty()
+                && currentFunction != null && !currentFunction.isStatic()) {
+            return emitGetClass(ir, resolveVariable("this"), keepResult);
+        }
+
         List<Operand> arguments = new ArrayList<>();
         for (ExpressionInterface argument : call.arguments())
             arguments.add(expression(ir, argument));
@@ -1582,7 +1668,8 @@ public final class IRGenerator {
             throw unsupported("Quantidade de argumentos incompatível para '" + call.name() + "'.");
         }
         for (int index = 0; index < arguments.size(); index++) {
-            arguments.set(index, coerce(ir, arguments.get(index), typeOf(target.parameters().get(index).type())));
+            arguments.set(index, coerceToSourceType(
+                    ir, arguments.get(index), target.parameters().get(index).type()));
         }
 
         String returnName = target.returnType().name();
@@ -1618,10 +1705,10 @@ public final class IRGenerator {
             }
             List<Operand> convertedArguments = new ArrayList<>();
             for (int index = 0; index < arguments.size(); index++) {
-                convertedArguments.add(coerce(
+                convertedArguments.add(coerceToSourceType(
                         ir,
                         arguments.get(index),
-                        typeOf(target.parameters().get(index).type())));
+                        target.parameters().get(index).type()));
             }
             if (keepResult && target.returnType().name().equals("void")) {
                 throw unsupported("Uma função void não pode ser usada como expressão.");
@@ -1663,6 +1750,39 @@ public final class IRGenerator {
         if (receiverClass == null) {
             receiverClass = referenceTypesByOperand.get(receiver);
         }
+        if ("Class".equals(receiverClass)
+                && call.name().equals("getClass")
+                && call.arguments().isEmpty()) {
+            Operand result = Operand.temporary("t" + nextTemp++, Operand.Type.REF);
+            ir.add(new IRInstruction(IROpCode.CLASS_META_CLASS, result, receiver, null));
+            registerReferenceType(result, new TypeRecord("Class"));
+            return keepResult ? result : null;
+        }
+        if (call.name().equals("getClass") && call.arguments().isEmpty()) {
+            return emitGetClass(ir, receiver, keepResult);
+        }
+        if ("Class".equals(receiverClass)) {
+            if (call.name().equals("getName") && call.arguments().isEmpty()) {
+                if (!keepResult) return null;
+                Operand result = Operand.temporary("t" + nextTemp++, Operand.Type.REF);
+                ir.add(new IRInstruction(IROpCode.CLASS_GET_NAME, result, receiver, null));
+                registerReferenceType(result, new TypeRecord("String"));
+                return result;
+            }
+            List<Operand> classArguments = new ArrayList<>();
+            for (ExpressionInterface argument : call.arguments()) {
+                classArguments.add(expression(ir, argument));
+            }
+            ResolvedMethod classMethod = resolveInstanceMethod(
+                    "jvs.lang.String", call.name(), classArguments);
+            return emitInstanceCall(
+                    ir,
+                    receiver,
+                    classArguments,
+                    classMethod,
+                    keepResult,
+                    VirtualMethodTable.isVirtual(classMethod.function()));
+        }
         if (receiverClass != null && interfaces.containsKey(receiverClass)) {
             List<Operand> arguments = new ArrayList<>();
             for (ExpressionInterface argument : call.arguments()) {
@@ -1671,14 +1791,20 @@ public final class IRGenerator {
             FunctionRecord interfaceMethod = resolveInterfaceMethod(
                     receiverClass,
                     call.name(),
+                    receiver,
                     arguments);
-            return emitInstanceCall(
+            Operand result = emitInstanceCall(
                     ir,
                     receiver,
                     arguments,
                     new ResolvedMethod(null, interfaceMethod),
                     keepResult,
                     true);
+            if (result != null) {
+                registerReferenceType(result, new TypeRecord(resolveReceiverType(
+                        receiver, receiverClass, interfaceMethod.returnType())));
+            }
+            return result;
         }
         if (isThrowableType(receiverClass)
                 && call.arguments().isEmpty()
@@ -1710,8 +1836,13 @@ public final class IRGenerator {
             arguments.add(expression(ir, argument));
         }
         ResolvedMethod method = resolveInstanceMethod(receiverClass, call.name(), arguments);
-        return emitInstanceCall(ir, receiver, arguments, method, keepResult,
+        Operand result = emitInstanceCall(ir, receiver, arguments, method, keepResult,
                 VirtualMethodTable.isVirtual(method.function()));
+        if (result != null) {
+            registerReferenceType(result, new TypeRecord(resolveReceiverType(
+                    receiver, method.owner().name(), method.function().returnType())));
+        }
+        return result;
     }
 
     private boolean isThrowableType(String className) {
@@ -1836,6 +1967,7 @@ public final class IRGenerator {
                 ambiguous = true;
             }
         }
+
         if (ambiguous) {
             throw unsupported("Chamada static ambígua para '" + methodName + "' na interface '"
                     + owner.name() + "'.");
@@ -1854,10 +1986,8 @@ public final class IRGenerator {
             boolean keepResult) {
         List<Operand> convertedArguments = new ArrayList<>();
         for (int index = 0; index < arguments.size(); index++) {
-            convertedArguments.add(coerce(
-                    ir,
-                    arguments.get(index),
-                    typeOf(target.parameters().get(index).type())));
+            convertedArguments.add(coerceToSourceType(
+                    ir, arguments.get(index), target.parameters().get(index).type()));
         }
         boolean returnsVoid = target.returnType().name().equals("void");
         if (keepResult && returnsVoid) {
@@ -1881,6 +2011,7 @@ public final class IRGenerator {
     private FunctionRecord resolveInterfaceMethod(
             String interfaceName,
             String methodName,
+            Operand receiver,
             List<Operand> arguments) {
         List<FunctionRecord> candidates = new ArrayList<>();
         Set<String> visitedInterfaces = new java.util.HashSet<>();
@@ -1898,11 +2029,18 @@ public final class IRGenerator {
             boolean applicable = true;
             for (int index = 0; index < arguments.size(); index++) {
                 Operand.Type actual = arguments.get(index).type();
-                Operand.Type expected = typeOf(function.parameters().get(index).type());
+                TypeRecord parameterType = new TypeRecord(resolveReceiverType(
+                        receiver, interfaceName, function.parameters().get(index).type()));
+                Operand.Type expected = typeOf(parameterType);
                 if (actual == expected) continue;
                 if (actual == Operand.Type.I32 && expected == Operand.Type.I64) score++;
                 else if (isInteger(actual) && expected == Operand.Type.F64) {
                     score += actual == Operand.Type.I32 ? 2 : 1;
+                } else if (expected == Operand.Type.REF
+                        && wrapperForPrimitive(actual) != null
+                        && canonicalTypeName(TypeNames.rawName(parameterType.name()))
+                                .equals(wrapperForPrimitive(actual))) {
+                    score += 3;
                 } else {
                     applicable = false;
                     break;
@@ -1934,7 +2072,7 @@ public final class IRGenerator {
             String methodName,
             List<Operand> arguments,
             boolean keepResult) {
-        FunctionRecord method = resolveInterfaceMethod(interfaceName, methodName, arguments);
+        FunctionRecord method = resolveInterfaceMethod(interfaceName, methodName, receiver, arguments);
         if (method.visibility() == TokenType.PRIVATE) {
             if (!interfaceName.equals(currentClassName)) {
                 throw unsupported("Método private de interface só pode ser chamado dentro da própria interface.");
@@ -1964,7 +2102,7 @@ public final class IRGenerator {
             throw unsupported("Interface não encontrada na geração de IR: " + interfaceName + ".");
         }
         for (FunctionRecord function : interfaceNode.functions()) {
-            String signature = VirtualMethodTable.signature(function);
+            String signature = virtualMethodTable.signature(function);
             if (!function.isStatic()
                     && (function.visibility() != TokenType.PRIVATE || interfaceName.equals(currentClassName))
                     && function.name().equals(methodName)
@@ -2026,6 +2164,16 @@ public final class IRGenerator {
                 VirtualMethodTable.isVirtual(method.function()));
     }
 
+    private Operand emitGetClass(IRProgram ir, Operand receiver, boolean keepResult) {
+        if (receiver == null) {
+            throw unsupported("getClass() exige um receptor de instância.");
+        }
+        Operand result = Operand.temporary("t" + nextTemp++, Operand.Type.REF);
+        ir.add(new IRInstruction(IROpCode.GET_CLASS, result, receiver, null));
+        registerReferenceType(result, new TypeRecord("Class"));
+        return keepResult ? result : null;
+    }
+
     private Operand emitSuperCall(IRProgram ir, SuperCallRecord call, boolean keepResult) {
         ClassRecord current = classes.get(currentClassName);
         String parentName = current == null ? null : current.superClass();
@@ -2054,10 +2202,15 @@ public final class IRGenerator {
         }
         List<Operand> convertedArguments = new ArrayList<>();
         for (int index = 0; index < arguments.size(); index++) {
-            convertedArguments.add(coerce(
+            TypeRecord parameterType = method.function().parameters().get(index).type();
+            String declaringType = method.owner() == null
+                    ? sourceTypesByOperand.get(receiver)
+                    : method.owner().name();
+            parameterType = new TypeRecord(resolveReceiverType(receiver, declaringType, parameterType));
+            convertedArguments.add(coerceToSourceType(
                     ir,
                     arguments.get(index),
-                    typeOf(function.parameters().get(index).type())));
+                    parameterType));
         }
         boolean returnsVoid = function.returnType().name().equals("void");
         if (keepResult && returnsVoid) {
@@ -2104,7 +2257,7 @@ public final class IRGenerator {
                 if (!function.name().equals(methodName) || function.isStatic()) {
                     continue;
                 }
-                String signature = VirtualMethodTable.signature(function);
+                String signature = virtualMethodTable.signature(function);
                 if (seenSignatures.add(signature)) {
                     candidates.add(new ResolvedMethod(owner, function));
                 }
@@ -2270,6 +2423,107 @@ public final class IRGenerator {
             return converted;
         }
         throw unsupported("Conversão de " + source.type() + " para " + expected + " não suportada pelo backend.");
+    }
+
+    /** Applies language-level boxing/unboxing before the low-level numeric conversions. */
+    private Operand coerceToSourceType(IRProgram ir, Operand source, TypeRecord expectedType) {
+        String expectedName = expectedType.name();
+        Operand.Type expectedOperandType = typeOf(expectedType);
+        if (expectedOperandType == Operand.Type.REF && source.type() != Operand.Type.REF) {
+            String expectedClass = canonicalTypeName(TypeNames.rawName(expectedName));
+            String primitive = primitiveForWrapper(expectedClass);
+            if (primitive != null) {
+                Operand.Type wrapperValueType = typeOf(new TypeRecord(primitive));
+                Operand value = coerce(ir, source, wrapperValueType);
+                return emitWrapperCall(ir, expectedClass, "valueOf", value, true);
+            }
+        }
+        if (expectedOperandType != Operand.Type.REF && source.type() == Operand.Type.REF) {
+            String sourceClass = sourceTypesByOperand.get(source);
+            String primitive = primitiveForWrapper(sourceClass);
+            if (primitive != null) {
+                Operand unboxed = emitWrapperCall(ir, sourceClass, unboxMethod(primitive), source, false);
+                return coerce(ir, unboxed, expectedOperandType);
+            }
+        }
+        return coerce(ir, source, expectedOperandType);
+    }
+
+    private String wrapperForPrimitive(Operand.Type primitive) {
+        String simpleName = switch (primitive) {
+            case I32 -> "Integer";
+            case I64 -> "Long";
+            case F64 -> "Double";
+            case BOOL -> "Boolean";
+            default -> null;
+        };
+        return findBuiltinWrapper(simpleName);
+    }
+
+    private String primitiveForWrapper(String className) {
+        if (className == null) return null;
+        return switch (simpleTypeName(className)) {
+            case "Integer" -> "int";
+            case "Long" -> "long";
+            case "Double" -> "double";
+            case "Boolean" -> "boolean";
+            default -> null;
+        };
+    }
+
+    private String unboxMethod(String primitive) {
+        return switch (primitive) {
+            case "int" -> "intValue";
+            case "long" -> "longValue";
+            case "double" -> "doubleValue";
+            case "boolean" -> "booleanValue";
+            default -> throw new CompilerInvariantException("Tipo primitivo sem método de unboxing: " + primitive);
+        };
+    }
+
+    private String findBuiltinWrapper(String simpleName) {
+        if (simpleName == null) return null;
+        return classes.keySet().stream()
+                .filter(name -> simpleTypeName(name).equals(simpleName))
+                .findFirst()
+                .orElse(null);
+    }
+
+    private String simpleTypeName(String name) {
+        int dot = name.lastIndexOf('.');
+        return dot < 0 ? name : name.substring(dot + 1);
+    }
+
+    private Operand emitWrapperCall(
+            IRProgram ir,
+            String wrapperName,
+            String methodName,
+            Operand value,
+            boolean isStatic) {
+        ClassRecord wrapper = classes.get(wrapperName);
+        if (wrapper == null) {
+            throw unsupported("A classe wrapper '" + wrapperName + "' não foi carregada.");
+        }
+        FunctionRecord target = wrapper.functions().stream()
+                .filter(function -> function.name().equals(methodName)
+                        && function.isStatic() == isStatic
+                        && function.parameters().size() == (isStatic ? 1 : 0))
+                .filter(function -> isStatic
+                        ? typeOf(function.parameters().get(0).type()) == value.type()
+                        : typeOf(function.returnType()) != Operand.Type.REF)
+                .findFirst()
+                .orElseThrow(() -> unsupported("Método wrapper não encontrado: "
+                        + wrapperName + "." + methodName + "."));
+        String label = functionLabel(wrapper, target);
+        if (!functionsByLabel.containsKey(label)) {
+            throw unsupported("Método wrapper não foi registrado na IR: " + label + ".");
+        }
+        Operand result = Operand.temporary("t" + nextTemp++, typeOf(target.returnType()));
+        List<Operand> arguments = isStatic ? List.of(value) : List.of(value);
+        ir.add(new IRInstruction(IROpCode.CALL, result, Operand.label(label), null, arguments));
+        emitExceptionCheck(ir);
+        if (result.type() == Operand.Type.REF) registerReferenceType(result, target.returnType());
+        return result;
     }
 
     private Operand.Type typeOf(TypeRecord type) {

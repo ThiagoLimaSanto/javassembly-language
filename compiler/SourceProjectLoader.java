@@ -51,6 +51,10 @@ final class SourceProjectLoader {
         if (Files.isRegularFile(coreString)) {
             loadFile(coreString);
         }
+        Path coreLanguageDirectory = libraryRoot.resolve("jvs/lang").normalize();
+        if (Files.isDirectory(coreLanguageDirectory)) {
+            loadPackageSources(coreLanguageDirectory);
+        }
         loadFile(entryFile.toAbsolutePath().normalize());
         return new ProgramRecord(classes, interfaces, registers, "", List.of(), sourceFiles);
     }
@@ -147,8 +151,7 @@ final class SourceProjectLoader {
         }
 
         Path packageDirectory = sourceRoot.resolve(unit.packageName().replace('.', '/'));
-        loadPackageSources(packageDirectory, unit.packageName().isEmpty()
-                ? readSource(normalizedFile) : null);
+        loadPackageSources(packageDirectory, readSource(normalizedFile));
 
         classes.addAll(unit.classes());
         interfaces.addAll(unit.interfaces());
@@ -194,9 +197,12 @@ final class SourceProjectLoader {
                             classNode.name(),
                             "jvs.lang.Object",
                             classNode.interfaces(),
+                            "jvs.lang.Object",
+                            classNode.genericInterfaceTypes(),
                             classNode.attributes(),
                             classNode.functions(),
                             classNode.constructors(),
+                            classNode.typeParameters(),
                             classNode.isAbstract(),
                             classNode.isFinal(),
                             classNode.line(),

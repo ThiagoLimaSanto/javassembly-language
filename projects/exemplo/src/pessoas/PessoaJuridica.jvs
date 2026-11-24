@@ -1,0 +1,11 @@
+package pessoas;
+
+public class PessoaJuridica extends Pessoa {
+    public PessoaJuridica(String razaoSocial, String cnpj) {
+        super(razaoSocial, cnpj);
+    }
+
+    public func String tipoPessoa() {
+        return "Pessoa Jurídica (CNPJ)";
+    }
+}

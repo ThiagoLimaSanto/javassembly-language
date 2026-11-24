@@ -1,0 +1,13 @@
+import jvs.lang.Integer;
+import jvs.util.HashMap;
+import jvs.util.Map;
+
+public class GenericMapDeclarationRule {
+    public static func void main(String[] args) {
+        Map<String, Integer> values = new HashMap<>();
+        values.put("answer", Integer.valueOf(42));
+        Integer answer = values.get("answer");
+        printLn answer.intValue();
+        return;
+    }
+}

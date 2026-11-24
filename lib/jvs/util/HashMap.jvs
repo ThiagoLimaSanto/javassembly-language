@@ -1,0 +1,289 @@
+package jvs.util;
+
+public final class HashMap<K, V> implements Map<K, V> {
+
+    private K[] keys;
+    private V[] values;
+    private int[] hashes;
+    private int[] states;
+
+    private int size;
+    private int capacity;
+    private int tombstones;
+
+    public HashMap() {
+        capacity = 16;
+
+        keys = new K[capacity];
+        values = new V[capacity];
+        hashes = new int[capacity];
+        states = new int[capacity];
+
+        size = 0;
+        tombstones = 0;
+    }
+
+    public func V get(K key) {
+        int index = findIndex(key);
+
+        if (cmp.lt index, 0) {
+            return null;
+        }
+
+        return values[index];
+    }
+
+    public func int size() {
+        return size;
+    }
+
+    public func boolean containsKey(K key) {
+        return cmp.ge findIndex(key), 0;
+    }
+
+    public func boolean isEmpty() {
+        return cmp.eq size, 0;
+    }
+
+    public func void clear() {
+        int index = 0;
+
+        while (cmp.lt index, capacity) {
+            keys[index] = null;
+            values[index] = null;
+            hashes[index] = 0;
+            states[index] = 0;
+
+            index = add index, 1;
+        }
+
+        size = 0;
+        tombstones = 0;
+    }
+
+    public func V put(K key, V value) {
+        int hash = key.hashCode();
+
+        int slot = findSlot(key, hash);
+
+        if (cmp.ge slot, 0) {
+            if (cmp.eq states[slot], 1) {
+                V previousValue = values[slot];
+                values[slot] = value;
+
+                return previousValue;
+            }
+        }
+
+        int occupied = add size, tombstones;
+        int threshold = mul capacity, 3;
+        threshold = div threshold, 4;
+
+        if (cmp.ge occupied, threshold) {
+            if (cmp.ge size, threshold) {
+                resize();
+            } else {
+                rehash(capacity);
+            }
+
+            slot = findSlot(key, hash);
+        }
+
+        if (cmp.lt slot, 0) {
+            resize();
+            slot = findSlot(key, hash);
+        }
+
+        if (cmp.eq states[slot], 2) {
+            tombstones = sub tombstones, 1;
+        }
+
+        keys[slot] = key;
+        values[slot] = value;
+        hashes[slot] = hash;
+        states[slot] = 1;
+
+        size = add size, 1;
+
+        return null;
+    }
+
+    public func V remove(K key) {
+        int index = findIndex(key);
+
+        if (cmp.lt index, 0) {
+            return null;
+        }
+
+        V previousValue = values[index];
+
+        keys[index] = null;
+        values[index] = null;
+        hashes[index] = 0;
+        states[index] = 2;
+
+        size = sub size, 1;
+        tombstones = add tombstones, 1;
+
+        return previousValue;
+    }
+
+    private func int findSlot(K key, int hash) {
+        int index = mod hash, capacity;
+
+        if (cmp.lt index, 0) {
+            index = add index, capacity;
+        }
+
+        int firstDeleted = neg 1;
+        int checked = 0;
+
+        while (cmp.lt checked, capacity) {
+            if (cmp.eq states[index], 0) {
+                if (cmp.ge firstDeleted, 0) {
+                    return firstDeleted;
+                }
+
+                return index;
+            }
+
+            if (cmp.eq states[index], 1) {
+                if (cmp.eq hashes[index], hash) {
+                    if (key.equals(keys[index])) {
+                        return index;
+                    }
+                }
+            }
+
+            if (cmp.eq states[index], 2) {
+                if (cmp.lt firstDeleted, 0) {
+                    firstDeleted = index;
+                }
+            }
+
+            index = add index, 1;
+
+            if (cmp.eq index, capacity) {
+                index = 0;
+            }
+
+            checked = add checked, 1;
+        }
+
+        return firstDeleted;
+    }
+
+    private func int findIndex(K key) {
+        int hash = key.hashCode();
+
+        int index = mod hash, capacity;
+
+        if (cmp.lt index, 0) {
+            index = add index, capacity;
+        }
+
+        int checked = 0;
+
+        while (cmp.lt checked, capacity) {
+            if (cmp.eq states[index], 0) {
+                return neg 1;
+            }
+
+            if (cmp.eq states[index], 1) {
+                if (cmp.eq hashes[index], hash) {
+                    if (key.equals(keys[index])) {
+                        return index;
+                    }
+                }
+            }
+
+            index = add index, 1;
+
+            if (cmp.eq index, capacity) {
+                index = 0;
+            }
+
+            checked = add checked, 1;
+        }
+
+        return neg 1;
+    }
+
+    private func void resize() {
+        int newCapacity = mul capacity, 2;
+        rehash(newCapacity);
+    }
+
+    private func void rehash(int newCapacity) {
+        K[] oldKeys = keys;
+        V[] oldValues = values;
+        int[] oldHashes = hashes;
+        int[] oldStates = states;
+
+        int oldCapacity = capacity;
+
+        capacity = newCapacity;
+
+        keys = new K[capacity];
+        values = new V[capacity];
+        hashes = new int[capacity];
+        states = new int[capacity];
+
+        size = 0;
+        tombstones = 0;
+
+        int index = 0;
+
+        while (cmp.lt index, oldCapacity) {
+            if (cmp.eq oldStates[index], 1) {
+                insertRehashed(
+                    oldKeys[index],
+                    oldValues[index],
+                    oldHashes[index]
+                );
+            }
+
+            index = add index, 1;
+        }
+
+        free(oldKeys);
+        free(oldValues);
+        free(oldHashes);
+        free(oldStates);
+    }
+
+    private func void insertRehashed(
+        K key,
+        V value,
+        int hash
+    ) {
+        int index = mod hash, capacity;
+
+        if (cmp.lt index, 0) {
+            index = add index, capacity;
+        }
+
+        int checked = 0;
+
+        while (cmp.lt checked, capacity) {
+            if (cmp.eq states[index], 0) {
+                keys[index] = key;
+                values[index] = value;
+                hashes[index] = hash;
+                states[index] = 1;
+
+                size = add size, 1;
+
+                return;
+            }
+
+            index = add index, 1;
+
+            if (cmp.eq index, capacity) {
+                index = 0;
+            }
+
+            checked = add checked, 1;
+        }
+    }
+}

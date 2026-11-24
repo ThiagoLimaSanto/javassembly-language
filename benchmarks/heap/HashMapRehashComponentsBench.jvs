@@ -1,0 +1,98 @@
+import jvs.io.Scanner;
+import jvs.lang.Integer;
+
+public class HashMapRehashComponentsBench {
+    public static func void main(String[] args) throws IOException {
+        int oldCapacity = Integer.parseInt(args[0]);
+        int activeCount = Integer.parseInt(args[1]);
+        int newCapacity = mul oldCapacity, 2;
+
+        Integer[] oldKeys = new Integer[oldCapacity];
+        Integer[] oldValues = new Integer[oldCapacity];
+        int[] oldHashes = new int[oldCapacity];
+        int[] oldStates = new int[oldCapacity];
+        Integer entry = Integer.valueOf(1);
+
+        for (int index = 0; cmp.lt index, activeCount; index = add index, 1) {
+            oldKeys[index] = entry;
+            oldValues[index] = entry;
+            oldHashes[index] = index;
+            oldStates[index] = 1;
+        }
+
+        Integer[] newKeys = null;
+        Integer[] newValues = null;
+        int[] newHashes = null;
+        int[] newStates = null;
+
+        printLn "READY";
+        Scanner.readLine();
+
+        newKeys = new Integer[newCapacity];
+        newValues = new Integer[newCapacity];
+        newHashes = new int[newCapacity];
+        newStates = new int[newCapacity];
+        printLn "ALLOC_DONE";
+        Scanner.readLine();
+
+        int scanned = 0;
+        for (int index = 0; cmp.lt index, oldCapacity; index = add index, 1) {
+            if (cmp.eq oldStates[index], 1) {
+                scanned = add scanned, 1;
+            }
+        }
+        printLn "SCAN_DONE";
+        Scanner.readLine();
+
+        int moved = 0;
+        for (int index = 0; cmp.lt index, oldCapacity; index = add index, 1) {
+            if (cmp.eq oldStates[index], 1) {
+                int bucket = mod oldHashes[index], newCapacity;
+                if (cmp.lt bucket, 0) {
+                    bucket = add bucket, newCapacity;
+                }
+                while (cmp.eq newStates[bucket], 1) {
+                    bucket = add bucket, 1;
+                    if (cmp.eq bucket, newCapacity) {
+                        bucket = 0;
+                    }
+                }
+                newKeys[bucket] = oldKeys[index];
+                newValues[bucket] = oldValues[index];
+                newHashes[bucket] = oldHashes[index];
+                newStates[bucket] = 1;
+                moved = add moved, 1;
+            }
+        }
+        printLn "REINSERT_DONE";
+        Scanner.readLine();
+
+        int verified = 0;
+        for (int index = 0; cmp.lt index, activeCount; index = add index, 1) {
+            if (cmp.eq newStates[index], 1) {
+                if (cmp.eq newHashes[index], index) {
+                    if (cmp.eq newKeys[index], entry) {
+                        if (cmp.eq newValues[index], entry) {
+                            verified = add verified, 1;
+                        }
+                    }
+                }
+            }
+        }
+        printLn "VERIFY_DONE";
+        Scanner.readLine();
+
+        free(oldKeys);
+        free(oldValues);
+        free(oldHashes);
+        free(oldStates);
+        printLn "FREE_DONE";
+        Scanner.readLine();
+
+        printfLn "RESULT %d %d %d", scanned, moved, verified;
+        free(newKeys);
+        free(newValues);
+        free(newHashes);
+        free(newStates);
+    }
+}

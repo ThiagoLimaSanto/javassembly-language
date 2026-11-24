@@ -1,0 +1,59 @@
+import jvs.lang.Integer;
+import jvs.util.HashMap;
+import jvs.util.Map;
+
+public class HashMapFixture {
+    public static func void main(String[] args) {
+        Map<Integer, Integer> values = new HashMap<>();
+        printLn values.isEmpty();
+
+        values.put(Integer.valueOf(1), Integer.valueOf(10));
+        values.put(Integer.valueOf(17), Integer.valueOf(170));
+        Integer value = values.get(Integer.valueOf(17));
+        printLn value.intValue();
+
+        values.remove(Integer.valueOf(1));
+        printLn values.containsKey(Integer.valueOf(1));
+        value = values.get(Integer.valueOf(17));
+        printLn value.intValue();
+
+        values.put(Integer.valueOf(33), Integer.valueOf(330));
+        value = values.get(Integer.valueOf(33));
+        printLn value.intValue();
+        value = values.get(Integer.valueOf(17));
+        printLn value.intValue();
+        printLn values.size();
+
+        Integer previous = values.put(Integer.valueOf(17), Integer.valueOf(171));
+        printLn previous.intValue();
+        value = values.get(Integer.valueOf(17));
+        printLn value.intValue();
+
+        values.clear();
+        printLn values.size();
+        printLn values.isEmpty();
+
+        int index = 0;
+        while (cmp.lt index, 20) {
+            values.put(Integer.valueOf(index), Integer.valueOf(mul index, 10));
+            index = add index, 1;
+        }
+
+        printLn values.size();
+        value = values.get(Integer.valueOf(19));
+        printLn value.intValue();
+        value = values.get(Integer.valueOf(4));
+        printLn value.intValue();
+
+        values.remove(Integer.valueOf(4));
+        printLn values.containsKey(Integer.valueOf(4));
+        value = values.get(Integer.valueOf(19));
+        printLn value.intValue();
+
+        values.clear();
+        printLn values.size();
+        printLn values.isEmpty();
+        free(values);
+        return;
+    }
+}

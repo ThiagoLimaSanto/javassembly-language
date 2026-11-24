@@ -1,0 +1,65 @@
+import jvs.lang.Integer;
+import jvs.util.ArrayList;
+import jvs.util.List;
+
+public class ArrayListFixture {
+    public static func void main(String[] args) {
+        ArrayList<Integer> concrete = new ArrayList<>(2);
+        List<Integer> values = concrete;
+        printLn values.isEmpty();
+
+        printLn values.add(10);
+        values.add(20);
+        values.add(1, 15);
+        printLn values.size();
+        printLn values.get(1).intValue();
+
+        Integer replaced = values.set(0, 5);
+        printLn replaced.intValue();
+        Integer removed = values.remove(1);
+        printLn removed.intValue();
+        printLn values.remove(Integer.valueOf(20));
+        printLn values.contains(5);
+        printLn values.indexOf(5);
+
+        values.add(5);
+        printLn values.lastIndexOf(5);
+        values.add(null);
+        printLn values.contains(null);
+        printLn values.indexOf(null);
+        printLn values.remove(null);
+
+        int index = 0;
+        while (cmp.lt index, 24) {
+            values.add(index);
+            index = add index, 1;
+        }
+        printLn values.size();
+        printLn values.get(25).intValue();
+        concrete.trimToSize();
+        values.add(99);
+        printLn values.get(26).intValue();
+
+        try {
+            values.get(values.size());
+        } catch (IndexOutOfBoundsException error) {
+            printLn "bounds";
+        }
+        try {
+            values.get(neg 1);
+        } catch (IndexOutOfBoundsException error) {
+            printLn "negative";
+        }
+        try {
+            int invalidPosition = add values.size(), 1;
+            values.add(invalidPosition, 7);
+        } catch (IndexOutOfBoundsException error) {
+            printLn "position";
+        }
+
+        values.clear();
+        printLn values.isEmpty();
+        printLn values.size();
+        return;
+    }
+}

@@ -1,0 +1,11 @@
+package jvs.util;
+
+public interface Map<K, V> {
+    public func V put(K key, V value);
+    public func V get(K key);
+    public func V remove(K key);
+    public func boolean containsKey(K key);
+    public func int size();
+    public func boolean isEmpty();
+    public func void clear();
+}

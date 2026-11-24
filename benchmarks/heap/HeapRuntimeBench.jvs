@@ -1,0 +1,92 @@
+import jvs.util.Map;
+import jvs.util.HashMap;
+import jvs.lang.Integer;
+
+public class HeapRuntimeBench {
+    public static func void main(String[] args) {
+        int n = Integer.parseInt(args[0]);
+        int mode = Integer.parseInt(args[1]);
+
+        if (cmp.eq mode, 1) {
+            BenchNode last = null;
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                last = new BenchNode();
+            }
+            free(last);
+            printLn n;
+        }
+        if (cmp.eq mode, 2) {
+            BenchNode[] items = new BenchNode[n];
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                BenchNode item = new BenchNode();
+                item.value = index;
+                items[index] = item;
+            }
+            int total = 0;
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                total = add total, items[index].value;
+            }
+            printLn total;
+        }
+        if (cmp.eq mode, 3) {
+            BenchNode[] items = new BenchNode[n];
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                items[index] = new BenchNode();
+            }
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                items[index].value = index;
+            }
+            printLn n;
+        }
+        if (cmp.eq mode, 4) {
+            int[] items = new int[n];
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                items[index] = index;
+            }
+            int total = 0;
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                total = add total, items[index];
+            }
+            printLn total;
+        }
+        if (cmp.eq mode, 5) {
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                BenchNode item = new BenchNode();
+                free(item);
+            }
+            printLn n;
+        }
+        if (cmp.eq mode, 6) {
+            BenchNode[] items = new BenchNode[n];
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                items[index] = new BenchNode();
+            }
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                free(items[index]);
+                items[index] = null;
+            }
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                items[index] = new BenchNode();
+            }
+            printLn n;
+        }
+        if (cmp.eq mode, 7) {
+            Map<Integer, Integer> map = new HashMap<>();
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                map.put(Integer.valueOf(index), Integer.valueOf(index));
+            }
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                map.get(Integer.valueOf(index));
+            }
+            for (int index = 0; cmp.lt index, n; index = add index, 1) {
+                map.remove(Integer.valueOf(index));
+            }
+            printfLn "%d", map.size();
+            free(map);
+        }
+    }
+}
+
+class BenchNode {
+    int value;
+}

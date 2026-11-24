@@ -6,7 +6,7 @@ public final class Boolean {
 
     private boolean value;
 
-    public Boolean(boolean value) {
+    private Boolean(boolean value) {
         this.value = value;
     }
 

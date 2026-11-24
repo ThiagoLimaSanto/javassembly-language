@@ -1,0 +1,21 @@
+package pessoas;
+
+public abstract class Pessoa {
+    private String nome;
+    private String documento;
+
+    public Pessoa(String nome, String documento) {
+        this.nome = nome;
+        this.documento = documento;
+    }
+
+    public func String nome() {
+        return this.nome;
+    }
+
+    public func String documento() {
+        return this.documento;
+    }
+
+    public abstract func String tipoPessoa();
+}

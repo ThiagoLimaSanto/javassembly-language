@@ -1,0 +1,22 @@
+package contas;
+
+import pessoas.Pessoa;
+
+public class ContaPoupanca extends ContaBancaria implements Investimento {
+    private double taxaRendimento;
+
+    public ContaPoupanca(int numero, Pessoa pessoaTitular, double taxaRendimento, String senha) {
+        super(numero, pessoaTitular, senha);
+        this.taxaRendimento = taxaRendimento;
+    }
+
+    public func String tipo() {
+        return "Conta poupança";
+    }
+
+    public func double aplicarRendimento() {
+        double rendimento = mul this.saldo(), this.taxaRendimento;
+        this.depositar(rendimento);
+        return rendimento;
+    }
+}

@@ -1,0 +1,5 @@
+package contas;
+
+public interface Investimento {
+    public func double aplicarRendimento();
+}

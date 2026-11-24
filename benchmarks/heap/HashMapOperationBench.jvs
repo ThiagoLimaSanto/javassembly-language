@@ -1,0 +1,54 @@
+import jvs.util.Map;
+import jvs.util.HashMap;
+import jvs.io.Scanner;
+import jvs.lang.Integer;
+
+public class HashMapOperationBench {
+    public static func void main(String[] args) throws IOException {
+        int size = Integer.parseInt(args[0]);
+        int operation = Integer.parseInt(args[1]);
+
+        Map<Integer, Integer> map = new HashMap<>();
+        Integer[] keys = new Integer[size];
+        for (int index = 0; cmp.lt index, size; index = add index, 1) {
+            keys[index] = Integer.valueOf(index);
+        }
+
+        if (cmp.ne operation, 1) {
+            for (int index = 0; cmp.lt index, size; index = add index, 1) {
+                map.put(keys[index], keys[index]);
+            }
+        }
+
+        printLn "READY";
+        Scanner.readLine();
+
+        Integer observed = null;
+        if (cmp.eq operation, 1) {
+            for (int index = 0; cmp.lt index, size; index = add index, 1) {
+                map.put(keys[index], keys[index]);
+            }
+        }
+        if (cmp.eq operation, 2) {
+            for (int index = 0; cmp.lt index, size; index = add index, 1) {
+                observed = map.get(keys[index]);
+            }
+        }
+        if (cmp.eq operation, 3) {
+            for (int index = 0; cmp.lt index, size; index = add index, 1) {
+                observed = map.remove(keys[index]);
+            }
+        }
+
+        printLn "DONE";
+        Scanner.readLine();
+
+        int observedValue = 0;
+        if (cmp.ne observed, null) {
+            observedValue = observed.intValue();
+        }
+        printfLn "RESULT %d %d", map.size(), observedValue;
+        free(map);
+        free(keys);
+    }
+}

@@ -18,6 +18,9 @@ import compiler.backend.ir.Operand;
 
 public class IROptimizer {
     private static final int MAX_OPTIMIZATION_ROUNDS = 8;
+    private long controlFlowTopologyGeneration;
+    private long cachedControlFlowTopologyGeneration = -1;
+    private List<BasicBlock> cachedControlFlowTopology;
 
     private static final class BasicBlock {
         private final int id;
@@ -51,7 +54,45 @@ public class IROptimizer {
             Operand.Type resultType) {
     }
 
+    /** Copy facts are stored in canonical form: every destination points directly to its root. */
+    private static final class CopyState {
+        private final Map<Operand, Operand> sourceByDestination = new HashMap<>();
+        private final Map<Operand, Set<Operand>> destinationsBySource = new HashMap<>();
+
+        private Operand resolve(Operand operand) {
+            if (operand == null) return null;
+            return sourceByDestination.getOrDefault(operand, operand);
+        }
+
+        private void removeCopiesFor(Operand destination) {
+            Operand source = sourceByDestination.remove(destination);
+            if (source != null) {
+                Set<Operand> aliases = destinationsBySource.get(source);
+                if (aliases != null) {
+                    aliases.remove(destination);
+                    if (aliases.isEmpty()) destinationsBySource.remove(source);
+                }
+            }
+
+            Set<Operand> aliases = destinationsBySource.remove(destination);
+            if (aliases == null) return;
+            for (Operand alias : aliases) sourceByDestination.remove(alias);
+        }
+
+        private void add(Operand destination, Operand source) {
+            if (destination.equals(source)) return;
+            sourceByDestination.put(destination, source);
+            destinationsBySource.computeIfAbsent(source, ignored -> new HashSet<>()).add(destination);
+        }
+
+        private void clear() {
+            sourceByDestination.clear();
+            destinationsBySource.clear();
+        }
+    }
+
     public IRProgram optimize(IRProgram input) {
+        resetControlFlowTopology();
         IRProgram current = input;
         for (int round = 0; round < MAX_OPTIMIZATION_ROUNDS; round++) {
             IRProgram next = removeUnreachable(current);
@@ -74,10 +115,20 @@ public class IROptimizer {
     }
 
     private List<BasicBlock> buildControlFlowGraph(IRProgram program) {
+        List<IRInstruction> instructions = program.instructions();
+        if (cachedControlFlowTopology != null
+                && cachedControlFlowTopologyGeneration == controlFlowTopologyGeneration) {
+            if (refreshControlFlowTopology(cachedControlFlowTopology, instructions)) {
+                return cachedControlFlowTopology;
+            }
+            // A missed invalidation must not turn a malformed cache into a stale CFG.
+            invalidateControlFlowTopology();
+        }
+
         List<BasicBlock> blocks = new ArrayList<>();
         BasicBlock current = null;
 
-        for (IRInstruction instruction : program.instructions()) {
+        for (IRInstruction instruction : instructions) {
             boolean startsBlock = instruction.opCode() == IROpCode.LABEL
                     || (current != null && isTerminator(current.last().opCode()));
             if (current == null || (startsBlock && !current.instructions.isEmpty())) {
@@ -122,7 +173,53 @@ public class IROptimizer {
                 default -> addFallthroughEdge(blocks, index, block);
             }
         }
+        cachedControlFlowTopology = blocks;
+        cachedControlFlowTopologyGeneration = controlFlowTopologyGeneration;
         return blocks;
+    }
+
+    private boolean refreshControlFlowTopology(
+            List<BasicBlock> topology,
+            List<IRInstruction> instructions) {
+        for (BasicBlock block : topology) {
+            block.instructions.clear();
+            block.inConstants = null;
+            block.outConstants = null;
+        }
+
+        int blockIndex = -1;
+        BasicBlock current = null;
+        for (IRInstruction instruction : instructions) {
+            boolean startsBlock = instruction.opCode() == IROpCode.LABEL
+                    || (current != null && isTerminator(current.last().opCode()));
+            if (current == null || (startsBlock && !current.instructions.isEmpty())) {
+                int nextBlockIndex = blockIndex + 1;
+                if (nextBlockIndex >= topology.size()) return false;
+                current = topology.get(nextBlockIndex);
+                blockIndex = nextBlockIndex;
+            }
+            current.instructions.add(instruction);
+        }
+        return blockIndex + 1 == topology.size();
+    }
+
+    /** Clears cached topology at every public optimize() boundary. */
+    private void resetControlFlowTopology() {
+        invalidateControlFlowTopology();
+    }
+
+    /**
+     * Invalidates cached blocks and edges after a structural IR mutation.
+     * Current callers are removeUnreachable() when it drops a block,
+     * simplifyConstantBranches() when it removes/converts a conditional
+     * terminator, and removeRedundantJumps() when it removes a jump. Any future
+     * pass that changes labels, block boundaries, terminators, branch targets,
+     * or PUSH_EXCEPTION_HANDLER targets must call this method as well.
+     */
+    private void invalidateControlFlowTopology() {
+        controlFlowTopologyGeneration++;
+        cachedControlFlowTopology = null;
+        cachedControlFlowTopologyGeneration = -1;
     }
 
     private void addJumpEdge(
@@ -175,11 +272,15 @@ public class IROptimizer {
         }
 
         IRProgram output = new IRProgram();
+        boolean topologyChanged = false;
         for (BasicBlock block : blocks) {
             if (reachable.contains(block)) {
                 block.instructions.forEach(output::add);
+            } else {
+                topologyChanged = true;
             }
         }
+        if (topologyChanged) invalidateControlFlowTopology();
         return output;
     }
 
@@ -188,32 +289,33 @@ public class IROptimizer {
         if (blocks.isEmpty())
             return input;
         Set<BasicBlock> reachable = reachableBlocks(blocks);
-
+        Deque<BasicBlock> worklist = new ArrayDeque<>();
+        Set<BasicBlock> queued = new HashSet<>();
         for (BasicBlock block : blocks) {
-            if (block.isFunctionEntry()) {
-                block.inConstants = new HashMap<>();
+            if (reachable.contains(block)) {
+                worklist.addLast(block);
+                queued.add(block);
             }
         }
 
-        boolean changed;
-        int rounds = 0;
-        do {
-            changed = false;
-            for (BasicBlock block : blocks) {
-                if (!reachable.contains(block))
-                    continue;
-                Map<Operand, Operand> incoming = mergeConstantInputs(block, reachable);
-                if (incoming == null)
-                    continue;
-                Map<Operand, Operand> outgoing = transferConstants(block, incoming);
-                if (!incoming.equals(block.inConstants) || !outgoing.equals(block.outConstants)) {
-                    block.inConstants = incoming;
-                    block.outConstants = outgoing;
-                    changed = true;
+        while (!worklist.isEmpty()) {
+            BasicBlock block = worklist.removeFirst();
+            queued.remove(block);
+            Map<Operand, Operand> incoming = mergeConstantInputs(block, reachable);
+            if (incoming == null) continue;
+
+            Map<Operand, Operand> outgoing = transferConstants(block, incoming);
+            boolean outputChanged = !outgoing.equals(block.outConstants);
+            block.inConstants = incoming;
+            if (!outputChanged) continue;
+
+            block.outConstants = outgoing;
+            for (BasicBlock successor : block.successors) {
+                if (reachable.contains(successor) && queued.add(successor)) {
+                    worklist.addLast(successor);
                 }
             }
-            rounds++;
-        } while (changed && rounds <= blocks.size() * 4 + 8);
+        }
 
         IRProgram output = new IRProgram();
         for (BasicBlock block : blocks) {
@@ -356,15 +458,23 @@ public class IROptimizer {
     private IRInstruction rewriteOperands(
             IRInstruction instruction,
             Map<Operand, Operand> constants) {
-        List<Operand> arguments = instruction.arguments().stream()
-                .map(argument -> resolveConstant(argument, constants))
-                .toList();
-        return new IRInstruction(
-                instruction.opCode(),
-                instruction.destination(),
-                resolveConstant(instruction.left(), constants),
-                resolveConstant(instruction.right(), constants),
-                arguments);
+        Operand left = resolveConstant(instruction.left(), constants);
+        Operand right = resolveConstant(instruction.right(), constants);
+        List<Operand> originalArguments = instruction.arguments();
+        List<Operand> rewrittenArguments = null;
+        for (int index = 0; index < originalArguments.size(); index++) {
+            Operand original = originalArguments.get(index);
+            Operand rewritten = resolveConstant(original, constants);
+            if (!Objects.equals(original, rewritten)) {
+                if (rewrittenArguments == null) rewrittenArguments = new ArrayList<>(originalArguments);
+                rewrittenArguments.set(index, rewritten);
+            }
+        }
+        if (Objects.equals(left, instruction.left())
+                && Objects.equals(right, instruction.right())
+                && rewrittenArguments == null) return instruction;
+        return new IRInstruction(instruction.opCode(), instruction.destination(), left, right,
+                rewrittenArguments == null ? originalArguments : rewrittenArguments);
     }
 
     private Operand resolveConstant(Operand operand, Map<Operand, Operand> constants) {
@@ -375,6 +485,7 @@ public class IROptimizer {
 
     private IRProgram simplifyConstantBranches(IRProgram input) {
         IRProgram output = new IRProgram();
+        boolean topologyChanged = false;
         for (IRInstruction instruction : input.instructions()) {
             boolean conditional = instruction.opCode() == IROpCode.JUMP_IF_FALSE
                     || instruction.opCode() == IROpCode.JUMP_IF_TRUE;
@@ -387,18 +498,21 @@ public class IROptimizer {
                 output.add(instruction);
                 continue;
             }
+            topologyChanged = true;
             boolean value = (Boolean) condition.value();
             boolean shouldJump = instruction.opCode() == IROpCode.JUMP_IF_TRUE ? value : !value;
             if (shouldJump) {
                 output.add(new IRInstruction(IROpCode.JUMP, instruction.destination(), null, null));
             }
         }
+        if (topologyChanged) invalidateControlFlowTopology();
         return output;
     }
 
     private IRProgram removeRedundantJumps(IRProgram input) {
         List<IRInstruction> instructions = input.instructions();
         IRProgram output = new IRProgram();
+        boolean topologyChanged = false;
         for (int index = 0; index < instructions.size(); index++) {
             IRInstruction instruction = instructions.get(index);
             if (instruction.opCode() == IROpCode.JUMP
@@ -412,6 +526,7 @@ public class IROptimizer {
                     if (isFunctionLabel(instructions.get(next))) break;
                     if (target.equals(instructions.get(next).destination().value().toString())) {
                         instruction = null;
+                        topologyChanged = true;
                         break;
                     }
                     next++;
@@ -419,13 +534,14 @@ public class IROptimizer {
             }
             if (instruction != null) output.add(instruction);
         }
+        if (topologyChanged) invalidateControlFlowTopology();
         return output;
     }
 
     private IRProgram propagateCopies(IRProgram input) {
         IRProgram output = new IRProgram();
         for (BasicBlock block : buildControlFlowGraph(input)) {
-            Map<Operand, Operand> copies = new HashMap<>();
+            CopyState copies = new CopyState();
             for (IRInstruction instruction : block.instructions) {
                 IRInstruction rewritten = rewriteCopies(instruction, copies);
                 output.add(rewritten);
@@ -435,42 +551,40 @@ public class IROptimizer {
                 Operand destination = rewritten.destination();
                 if (destination == null)
                     continue;
-                removeCopiesFor(destination, copies);
+                copies.removeCopiesFor(destination);
                 if (rewritten.opCode() == IROpCode.ASSIGN
                         && rewritten.left() != null
                         && destination.type() != Operand.Type.REF
                         && (rewritten.left().kind() == Operand.Kind.VARIABLE
                                 || rewritten.left().kind() == Operand.Kind.TEMPORARY)
                         && !destination.equals(rewritten.left())) {
-                    copies.put(destination, rewritten.left());
+                    copies.add(destination, copies.resolve(rewritten.left()));
                 }
             }
         }
         return output;
     }
 
-    private IRInstruction rewriteCopies(IRInstruction instruction, Map<Operand, Operand> copies) {
-        List<Operand> arguments = instruction.arguments().stream()
-                .map(argument -> resolveCopy(argument, copies))
-                .toList();
-        return new IRInstruction(instruction.opCode(), instruction.destination(),
-                resolveCopy(instruction.left(), copies), resolveCopy(instruction.right(), copies), arguments);
-    }
-
-    private Operand resolveCopy(Operand operand, Map<Operand, Operand> copies) {
-        if (operand == null)
-            return null;
-        Operand current = operand;
-        Set<Operand> visited = new HashSet<>();
-        while (copies.containsKey(current) && visited.add(current)) {
-            current = copies.get(current);
+    private IRInstruction rewriteCopies(IRInstruction instruction, CopyState copies) {
+        Operand left = copies.resolve(instruction.left());
+        Operand right = copies.resolve(instruction.right());
+        List<Operand> originalArguments = instruction.arguments();
+        List<Operand> rewrittenArguments = null;
+        for (int index = 0; index < originalArguments.size(); index++) {
+            Operand original = originalArguments.get(index);
+            Operand rewritten = copies.resolve(original);
+            if (!Objects.equals(original, rewritten)) {
+                if (rewrittenArguments == null) rewrittenArguments = new ArrayList<>(originalArguments);
+                rewrittenArguments.set(index, rewritten);
+            }
         }
-        return current;
-    }
-
-    private void removeCopiesFor(Operand destination, Map<Operand, Operand> copies) {
-        copies.remove(destination);
-        copies.entrySet().removeIf(entry -> resolveCopy(entry.getValue(), copies).equals(destination));
+        if (Objects.equals(left, instruction.left())
+                && Objects.equals(right, instruction.right())
+                && rewrittenArguments == null) {
+            return instruction;
+        }
+        return new IRInstruction(instruction.opCode(), instruction.destination(), left, right,
+                rewrittenArguments == null ? originalArguments : rewrittenArguments);
     }
 
     private IRProgram eliminateCommonSubexpressions(IRProgram input) {
@@ -522,7 +636,8 @@ public class IROptimizer {
     private boolean isCseCandidate(IROpCode opcode) {
         return switch (opcode) {
             case CAST_I32_TO_I64, CAST_I32_TO_F64, CAST_I64_TO_F64,
-                    ADD, SUB, MUL, NEG, LT, GT, LE, GE, EQ, NE, LOAD_STATIC ->
+                    ADD, SUB, MUL, DIV, MOD, NEG, LT, GT, LE, GE, EQ, NE,
+                    LOAD_STATIC, LOAD_FIELD, LOAD_ARRAY, ARRAY_LENGTH ->
                 true;
             default -> false;
         };
@@ -709,10 +824,57 @@ public class IROptimizer {
 
     private IRInstruction simplifyIdentity(IRInstruction instruction) {
         Operand destination = instruction.destination();
-        if (destination == null || !isIntegerType(destination.type()))
-            return instruction;
         Operand left = instruction.left();
         Operand right = instruction.right();
+        if (destination == null || left == null) return instruction;
+
+        if (right != null && left.equals(right) && destination.type() == Operand.Type.BOOL) {
+            boolean foldable = switch (instruction.opCode()) {
+                case EQ, NE -> canFoldReflexiveEquality(left);
+                case LE, GE, LT, GT -> isIntegerType(left.type());
+                default -> false;
+            };
+            if (!foldable) return instruction;
+            boolean reflexive = switch (instruction.opCode()) {
+                case EQ -> canFoldReflexiveEquality(left);
+                case NE, LT, GT -> false;
+                case LE, GE -> isIntegerType(left.type());
+                default -> false;
+            };
+            if (instruction.opCode() == IROpCode.EQ || instruction.opCode() == IROpCode.NE
+                    || instruction.opCode() == IROpCode.LE || instruction.opCode() == IROpCode.GE
+                    || instruction.opCode() == IROpCode.LT || instruction.opCode() == IROpCode.GT) {
+                return assign(destination, Operand.constant(reflexive, Operand.Type.BOOL));
+            }
+        }
+
+        if (!isIntegerType(destination.type())) {
+            if (destination.type() == Operand.Type.F64 && right != null
+                    && isConstant(right, Operand.Type.F64)
+                    && ((instruction.opCode() == IROpCode.MUL
+                                    && (Double) right.value() == 1.0d)
+                            || (instruction.opCode() == IROpCode.DIV
+                                    && (Double) right.value() == 1.0d))) {
+                return assign(destination, left);
+            }
+            if (destination.type() == Operand.Type.F64
+                    && instruction.opCode() == IROpCode.MUL
+                    && isConstant(left, Operand.Type.F64)
+                    && (Double) left.value() == 1.0d) {
+                return assign(destination, right);
+            }
+            return instruction;
+        }
+
+        if (instruction.opCode() == IROpCode.SUB
+                && left.equals(right)) {
+            return assign(destination, integerZero(destination.type()));
+        }
+        if (instruction.opCode() == IROpCode.SUB
+                && right != null
+                && isIntegerConstant(left, destination.type(), 0L)) {
+            return new IRInstruction(IROpCode.NEG, destination, right, null);
+        }
         if (instruction.opCode() == IROpCode.ADD) {
             if (isIntegerConstant(left, destination.type(), 0L))
                 return assign(destination, right);
@@ -726,13 +888,24 @@ public class IROptimizer {
         if (instruction.opCode() == IROpCode.MUL) {
             if (isIntegerConstant(left, destination.type(), 0L)
                     || isIntegerConstant(right, destination.type(), 0L)) {
-                return assign(destination, Operand.constant(
-                        destination.type() == Operand.Type.I32 ? 0 : 0L, destination.type()));
+                return assign(destination, integerZero(destination.type()));
             }
             if (isIntegerConstant(left, destination.type(), 1L))
                 return assign(destination, right);
             if (isIntegerConstant(right, destination.type(), 1L))
                 return assign(destination, left);
+            if (right != null && isIntegerConstant(left, destination.type(), -1L)) {
+                return new IRInstruction(IROpCode.NEG, destination, right, null);
+            }
+            if (isIntegerConstant(right, destination.type(), -1L)) {
+                return new IRInstruction(IROpCode.NEG, destination, left, null);
+            }
+            if (right != null && isIntegerConstant(left, destination.type(), 2L)) {
+                return new IRInstruction(IROpCode.ADD, destination, right, right);
+            }
+            if (isIntegerConstant(right, destination.type(), 2L)) {
+                return new IRInstruction(IROpCode.ADD, destination, left, left);
+            }
         }
         if (instruction.opCode() == IROpCode.DIV
                 && isIntegerConstant(right, destination.type(), 1L)) {
@@ -740,14 +913,19 @@ public class IROptimizer {
         }
         if (instruction.opCode() == IROpCode.MOD
                 && isIntegerConstant(right, destination.type(), 1L)) {
-            return assign(destination, Operand.constant(
-                    destination.type() == Operand.Type.I32 ? 0 : 0L, destination.type()));
+            return assign(destination, integerZero(destination.type()));
         }
         return instruction;
     }
 
     private IRInstruction assign(Operand destination, Operand source) {
         return new IRInstruction(IROpCode.ASSIGN, destination, source, null);
+    }
+
+    private Operand integerZero(Operand.Type type) {
+        return type == Operand.Type.I32
+                ? Operand.constant(Integer.valueOf(0), type)
+                : Operand.constant(Long.valueOf(0L), type);
     }
 
     private IRInstruction foldConstants(IRInstruction instruction) {
@@ -891,6 +1069,14 @@ public class IROptimizer {
 
     private boolean isIntegerType(Operand.Type type) {
         return type == Operand.Type.I32 || type == Operand.Type.I64;
+    }
+
+    private boolean canFoldReflexiveEquality(Operand operand) {
+        if (isIntegerType(operand.type()) || operand.type() == Operand.Type.BOOL) return true;
+        if (operand.type() != Operand.Type.REF) return false;
+        return operand.kind() == Operand.Kind.VARIABLE
+                || operand.kind() == Operand.Kind.TEMPORARY
+                || isNullReference(operand);
     }
 
     private long integerValue(Operand operand) {

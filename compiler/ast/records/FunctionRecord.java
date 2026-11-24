@@ -19,11 +19,31 @@ public record FunctionRecord(
         boolean isDefault,
         boolean isNative,
         int line,
-        int column) implements ASTNode {
+        int column,
+        List<String> typeParameters) implements ASTNode {
 
     public FunctionRecord {
         parameters = List.copyOf(parameters);
         thrownExceptions = List.copyOf(thrownExceptions);
+        typeParameters = List.copyOf(typeParameters);
+    }
+
+    public FunctionRecord(
+            TokenType visibility,
+            boolean isStatic,
+            boolean isFinal,
+            TypeRecord returnType,
+            String name,
+            List<ParameterRecord> parameters,
+            List<TypeRecord> thrownExceptions,
+            BlockRecord block,
+            boolean isAbstract,
+            boolean isDefault,
+            boolean isNative,
+            int line,
+            int column) {
+        this(visibility, isStatic, isFinal, returnType, name, parameters, thrownExceptions,
+                block, isAbstract, isDefault, isNative, line, column, List.of());
     }
 
     public FunctionRecord(

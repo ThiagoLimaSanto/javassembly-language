@@ -66,6 +66,27 @@ String nome = "Ana";
 O sufixo `L` indica um literal `long`. A linguagem verifica tipos e conversões antes
 de gerar o executável.
 
+### Matemática
+
+`jvs.util.Math` fornece métodos estáticos nativos para valores `double`. Importe a
+classe e chame os métodos sem criar uma instância:
+
+```java
+import jvs.util.Math;
+
+double raiz = Math.sqrt(81.0);
+double potencia = Math.pow(2.0, 10.0);
+double angulo = Math.toRadians(90.0);
+double sorteio = Math.random();
+printLn raiz;
+```
+
+Estão disponíveis `abs`, `random`, `sqrt`, `cbrt`, `pow`, `min`, `max`, `round`,
+`ceil`, `floor`, `sin`, `cos`, `tan`, `toRadians` e `toDegrees`, além das constantes
+`PI` e `E`. `round(double)` retorna `long`; os demais métodos retornam `double`.
+`random()` gera um valor pseudoaleatório no intervalo `[0, 1)` e não deve ser usado
+para fins criptográficos.
+
 Os tipos wrapper da biblioteca `jvs.lang` representam valores primitivos como objetos.
 Use as fábricas `valueOf` para criá-los e os métodos `intValue()`, `longValue()`,
 `booleanValue()` ou `doubleValue()` para recuperar o valor primitivo:
@@ -179,6 +200,66 @@ interfaces usam `implements`. Métodos sobrescritos podem ser chamados virtualme
 Modificadores disponíveis incluem `public`, `private`, `protected`, `static`, `final`
 e `abstract`. A visibilidade e as combinações permitidas são verificadas pelo
 compilador.
+
+Toda referência a objeto e array oferece `getClass()`. O resultado pode ser guardado
+em `Class`; `getName()` retorna o nome qualificado da classe ou o tipo do array:
+
+```java
+Class tipo = pessoa.getClass();
+printLn tipo.getName();
+printLn notas.getClass().getName();
+```
+
+`Class` é um identificador de metadados mantido pelo runtime. Chamadas a `wait()`,
+`wait(long)`, `wait(long, int)`, `notify()` e `notifyAll()` são rejeitadas durante a
+análise semântica porque JavaAssembly ainda não implementa threads nem monitores.
+
+## Tipos genéricos
+
+Classes e interfaces podem declarar parâmetros de tipo e usá-los em outros tipos:
+
+```java
+public interface List<T> {
+}
+
+public class ArrayList<T> implements List<T> {
+}
+
+public class Util {
+    public static func <T> T identidade(T valor) {
+        return valor;
+    }
+}
+
+public class ExemploLista {
+    public static func void main(String[] args) {
+        List<String> nomes = new ArrayList<>();
+        List<?> qualquerLista = nomes;
+        List<? extends jvs.lang.Object> somenteLeitura = nomes;
+        String nome = Util.identidade("Ana");
+        return;
+    }
+}
+```
+
+Os argumentos genéricos são tipos de referência; tipos primitivos precisam ser
+representados pelas classes wrapper de `jvs.lang`. A compatibilidade entre interfaces
+genéricas considera os argumentos declarados na herança. São aceitos curingas sem limite,
+com limite superior (`? extends Tipo`) e inferior (`? super Tipo`), além da inferência
+`<>` em criações atribuídas a um tipo declarado ou inferidas pelos argumentos do
+construtor. A leitura por `? extends` usa o limite superior; `? super` permite passar
+valores compatíveis com o limite inferior.
+
+Métodos podem declarar seus próprios parâmetros genéricos após `func`; o compilador
+infere esses tipos pelos argumentos e pelo tipo esperado do retorno. Na tabela virtual,
+implementações de interfaces genéricas são associadas à assinatura concreta mesmo quando
+os nomes ou tipos dos parâmetros diferem; como os tipos genéricos são referências e usam
+a mesma ABI, o backend emite uma entrada bridge que encaminha a chamada para a
+implementação concreta.
+
+Ainda não há limites em declarações de parâmetros (`<T extends Tipo>`), argumentos
+genéricos explícitos em chamadas (`obj.<String>metodo(...)`) nem inferência polimórfica
+completa em expressões genéricas aninhadas dentro de argumentos sobrecarregados.
 
 ## Interfaces
 

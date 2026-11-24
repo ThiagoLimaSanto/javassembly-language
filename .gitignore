@@ -1,2 +1,14 @@
 out
 build
+benchmarks
+
+# Keep optimizer benchmark tooling, its baseline reference, and measured CSVs versioned.
+!benchmarks/
+!benchmarks/optimizer/
+!benchmarks/optimizer/*.java
+!benchmarks/optimizer/*.py
+!benchmarks/optimizer/*.sh
+!benchmarks/optimizer/*.md
+!benchmarks/optimizer/*.csv
+!benchmarks/optimizer/reference/
+!benchmarks/optimizer/reference/*.java

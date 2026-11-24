@@ -1,0 +1,17 @@
+package jvs.util;
+
+public interface List<T> {
+    public func int size();
+    public func boolean isEmpty();
+    public func boolean contains(T value);
+    public func int indexOf(T value);
+    public func int lastIndexOf(T value);
+
+    public func T get(int index);
+    public func T set(int index, T value);
+    public func boolean add(T value);
+    public func void add(int index, T value);
+    public func T remove(int index);
+    public func boolean remove(T value);
+    public func void clear();
+}

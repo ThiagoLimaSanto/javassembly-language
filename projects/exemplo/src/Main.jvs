@@ -1,0 +1,396 @@
+import banco.Banco;
+import contas.ContaBancaria;
+import contas.ContaCorrente;
+import contas.ContaPoupanca;
+import pessoas.Pessoa;
+import pessoas.PessoaFisica;
+import pessoas.PessoaJuridica;
+import jvs.io.Scanner;
+import jvs.lang.Integer;
+import jvs.lang.Double;
+
+public class Main {
+    private static func int lerInteiro(String mensagem, int minimo, int maximo) throws IOException {
+        int valor = 0;
+        boolean valido = False;
+
+        while (cmp.eq valido, False) {
+            print mensagem;
+            String entrada = Scanner.readLine();
+
+            try {
+                valor = Integer.parseInt(entrada);
+                if (cmp.lt valor, minimo) {
+                    printLn "";
+                    printLn "Valor fora do intervalo permitido.";
+                } else if (cmp.gt valor, maximo) {
+                    printLn "";
+                    printLn "Valor fora do intervalo permitido.";
+                } else {
+                    valido = True;
+                }
+            } catch (NumberFormatException erro) {
+                printLn "";
+                printLn "Digite um número inteiro válido.";
+            }
+        }
+        return valor;
+    }
+
+    private static func double lerValorPositivo(String mensagem) throws IOException {
+        boolean valido = False;
+        double valor = 0.0;
+
+        while (cmp.eq valido, False) {
+            print mensagem;
+            String entrada = Scanner.readLine();
+
+            try {
+                valor = Double.parseDouble(entrada);
+                if (cmp.gt valor, 0.0) {
+                    if (cmp.le valor, 1000000000.0) {
+                        valido = True;
+                    } else {
+                        printLn "";
+                        printLn "O valor máximo permitido é 1000000000.";
+                    }
+                } else {
+                    printLn "";
+                    printLn "O valor precisa ser maior que zero.";
+                }
+            } catch (NumberFormatException erro) {
+                printLn "";
+                printLn "Digite um valor decimal válido.";
+            }
+        }
+        return valor;
+    }
+
+    private static func String lerTextoObrigatorio(String mensagem) throws IOException {
+        boolean valido = False;
+        String valor = "";
+        while (cmp.eq valido, False) {
+            print mensagem;
+            valor = Scanner.readLine();
+            if (valor.isEmpty()) {
+                printLn "";
+                printLn "Este campo não pode ficar vazio.";
+            } else {
+                valido = True;
+            }
+        }
+        return valor;
+    }
+
+    private static func boolean documentoNumericoValido(String documento, int tamanhoEsperado) {
+        if (cmp.ne documento.length(), tamanhoEsperado) {
+            return False;
+        }
+
+        int indice = 0;
+        int primeiroDigito = documento.codePointAt(0);
+        boolean todosIguais = True;
+        while (cmp.lt indice, tamanhoEsperado) {
+            int codigo = documento.codePointAt(indice);
+            if (cmp.lt codigo, 48) {
+                return False;
+            }
+            if (cmp.gt codigo, 57) {
+                return False;
+            }
+            if (cmp.ne codigo, primeiroDigito) {
+                todosIguais = False;
+            }
+            indice = add indice, 1;
+        }
+        if (todosIguais) {
+            return False;
+        }
+
+        if (cmp.eq tamanhoEsperado, 11) {
+            int soma = 0;
+            indice = 0;
+            while (cmp.lt indice, 9) {
+                int digito = sub documento.codePointAt(indice), 48;
+                int peso = sub 10, indice;
+                soma = add soma, mul digito, peso;
+                indice = add indice, 1;
+            }
+
+            int resto = mod soma, 11;
+            int primeiroVerificador = 0;
+            if (cmp.ge resto, 2) {
+                primeiroVerificador = sub 11, resto;
+            }
+            if (cmp.ne primeiroVerificador, sub documento.codePointAt(9), 48) {
+                return False;
+            }
+
+            soma = 0;
+            indice = 0;
+            while (cmp.lt indice, 10) {
+                int digito = sub documento.codePointAt(indice), 48;
+                int peso = sub 11, indice;
+                soma = add soma, mul digito, peso;
+                indice = add indice, 1;
+            }
+            resto = mod soma, 11;
+            int segundoVerificador = 0;
+            if (cmp.ge resto, 2) {
+                segundoVerificador = sub 11, resto;
+            }
+            return cmp.eq segundoVerificador, sub documento.codePointAt(10), 48;
+        }
+
+        int soma = 0;
+        indice = 0;
+        while (cmp.lt indice, 12) {
+            int digito = sub documento.codePointAt(indice), 48;
+            int peso = 0;
+            if (cmp.lt indice, 4) {
+                peso = sub 5, indice;
+            } else {
+                peso = sub 13, indice;
+            }
+            soma = add soma, mul digito, peso;
+            indice = add indice, 1;
+        }
+
+        int resto = mod soma, 11;
+        int primeiroVerificador = 0;
+        if (cmp.ge resto, 2) {
+            primeiroVerificador = sub 11, resto;
+        }
+        if (cmp.ne primeiroVerificador, sub documento.codePointAt(12), 48) {
+            return False;
+        }
+
+        soma = 0;
+        indice = 0;
+        while (cmp.lt indice, 13) {
+            int digito = sub documento.codePointAt(indice), 48;
+            int peso = 0;
+            if (cmp.lt indice, 5) {
+                peso = sub 6, indice;
+            } else {
+                peso = sub 14, indice;
+            }
+            soma = add soma, mul digito, peso;
+            indice = add indice, 1;
+        }
+        resto = mod soma, 11;
+        int segundoVerificador = 0;
+        if (cmp.ge resto, 2) {
+            segundoVerificador = sub 11, resto;
+        }
+        return cmp.eq segundoVerificador, sub documento.codePointAt(13), 48;
+    }
+
+    private static func String lerDocumento(int tipoPessoa) throws IOException {
+        int tamanho = 11;
+        String nomeDocumento = "CPF";
+        if (cmp.eq tipoPessoa, 2) {
+            tamanho = 14;
+            nomeDocumento = "CNPJ";
+        }
+
+        boolean valido = False;
+        String documento = "";
+        while (cmp.eq valido, False) {
+            print "Digite o ";
+            print nomeDocumento;
+            print " (somente números): ";
+            documento = Scanner.readLine();
+            if (documentoNumericoValido(documento, tamanho)) {
+                valido = True;
+            } else {
+                printLn "";
+                printLn "Documento inválido. Confira os dígitos e tente novamente.";
+            }
+        }
+        return documento;
+    }
+
+    private static func String lerSenhaCadastro() throws IOException {
+        boolean confirmada = False;
+        String senha = "";
+        while (cmp.eq confirmada, False) {
+            senha = lerTextoObrigatorio("Crie uma senha (mínimo 4 caracteres): ");
+            if (cmp.ge senha.length(), 4) {
+                String repetida = lerTextoObrigatorio("Confirme a senha: ");
+                if (senha.equals(repetida)) {
+                    confirmada = True;
+                } else {
+                    printLn "";
+                    printLn "As senhas não são iguais.";
+                }
+            } else {
+                printLn "";
+                printLn "A senha precisa ter pelo menos 4 caracteres.";
+            }
+        }
+        return senha;
+    }
+
+    private static func boolean cadastrarConta(Banco banco) throws IOException {
+        printLn "";
+        printLn "--- Criar nova conta ---";
+        int tipoConta = lerInteiro("Tipo de conta (1-Corrente, 2-Poupança): ", 1, 2);
+        int tipoPessoa = lerInteiro("Titular (1-Pessoa Física, 2-Pessoa Jurídica): ", 1, 2);
+        String nome = lerTextoObrigatorio("Nome completo ou razão social: ");
+        String documento = lerDocumento(tipoPessoa);
+        int numero = lerInteiro("Número da conta (positivo): ", 1, 2147483647);
+        String senha = lerSenhaCadastro();
+
+        Pessoa pessoa = null;
+        if (cmp.eq tipoPessoa, 1) {
+            pessoa = new PessoaFisica(nome, documento);
+        } else {
+            pessoa = new PessoaJuridica(nome, documento);
+        }
+
+        ContaBancaria conta = null;
+        if (cmp.eq tipoConta, 1) {
+            conta = new ContaCorrente(numero, pessoa, senha);
+        } else {
+            conta = new ContaPoupanca(numero, pessoa, 0.05, senha);
+        }
+
+        if (banco.adicionar(conta)) {
+            printLn "";
+            printLn "Conta criada. Agora faça login para acessar as operações.";
+            return True;
+        }
+
+        printLn "";
+        printLn "Já existe uma conta com esse número. Cadastro rejeitado.";
+        free(conta);
+        free(pessoa);
+        return False;
+    }
+
+    private static func ContaBancaria fazerLogin(Banco banco) throws IOException {
+        printLn "";
+        printLn "--- Login ---";
+        int numero = lerInteiro("Número da conta: ", 1, 2147483647);
+        String documento = lerTextoObrigatorio("CPF/CNPJ (somente números): ");
+        String senha = lerTextoObrigatorio("Senha: ");
+
+        ContaBancaria conta = banco.autenticar(numero, documento, senha);
+        if (cmp.eq conta, null) {
+            printLn "";
+            printLn "Não foi possível entrar. Confira conta, documento e senha.";
+            return null;
+        }
+
+        printLn "";
+        print "Bem-vindo(a), ";
+        print conta.titular().nome();
+        printLn "!";
+        return conta;
+    }
+
+    private static func void mostrarConta(ContaBancaria conta) {
+        printLn "";
+        printLn "---------- Minha conta ----------";
+        printfLn "%s | número %d | %s: %s | documento %s | saldo R$ %f",
+                conta.tipo(), conta.numero(), conta.titular().tipoPessoa(),
+                conta.titular().nome(), conta.titular().documento(), conta.saldo();
+        printLn "---------------------------------";
+    }
+
+    private static func void depositarOuSacar(ContaBancaria contaLogada, boolean sacar) throws IOException {
+        printLn "";
+        double valor = lerValorPositivo("Valor da operação: R$ ");
+        if (sacar) {
+            if (contaLogada.sacar(valor)) {
+                printLn "";
+                printLn "Saque realizado com sucesso.";
+            } else {
+                printLn "";
+                printLn "Saque recusado: saldo insuficiente ou tarifa não coberta.";
+            }
+        } else {
+            if (contaLogada.depositar(valor)) {
+                printLn "";
+                printLn "Depósito realizado com sucesso.";
+            } else {
+                printLn "";
+                printLn "Depósito recusado.";
+            }
+        }
+    }
+
+    private static func void transferir(Banco banco, ContaBancaria contaLogada) throws IOException {
+        printLn "";
+        int destino = lerInteiro("Conta de destino: ", 1, 2147483647);
+        double valor = lerValorPositivo("Valor da transferência: R$ ");
+
+        if (banco.transferir(contaLogada.numero(), destino, valor)) {
+            printLn "";
+            printLn "Transferência realizada com sucesso.";
+        } else {
+            printLn "";
+            printLn "Transferência recusada. Confira a conta de destino e o saldo.";
+        }
+    }
+
+    private static func void menuLogado(Banco banco, ContaBancaria contaLogada) throws IOException {
+        boolean logado = True;
+        while (logado) {
+            printLn "";
+            printLn "1 - Consultar minha conta";
+            printLn "2 - Depositar";
+            printLn "3 - Sacar";
+            printLn "4 - Transferir";
+            printLn "0 - Logout";
+
+            int opcao = lerInteiro("Escolha uma opção: ", 0, 4);
+            if (cmp.eq opcao, 1) {
+                mostrarConta(contaLogada);
+            } else if (cmp.eq opcao, 2) {
+                depositarOuSacar(contaLogada, False);
+            } else if (cmp.eq opcao, 3) {
+                depositarOuSacar(contaLogada, True);
+            } else if (cmp.eq opcao, 4) {
+                transferir(banco, contaLogada);
+            } else {
+                logado = False;
+            }
+        }
+        printLn "";
+        printLn "Logout realizado.";
+    }
+
+    public static func void main(String[] args) throws IOException {
+        Banco banco = new Banco();
+        boolean executando = True;
+
+        printLn "====================================";
+        printLn "       SISTEMA BANCÁRIO JVS";
+        printLn "====================================";
+
+        while (executando) {
+            printLn "";
+            printLn "1 - Criar nova conta";
+            printLn "2 - Fazer login";
+            printLn "0 - Sair";
+
+            int opcao = lerInteiro("Escolha uma opção: ", 0, 2);
+            if (cmp.eq opcao, 1) {
+                cadastrarConta(banco);
+            } else if (cmp.eq opcao, 2) {
+                ContaBancaria contaLogada = fazerLogin(banco);
+                if (cmp.ne contaLogada, null) {
+                    menuLogado(banco, contaLogada);
+                }
+            } else {
+                executando = False;
+            }
+        }
+
+        printLn "";
+        printLn "Sistema encerrado.";
+        return;
+    }
+}

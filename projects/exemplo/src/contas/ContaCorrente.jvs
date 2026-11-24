@@ -1,0 +1,21 @@
+package contas;
+
+import pessoas.Pessoa;
+
+public class ContaCorrente extends ContaBancaria {
+    private double tarifaSaque;
+
+    public ContaCorrente(int numero, Pessoa pessoaTitular, String senha) {
+        super(numero, pessoaTitular, senha);
+        this.tarifaSaque = 1.50;
+    }
+
+    public func boolean sacar(double valor) {
+        double total = add valor, this.tarifaSaque;
+        return super.sacar(total);
+    }
+
+    public func String tipo() {
+        return "Conta corrente";
+    }
+}

@@ -1,0 +1,16 @@
+class BackendEmptyHeapObject {
+}
+
+public class BackendEmptyHeapObjectTest {
+    public static func void main(String[] args) {
+        BackendEmptyHeapObject first = new BackendEmptyHeapObject();
+        BackendEmptyHeapObject second = new BackendEmptyHeapObject();
+        free(first);
+        free(second);
+
+        BackendEmptyHeapObject reused = new BackendEmptyHeapObject();
+        printLn 42;
+        free(reused);
+        return;
+    }
+}

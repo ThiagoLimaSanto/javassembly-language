@@ -67,6 +67,9 @@ public enum TokenType {
     IDENTIFIER,
 
     ASSIGN,
+    TYPE_PARAMETER_OPEN,
+    TYPE_PARAMETER_CLOSE,
+    QUESTION,
     AND,
     OR,
 

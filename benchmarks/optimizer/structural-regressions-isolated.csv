@@ -1,0 +1,13 @@
+replicate,mode,java,os,os_version,arch,jvm_args,scenario,size,warmups,samples,full_key_median_ns,full_key_mad_ns,generation_median_ns,generation_mad_ns,full_key_alloc_median_bytes,full_key_alloc_mad_bytes,generation_alloc_median_bytes,generation_alloc_mad_bytes,final_ir_equal
+1,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,loops,250,5,31,10582787,543864,9960947,996016,9681416,10560,8997784,0,true
+2,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,loops,250,5,31,10537822,735751,9647935,438106,9681416,8032,8885176,72688,true
+3,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,loops,250,5,31,10891682,579980,10250096,929231,9681416,8032,8997784,0,true
+1,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,loops,500,5,31,29356812,1545751,28166035,2055078,32870296,112288,31166312,112288,true
+2,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,loops,500,5,31,29587242,1808610,28377778,2182086,32870296,74576,31166312,112288,true
+3,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,loops,500,5,31,29823091,2121733,28623377,2622045,32870296,112224,31166312,112288,true
+1,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,copies,250,5,31,9651261,1445011,9310115,1397995,9952584,16960,9540720,128,true
+2,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,copies,250,5,31,9336424,677613,9254662,469766,9952584,128,9540720,0,true
+3,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,copies,250,5,31,9481785,1266400,9367282,735672,9952584,16960,9540720,128,true
+1,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,copies,500,5,31,25439896,1623964,24709115,1980339,34827616,129056,34037912,32480,true
+2,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,copies,500,5,31,24979879,2374873,24468295,3852187,34892240,64432,34102360,32384,true
+3,time,25.0.5.1,Linux,7.0.0-43-generic,amd64,-Xms3g -Xmx3g,copies,500,5,31,25017228,2211440,24177134,3088664,34859840,32480,34037912,96800,true

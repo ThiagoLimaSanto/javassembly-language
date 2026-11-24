@@ -5,19 +5,16 @@ final class ScannerRuntime {
     private ScannerRuntime() {
     }
 
-    static void append(StringBuilder asm) {
-        append(asm, false);
-    }
-
     static void append(StringBuilder asm, boolean windows) {
-        appendScannerFunctions(asm, windows);
-        appendTokenReader(asm, windows);
+        appendScannerFunctions(asm);
+        appendTokenReader(asm);
+        appendBufferedByteReader(asm, windows);
         appendIntegerParser(asm);
         appendDoubleParser(asm);
         appendInputError(asm);
     }
 
-    private static void appendScannerFunctions(StringBuilder asm, boolean windows) {
+    private static void appendScannerFunctions(StringBuilder asm) {
         asm.append("jvs.io.Scanner.readInt__void__ret_int:\n")
                 .append("    call __scanner_parse_signed\n")
                 .append("    movsxd rcx, eax\n")
@@ -97,15 +94,9 @@ final class ScannerRuntime {
         asm.append("__scanner_read_line:\n")
                 .append("    xor r8d, r8d\n")
                 .append(".scanner_line_loop:\n")
-                .append("    xor eax, eax\n")
-                .append("    xor edi, edi\n")
-                .append("    lea rsi, [rel __scanner_byte]\n")
-                .append("    mov edx, 1\n")
-                .append(windows ? "    call __jvs_read_once\n" : "    syscall\n")
-                .append("    test rax, rax\n")
-                .append("    js __runtime_io_error\n")
-                .append("    jz .scanner_line_eof\n")
-                .append("    mov al, byte [rel __scanner_byte]\n")
+                .append("    call __scanner_read_byte\n")
+                .append("    cmp rax, -2\n    je __runtime_io_error\n")
+                .append("    cmp rax, -1\n    je .scanner_line_eof\n")
                 .append("    cmp al, 10\n")
                 .append("    je .scanner_line_done\n")
                 .append("    cmp r8, 4095\n")
@@ -133,19 +124,13 @@ final class ScannerRuntime {
                 .append("    ret\n\n");
     }
 
-    private static void appendTokenReader(StringBuilder asm, boolean windows) {
+    private static void appendTokenReader(StringBuilder asm) {
         asm.append("__scanner_read_token:\n")
                 .append("    xor r8d, r8d\n")
                 .append(".scanner_skip_whitespace:\n")
-                .append("    xor eax, eax\n")
-                .append("    xor edi, edi\n")
-                .append("    lea rsi, [rel __scanner_byte]\n")
-                .append("    mov edx, 1\n")
-                .append(windows ? "    call __jvs_read_once\n" : "    syscall\n")
-                .append("    test rax, rax\n")
-                .append("    js __runtime_io_error\n")
-                .append("    jz __runtime_no_such_element\n")
-                .append("    mov al, byte [rel __scanner_byte]\n")
+                .append("    call __scanner_read_byte\n")
+                .append("    cmp rax, -2\n    je __runtime_io_error\n")
+                .append("    cmp rax, -1\n    je __runtime_no_such_element\n")
                 .append("    cmp al, 32\n")
                 .append("    je .scanner_skip_whitespace\n")
                 .append("    cmp al, 9\n")
@@ -157,15 +142,9 @@ final class ScannerRuntime {
                 .append("    mov byte [rel __scanner_token], al\n")
                 .append("    mov r8d, 1\n")
                 .append(".scanner_token_loop:\n")
-                .append("    xor eax, eax\n")
-                .append("    xor edi, edi\n")
-                .append("    lea rsi, [rel __scanner_byte]\n")
-                .append("    mov edx, 1\n")
-                .append(windows ? "    call __jvs_read_once\n" : "    syscall\n")
-                .append("    test rax, rax\n")
-                .append("    js __runtime_io_error\n")
-                .append("    jz .scanner_token_done\n")
-                .append("    mov al, byte [rel __scanner_byte]\n")
+                .append("    call __scanner_read_byte\n")
+                .append("    cmp rax, -2\n    je __runtime_io_error\n")
+                .append("    cmp rax, -1\n    je .scanner_token_done\n")
                 .append("    cmp al, 32\n")
                 .append("    je .scanner_token_done\n")
                 .append("    cmp al, 9\n")
@@ -186,6 +165,29 @@ final class ScannerRuntime {
                 .append("    mov qword [rel __scanner_token_length], r8\n")
                 .append("    mov rax, r8\n")
                 .append("    ret\n\n");
+    }
+
+    private static void appendBufferedByteReader(StringBuilder asm, boolean windows) {
+        asm.append("__scanner_read_byte:\n")
+                .append("    mov rax, qword [rel __scanner_buffer_position]\n")
+                .append("    cmp rax, qword [rel __scanner_buffer_length]\n")
+                .append("    jb .scanner_byte_ready\n")
+                .append("    xor eax, eax\n    xor edi, edi\n")
+                .append("    lea rsi, [rel __scanner_input_buffer]\n")
+                .append("    mov edx, 4096\n")
+                .append(windows ? "    call __jvs_read_once\n" : "    syscall\n")
+                .append("    test rax, rax\n    js .scanner_byte_error\n")
+                .append("    jz .scanner_byte_eof\n")
+                .append("    mov qword [rel __scanner_buffer_position], 0\n")
+                .append("    mov qword [rel __scanner_buffer_length], rax\n")
+                .append(".scanner_byte_ready:\n")
+                .append("    mov rax, qword [rel __scanner_buffer_position]\n")
+                .append("    lea rdx, [rel __scanner_input_buffer]\n")
+                .append("    movzx eax, byte [rdx+rax]\n")
+                .append("    inc qword [rel __scanner_buffer_position]\n")
+                .append("    ret\n")
+                .append(".scanner_byte_eof:\n    mov rax, -1\n    ret\n")
+                .append(".scanner_byte_error:\n    mov rax, -2\n    ret\n\n");
     }
 
     private static void appendIntegerParser(StringBuilder asm) {

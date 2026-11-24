@@ -1,0 +1,31 @@
+import jvs.util.Map;
+import jvs.util.HashMap;
+import jvs.io.Scanner;
+import jvs.lang.Integer;
+
+public class HashMapResizeBench {
+    public static func void main(String[] args) throws IOException {
+        int existingEntries = Integer.parseInt(args[0]);
+        int keyCount = add existingEntries, 1;
+
+        Integer[] keys = new Integer[keyCount];
+        for (int index = 0; cmp.lt index, keyCount; index = add index, 1) {
+            keys[index] = Integer.valueOf(index);
+        }
+
+        Map<Integer, Integer> map = new HashMap<>();
+        for (int index = 0; cmp.lt index, existingEntries; index = add index, 1) {
+            map.put(keys[index], keys[index]);
+        }
+
+        printLn "READY";
+        Scanner.readLine();
+        map.put(keys[existingEntries], keys[existingEntries]);
+        printLn "DONE";
+        Scanner.readLine();
+
+        printfLn "RESULT %d", map.size();
+        free(map);
+        free(keys);
+    }
+}

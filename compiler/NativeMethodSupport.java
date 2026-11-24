@@ -26,6 +26,10 @@ public final class NativeMethodSupport {
                     && method.returnType().name().equals(expectedResult);
         }
 
+        if (type.equals("jvs.util.Math")) {
+            return supportsMath(owner, method);
+        }
+
         if (!type.startsWith("jvs.lang.")) return false;
         String simpleName = type.substring("jvs.lang.".length());
         return switch (simpleName) {
@@ -69,6 +73,24 @@ public final class NativeMethodSupport {
                     || nativeInstance(method, "hashCode", List.of(), "int")
                     || nativeInstance(method, "toString", List.of(), "String")
                     || nativeStatic(method, "parseDouble", List.of("jvs.lang.String"), "double");
+            default -> false;
+        };
+    }
+
+    private static boolean supportsMath(ClassRecord owner, FunctionRecord method) {
+        if (!owner.name().equals("jvs.util.Math") || !method.isStatic()) {
+            return false;
+        }
+        List<String> parameters = parametersOf(method);
+        String result = method.returnType().name();
+        return switch (method.name()) {
+            case "random" -> parameters.isEmpty() && result.equals("double");
+            case "abs", "sqrt", "cbrt", "ceil", "floor", "sin", "cos", "tan",
+                    "toRadians", "toDegrees" -> parameters.equals(List.of("double"))
+                            && result.equals("double");
+            case "pow", "max", "min" -> parameters.equals(List.of("double", "double"))
+                    && result.equals("double");
+            case "round" -> parameters.equals(List.of("double")) && result.equals("long");
             default -> false;
         };
     }

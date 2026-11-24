@@ -1,0 +1,5 @@
+mode,java,os,os_version,arch,jvm_args,scenario,size,warmups,samples,full_key_median_ns,full_key_mad_ns,generation_median_ns,generation_mad_ns,full_key_alloc_median_bytes,full_key_alloc_mad_bytes,generation_alloc_median_bytes,generation_alloc_mad_bytes,final_ir_equal
+time,"25.0.5.1","Linux","7.0.0-43-generic","amd64","",copies,250,5,31,6210551,1218651,5406302,852919,9977544,16,9548720,0,true
+time,"25.0.5.1","Linux","7.0.0-43-generic","amd64","",copies,500,5,31,13281905,999252,13964206,1981842,34659136,64,33837144,64,true
+time,"25.0.5.1","Linux","7.0.0-43-generic","amd64","",loops,250,5,31,5150565,396227,5181964,549664,9592232,0,8908600,0,true
+time,"25.0.5.1","Linux","7.0.0-43-generic","amd64","",loops,500,5,31,16433967,105306,16013043,97983,32965816,0,31261832,0,true

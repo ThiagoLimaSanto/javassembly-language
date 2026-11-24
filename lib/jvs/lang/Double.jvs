@@ -7,7 +7,7 @@ public final class Double {
 
     private double value;
 
-    public Double(double value) {
+    private Double(double value) {
         this.value = value;
     }
 

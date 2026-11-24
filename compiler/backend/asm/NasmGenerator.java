@@ -4,6 +4,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -18,6 +19,7 @@ import compiler.backend.ir.IRProgram;
 import compiler.backend.ir.Operand;
 import compiler.backend.memory.StaticFieldSupport;
 import compiler.backend.memory.VirtualMethodTable;
+import compiler.backend.optimization.IRReachabilityOptimizer;
 import compiler.exceptions.CompilerInvariantException;
 import compiler.exceptions.InvalidIRException;
 import compiler.exceptions.UnsupportedBackendFeatureException;
@@ -66,6 +68,7 @@ public class NasmGenerator {
     private final ProgramRecord sourceProgram;
     private final Map<String, ClassRecord> sourceClassesByName;
     private final TargetPlatform target;
+    private Set<Integer> usedVirtualSlots = Set.of();
 
     public NasmGenerator() {
         this.virtualMethodTable = null;
@@ -93,14 +96,19 @@ public class NasmGenerator {
         if (sourceProgram != null) {
             EntryPointValidator.validate(sourceProgram);
         }
+        IRProgram emittedProgram = sourceProgram == null
+                ? program
+                : new IRReachabilityOptimizer().optimize(program, sourceProgram);
+        List<IRInstruction> instructions = emittedProgram.instructions();
+        usedVirtualSlots = collectVirtualSlots(instructions);
         nextFreeLabel = 0;
         StringBuilder asm = new StringBuilder();
-        prepareStringLabels(program.instructions());
-        appendHeader(asm, program.instructions());
+        prepareStringLabels(instructions);
+        appendHeader(asm, instructions);
 
         List<IRInstruction> function = new ArrayList<>();
 
-        for (IRInstruction instruction : program.instructions()) {
+        for (IRInstruction instruction : instructions) {
             if (isFunctionLabel(instruction)) {
                 if (!function.isEmpty()) {
                     emitFunction(asm, function);
@@ -118,13 +126,13 @@ public class NasmGenerator {
             emitFunction(asm, function);
         }
 
-        String entryFunction = findEntryFunction(program);
+        String entryFunction = findEntryFunction(emittedProgram);
         if (entryFunction == null) {
             throw new InvalidIRException(
                     "O programa precisa ter main(String[]) ou main() para gerar um executável.");
         }
         emitEntryPoint(asm, entryFunction);
-        appendRuntimeSupport(asm);
+        appendRuntimeSupport(asm, instructions);
         if (!target.isWindows()) {
             asm.append("section .note.GNU-stack noalloc noexec nowrite progbits\n");
         }
@@ -157,10 +165,11 @@ public class NasmGenerator {
         }
 
         StringBuilder asm = new StringBuilder();
+        usedVirtualSlots = collectVirtualSlots(target);
         prepareStringLabels(target);
         appendHeader(asm, target);
         emitFunction(asm, target);
-        appendRuntimeSupport(asm);
+        appendRuntimeSupport(asm, target);
         if (!this.target.isWindows()) {
             asm.append("section .note.GNU-stack noalloc noexec nowrite progbits\n");
         }
@@ -208,6 +217,7 @@ public class NasmGenerator {
                 .append("__jvs_main_args_element_type: db \"jvs.lang.String\", 0\n");
         appendVirtualTables(asm);
         asm.append("section .data\n");
+        asm.append("__jvs_string_objects_start:\n");
         for (Map.Entry<String, String> entry : stringObjectLabels.entrySet()) {
             String value = entry.getKey();
             asm.append(entry.getValue()).append(":\n")
@@ -215,6 +225,7 @@ public class NasmGenerator {
                     .append("    dq ").append(stringLabels.get(value)).append('\n')
                     .append("    dq ").append(value.getBytes(StandardCharsets.UTF_8).length).append('\n');
         }
+        asm.append("__jvs_string_objects_end:\n");
         asm.append("__jvs_array_vtable: dq 0\n");
         for (String typeName : BuiltinExceptionTypes.names()) {
             asm.append(builtinVtableLabel(typeName)).append(": dq 0\n");
@@ -235,6 +246,7 @@ public class NasmGenerator {
         appendStaticStorage(asm, instructions);
         asm.append("__heap_start: resq 1\n");
         asm.append("__heap_end: resq 1\n");
+        asm.append("__heap_free_bins: resq 64\n");
         if (!target.isWindows()) {
             asm.append("__jvs_start_argc: resq 1\n")
                     .append("__jvs_start_argv: resq 1\n");
@@ -242,6 +254,8 @@ public class NasmGenerator {
         if (target.isWindows()) {
             asm.append("__heap_commit_end: resq 1\n")
                     .append("__heap_reserved_end: resq 1\n");
+        } else {
+            asm.append("__heap_reserved_end: resq 1\n");
         }
         asm.append("__jvs_exception_ptr: resq 1\n");
         asm.append("__jvs_handler_depth: resq 1\n");
@@ -265,7 +279,9 @@ public class NasmGenerator {
         asm.append("__jvs_source_column: resq 1\n");
         asm.append("__number_buffer: resb 32\n\n");
         asm.append("__scanner_token: resb 4096\n");
-        asm.append("__scanner_byte: resb 1\n");
+        asm.append("__scanner_input_buffer: resb 4096\n");
+        asm.append("__scanner_buffer_position: resq 1\n");
+        asm.append("__scanner_buffer_length: resq 1\n");
         asm.append("__scanner_token_length: resq 1\n");
         asm.append("__scanner_string_result: resq 1\n");
         asm.append("__scanner_double_integer: resq 1\n");
@@ -440,21 +456,55 @@ public class NasmGenerator {
     }
 
     private void appendVirtualTables(StringBuilder asm) {
-        if (virtualMethodTable == null || virtualMethodTable.tables().isEmpty()) {
+        if (virtualMethodTable == null) {
             return;
         }
+        Map<String, List<String>> tables = virtualMethodTable.tables();
+        if (tables.isEmpty()) return;
         asm.append("section .data\n");
-        for (Map.Entry<String, List<String>> table : virtualMethodTable.tables().entrySet()) {
+        for (Map.Entry<String, List<String>> table : tables.entrySet()) {
             asm.append("__vtable_").append(table.getKey()).append(":\n");
             if (table.getValue().isEmpty()) {
                 asm.append("    dq 0\n");
             } else {
-                for (String methodLabel : table.getValue()) {
+                for (int slot = 0; slot < table.getValue().size(); slot++) {
+                    String methodLabel = usedVirtualSlots.contains(slot)
+                            ? table.getValue().get(slot)
+                            : "0";
                     asm.append("    dq ").append(methodLabel).append("\n");
                 }
             }
         }
+        Map<String, String> bridges = virtualMethodTable.bridgeTargets();
+        if (!bridges.isEmpty()) {
+            asm.append("section .text\n");
+            Set<String> requiredBridges = new HashSet<>();
+            for (List<String> table : tables.values()) {
+                for (int slot : usedVirtualSlots) {
+                    if (slot < table.size() && bridges.containsKey(table.get(slot))) {
+                        requiredBridges.add(table.get(slot));
+                    }
+                }
+            }
+            for (String bridgeLabel : requiredBridges) {
+                asm.append(bridgeLabel).append(":\n")
+                        .append("    jmp ").append(bridges.get(bridgeLabel)).append('\n');
+            }
+        }
         asm.append('\n');
+    }
+
+    private Set<Integer> collectVirtualSlots(List<IRInstruction> instructions) {
+        Set<Integer> slots = new HashSet<>();
+        for (IRInstruction instruction : instructions) {
+            if (instruction.opCode() == IROpCode.CALL_VIRTUAL
+                    && instruction.right() != null
+                    && instruction.right().value() instanceof Integer slot
+                    && slot >= 0) {
+                slots.add(slot);
+            }
+        }
+        return Set.copyOf(slots);
     }
 
     private void prepareStringLabels(List<IRInstruction> instructions) {
@@ -474,10 +524,13 @@ public class NasmGenerator {
         registerStringValue("");
         registerStringValue("Throwable");
         registerStringValue("jvs.lang.Object");
+        registerStringValue("jvs.lang.Class");
         registerStringValue("String");
         registerStringValue("String[]");
         registerStringValue("jvs.lang.String");
         registerStringValue("jvs.lang.String[]");
+        registerStringValue("Object[]");
+        registerStringValue("jvs.lang.Object[]");
         registerStringValue("true");
         registerStringValue("false");
         arrayTypeNames.add("String[]");
@@ -931,6 +984,12 @@ public class NasmGenerator {
 
             case EXCEPTION_GET_TYPE -> emitExceptionGetType(asm, instruction);
 
+            case GET_CLASS -> emitGetClass(asm, instruction);
+
+            case CLASS_GET_NAME -> emitClassGetName(asm, instruction);
+
+            case CLASS_META_CLASS -> emitClassMetaClass(asm, instruction);
+
             case LOAD_FIELD -> emitFieldLoad(asm, instruction);
 
             case STORE_FIELD -> emitFieldStore(asm, instruction);
@@ -1194,7 +1253,7 @@ public class NasmGenerator {
         asm.append("    call __write_all\n");
     }
 
-    private void appendRuntimeSupport(StringBuilder asm) {
+    private void appendRuntimeSupport(StringBuilder asm, List<IRInstruction> instructions) {
         asm.append("__write_all:\n");
         asm.append("    test rdx, rdx\n");
         asm.append("    jz .write_done\n");
@@ -1244,16 +1303,21 @@ public class NasmGenerator {
         asm.append("    add r8, 15\n"); // arredonda o payload
         asm.append("    jc .heap_alloc_failed\n");
         asm.append("    and r8, -16\n"); // alinhamento de 16 bytes
-        asm.append("    add r8, 16\n"); // espaço do cabeçalho
+        asm.append("    add r8, 32\n"); // cabeçalho, footer e alinhamento
         asm.append("    jc .heap_alloc_failed\n");
+        asm.append("    cmp r8, 48\n") // espaço mínimo para cabeçalho, links da free list e footer
+                .append("    jae .heap_alloc_size_ready\n")
+                .append("    mov r8, 48\n")
+                .append(".heap_alloc_size_ready:\n");
         if (target.isWindows()) {
             // VirtualAlloc takes r8 as PAGE_*; keep the requested block size across that call.
             asm.append("    mov qword [rbp-16], r8\n");
         }
 
-        asm.append("    mov r9, qword [rel __heap_start]\n");
-        asm.append("    test r9, r9\n");
-        asm.append("    jnz .heap_search\n");
+        asm.append("    cmp qword [rel __heap_start], 0\n")
+                .append("    jne .heap_find_free\n")
+                .append("    jmp .heap_initialize\n")
+                .append(".heap_initialize:\n");
         if (target.isWindows()) {
             asm.append("    xor edi, edi\n")
                     .append("    mov esi, 0x40000000\n")
@@ -1276,28 +1340,42 @@ public class NasmGenerator {
         }
         asm.append("    mov qword [rel __heap_start], rax\n");
         asm.append("    mov qword [rel __heap_end], rax\n");
-        asm.append("    mov r9, rax\n");
-
-        asm.append(".heap_search:\n");
-        asm.append("    cmp r9, qword [rel __heap_end]\n");
+        if (!target.isWindows()) {
+            asm.append("    mov qword [rel __heap_reserved_end], rax\n");
+        }
+        asm.append(".heap_find_free:\n");
+        asm.append("    bsr r10, r8\n");
+        asm.append("    lea rdx, [rel __heap_free_bins]\n");
+        asm.append(".heap_bin_search:\n");
+        asm.append("    cmp r10, 64\n");
         asm.append("    jae .heap_grow\n");
-        asm.append("    cmp qword [r9 + 8], 0\n");
-        asm.append("    jne .heap_next_block\n");
+        asm.append("    mov r9, qword [rdx + r10*8]\n");
+        asm.append(".heap_free_list_search:\n");
+        asm.append("    test r9, r9\n");
+        asm.append("    jz .heap_next_bin\n");
         asm.append("    cmp qword [r9], r8\n");
-        asm.append("    jae .heap_reuse_block\n");
-        asm.append(".heap_next_block:\n");
-        asm.append("    add r9, qword [r9]\n");
-        asm.append("    jmp .heap_search\n");
+        asm.append("    jae .heap_free_list_fit\n");
+        asm.append("    mov r9, qword [r9 + 16]\n");
+        asm.append("    jmp .heap_free_list_search\n");
+        asm.append(".heap_next_bin:\n");
+        asm.append("    inc r10\n");
+        asm.append("    jmp .heap_bin_search\n");
 
-        asm.append(".heap_reuse_block:\n");
+        asm.append(".heap_free_list_fit:\n");
+        asm.append("    mov rdi, r9\n");
+        asm.append("    call __heap_unlink_free\n");
         asm.append("    mov r10, qword [r9]\n");
         asm.append("    sub r10, r8\n");
-        asm.append("    cmp r10, 32\n"); // cabeçalho + payload mínimo alinhado
+        asm.append("    cmp r10, 48\n"); // cabeçalho, links livres, footer e alinhamento
         asm.append("    jb .heap_mark_allocated\n");
         asm.append("    lea rax, [r9 + r8]\n");
         asm.append("    mov qword [rax], r10\n");
         asm.append("    mov qword [rax + 8], 0\n");
+        asm.append("    mov qword [rax + r10 - 8], r10\n");
+        asm.append("    mov rdi, rax\n");
+        asm.append("    call __heap_link_free\n");
         asm.append("    mov qword [r9], r8\n");
+        asm.append("    mov qword [r9 + r8 - 8], r8\n");
         asm.append(".heap_mark_allocated:\n");
         asm.append("    mov qword [r9 + 8], 1\n");
         asm.append("    jmp .heap_clear_payload\n");
@@ -1330,22 +1408,30 @@ public class NasmGenerator {
                     .append("    mov qword [rel __heap_commit_end], rax\n")
                     .append(".heap_commit_ready:\n");
         } else {
-            asm.append("    mov rdi, r10\n");
-            asm.append("    mov eax, 12\n");
-            asm.append("    syscall\n");
-            asm.append("    cmp rax, r10\n");
-            asm.append("    jb .heap_alloc_failed\n");
+            asm.append("    cmp r10, qword [rel __heap_reserved_end]\n")
+                    .append("    jbe .heap_linux_commit_ready\n")
+                    .append("    mov rdi, r10\n")
+                    .append("    add rdi, 65535\n")
+                    .append("    jc .heap_alloc_failed\n")
+                    .append("    and rdi, -65536\n")
+                    .append("    mov eax, 12\n")
+                    .append("    syscall\n")
+                    .append("    cmp rax, rdi\n")
+                    .append("    jb .heap_alloc_failed\n")
+                    .append("    mov qword [rel __heap_reserved_end], rdi\n")
+                    .append(".heap_linux_commit_ready:\n");
         }
         asm.append("    mov qword [rel __heap_end], r10\n");
         asm.append("    mov qword [r9], r8\n");
         asm.append("    mov qword [r9 + 8], 1\n");
+        asm.append("    mov qword [r9 + r8 - 8], r8\n");
 
         asm.append(".heap_clear_payload:\n");
         asm.append("    mov qword [r9 + 8], 1\n");
         asm.append("    lea rdi, [r9 + 16]\n");
         asm.append("    mov rcx, r8\n");
         asm.append("    shr rcx, 3\n");
-        asm.append("    sub rcx, 2\n");
+        asm.append("    sub rcx, 3\n"); // não sobrescreve o footer
         asm.append("    xor eax, eax\n");
         asm.append("    cld\n");
         asm.append("    rep stosq\n");
@@ -1358,79 +1444,168 @@ public class NasmGenerator {
         asm.append("__heap_free:\n");
         asm.append("    test rdi, rdi\n");
         asm.append("    jz .heap_free_done\n");
-        asm.append("    mov r11, rdi\n"); // preserva o ponteiro entregue
+        asm.append("    mov r11, rdi\n");
         asm.append("    mov r8, qword [rel __heap_start]\n");
         asm.append("    test r8, r8\n");
         asm.append("    jz .heap_invalid_free\n");
-        asm.append(".heap_free_search:\n");
-        asm.append("    cmp r8, qword [rel __heap_end]\n");
-        asm.append("    jae .heap_invalid_free\n");
         asm.append("    lea rax, [r8 + 16]\n");
-        asm.append("    cmp rax, r11\n");
-        asm.append("    je .heap_free_found\n");
-        asm.append("    mov rax, qword [r8]\n");
-        asm.append("    test rax, rax\n");
-        asm.append("    jz .heap_invalid_free\n");
-        asm.append("    add r8, rax\n");
-        asm.append("    jmp .heap_free_search\n");
-        asm.append(".heap_free_found:\n");
-        asm.append("    cmp qword [r8 + 8], 1\n");
-        asm.append("    jne .heap_invalid_free\n"); // double-free
-        asm.append("    mov qword [r8 + 8], 0\n");
+        asm.append("    cmp r11, rax\n");
+        asm.append("    jb .heap_invalid_free\n");
+        asm.append("    cmp r11, qword [rel __heap_end]\n");
+        asm.append("    jae .heap_invalid_free\n");
+        asm.append("    test r11, 15\n");
+        asm.append("    jnz .heap_invalid_free\n");
+        asm.append("    lea r8, [r11 - 16]\n");
         asm.append("    mov r9, qword [r8]\n");
-        asm.append("    lea r10, [r8 + r9]\n"); // combina com o próximo bloco livre
+        asm.append("    cmp r9, 48\n");
+        asm.append("    jb .heap_invalid_free\n");
+        asm.append("    test r9, 15\n");
+        asm.append("    jnz .heap_invalid_free\n");
+        asm.append("    mov rax, r8\n");
+        asm.append("    add rax, r9\n");
+        asm.append("    jc .heap_invalid_free\n");
+        asm.append("    cmp rax, qword [rel __heap_end]\n");
+        asm.append("    ja .heap_invalid_free\n");
+        asm.append("    cmp qword [rax - 8], r9\n");
+        asm.append("    jne .heap_invalid_free\n");
+        asm.append("    cmp qword [r8 + 8], 1\n");
+        asm.append("    jne .heap_invalid_free\n"); // double-free e referência não alocada
+        asm.append("    mov qword [r8 + 8], 0\n");
+        asm.append("    lea r10, [r8 + r9]\n");
         asm.append("    cmp r10, qword [rel __heap_end]\n");
         asm.append("    jae .heap_try_previous\n");
+        asm.append("    lea rdx, [r10 + 16]\n");
+        asm.append("    cmp rdx, qword [rel __heap_end]\n");
+        asm.append("    ja .heap_invalid_free\n");
         asm.append("    cmp qword [r10 + 8], 0\n");
         asm.append("    jne .heap_try_previous\n");
+        asm.append("    mov rax, qword [r10]\n");
+        asm.append("    cmp rax, 48\n");
+        asm.append("    jb .heap_invalid_free\n");
+        asm.append("    test rax, 15\n");
+        asm.append("    jnz .heap_invalid_free\n");
+        asm.append("    mov rdx, r10\n");
+        asm.append("    add rdx, rax\n");
+        asm.append("    jc .heap_invalid_free\n");
+        asm.append("    cmp rdx, qword [rel __heap_end]\n");
+        asm.append("    ja .heap_invalid_free\n");
+        asm.append("    cmp qword [rdx - 8], rax\n");
+        asm.append("    jne .heap_invalid_free\n");
+        asm.append("    mov rdi, r10\n");
+        asm.append("    call __heap_unlink_free\n");
+        asm.append("    lea r10, [r8 + r9]\n");
         asm.append("    add r9, qword [r10]\n");
         asm.append("    mov qword [r8], r9\n");
+        asm.append("    mov qword [r8 + r9 - 8], r9\n");
         asm.append(".heap_try_previous:\n");
-        asm.append("    mov r10, qword [rel __heap_start]\n");
-        asm.append("    xor edx, edx\n"); // bloco anterior
-        asm.append(".heap_previous_search:\n");
-        asm.append("    cmp r10, r8\n");
-        asm.append("    jae .heap_free_done\n");
-        asm.append("    mov rdx, r10\n");
-        asm.append("    add r10, qword [r10]\n");
-        asm.append("    jmp .heap_previous_search\n");
-        asm.append(".heap_free_done:\n");
-        asm.append("    test rdx, rdx\n");
-        asm.append("    jz .heap_free_return\n");
+        asm.append("    cmp r8, qword [rel __heap_start]\n");
+        asm.append("    jbe .heap_insert_free_block\n");
+        asm.append("    mov r10, qword [r8 - 8]\n"); // footer do bloco anterior
+        asm.append("    cmp r10, 48\n");
+        asm.append("    jb .heap_invalid_free\n");
+        asm.append("    test r10, 15\n");
+        asm.append("    jnz .heap_invalid_free\n");
+        asm.append("    mov rdx, r8\n");
+        asm.append("    sub rdx, r10\n");
+        asm.append("    jc .heap_invalid_free\n");
+        asm.append("    cmp rdx, qword [rel __heap_start]\n");
+        asm.append("    jb .heap_invalid_free\n");
+        asm.append("    cmp qword [rdx], r10\n");
+        asm.append("    jne .heap_invalid_free\n");
         asm.append("    cmp qword [rdx + 8], 0\n");
-        asm.append("    jne .heap_free_return\n");
+        asm.append("    jne .heap_insert_free_block\n");
+        asm.append("    mov rdi, rdx\n");
+        asm.append("    call __heap_unlink_free\n");
+        asm.append("    mov rdx, rdi\n");
         asm.append("    mov rax, qword [r8]\n");
         asm.append("    add qword [rdx], rax\n");
-        asm.append(".heap_free_return:\n");
+        asm.append("    mov r8, rdx\n");
+        asm.append("    mov r9, qword [r8]\n");
+        asm.append("    mov qword [r8 + r9 - 8], r9\n");
+        asm.append(".heap_insert_free_block:\n");
+        asm.append("    mov rdi, r8\n");
+        asm.append("    call __heap_link_free\n");
+        asm.append(".heap_free_done:\n");
         asm.append("    ret\n");
         asm.append(".heap_invalid_free:\n");
         appendRuntimeExceptionTrap(asm, "__invalid_free_message");
 
+        asm.append("__heap_unlink_free:\n");
+        asm.append("    mov rax, qword [rdi]\n");
+        asm.append("    bsr rcx, rax\n");
+        asm.append("    lea rdx, [rel __heap_free_bins]\n");
+        asm.append("    mov r10, qword [rdi + 24]\n"); // nó anterior do bin
+        asm.append("    mov r11, qword [rdi + 16]\n"); // próximo nó do bin
+        asm.append("    test r10, r10\n");
+        asm.append("    jnz .heap_unlink_has_previous\n");
+        asm.append("    mov qword [rdx + rcx*8], r11\n");
+        asm.append("    jmp .heap_unlink_next\n");
+        asm.append(".heap_unlink_has_previous:\n");
+        asm.append("    mov qword [r10 + 16], r11\n");
+        asm.append(".heap_unlink_next:\n");
+        asm.append("    test r11, r11\n");
+        asm.append("    jz .heap_unlink_done\n");
+        asm.append("    mov qword [r11 + 24], r10\n");
+        asm.append(".heap_unlink_done:\n");
+        asm.append("    ret\n\n");
+
+        asm.append("__heap_link_free:\n");
+        asm.append("    mov rax, qword [rdi]\n");
+        asm.append("    bsr rcx, rax\n");
+        asm.append("    lea rdx, [rel __heap_free_bins]\n");
+        asm.append("    mov r10, qword [rdx + rcx*8]\n");
+        asm.append("    mov qword [rdi + 16], r10\n");
+        asm.append("    mov qword [rdi + 24], 0\n");
+        asm.append("    test r10, r10\n");
+        asm.append("    jz .heap_link_set_head\n");
+        asm.append("    mov qword [r10 + 24], rdi\n");
+        asm.append(".heap_link_set_head:\n");
+        asm.append("    mov qword [rdx + rcx*8], rdi\n");
+        asm.append("    ret\n\n");
+
         asm.append("__heap_validate:\n");
         asm.append("    mov r11, rdi\n");
-        for (String stringObjectLabel : stringObjectLabels.values()) {
-            asm.append("    lea rax, [rel ").append(stringObjectLabel).append("]\n")
-                    .append("    cmp r11, rax\n    je .heap_validate_static\n");
-        }
         asm.append("    mov r8, qword [rel __heap_start]\n");
         asm.append("    test r8, r8\n");
-        asm.append("    jz __runtime_invalid_reference\n");
-        asm.append(".heap_validate_search:\n");
-        asm.append("    cmp r8, qword [rel __heap_end]\n");
-        asm.append("    jae __runtime_invalid_reference\n");
+        asm.append("    jz .heap_validate_static\n");
         asm.append("    lea rax, [r8 + 16]\n");
-        asm.append("    cmp rax, r11\n");
-        asm.append("    je .heap_validate_found\n");
+        asm.append("    cmp r11, rax\n");
+        asm.append("    jb .heap_validate_static\n");
+        asm.append("    cmp r11, qword [rel __heap_end]\n");
+        asm.append("    jae .heap_validate_static\n");
+        asm.append("    test r11, 15\n");
+        asm.append("    jnz __runtime_invalid_reference\n");
+        asm.append("    lea r8, [r11 - 16]\n");
         asm.append("    mov rax, qword [r8]\n");
-        asm.append("    test rax, rax\n");
-        asm.append("    jz __runtime_invalid_reference\n");
-        asm.append("    add r8, rax\n");
-        asm.append("    jmp .heap_validate_search\n");
-        asm.append(".heap_validate_found:\n");
+        asm.append("    cmp rax, 48\n");
+        asm.append("    jb __runtime_invalid_reference\n");
+        asm.append("    test rax, 15\n");
+        asm.append("    jnz __runtime_invalid_reference\n");
+        asm.append("    mov rdx, r8\n");
+        asm.append("    add rdx, rax\n");
+        asm.append("    jc __runtime_invalid_reference\n");
+        asm.append("    cmp rdx, qword [rel __heap_end]\n");
+        asm.append("    ja __runtime_invalid_reference\n");
+        asm.append("    cmp qword [rdx - 8], rax\n");
+        asm.append("    jne __runtime_invalid_reference\n");
         asm.append("    cmp qword [r8 + 8], 1\n");
         asm.append("    jne __runtime_invalid_reference\n");
         asm.append("    ret\n");
         asm.append(".heap_validate_static:\n");
+        asm.append("    lea rax, [rel __jvs_string_objects_start]\n");
+        asm.append("    cmp r11, rax\n");
+        asm.append("    jb __runtime_invalid_reference\n");
+        asm.append("    lea rdx, [rel __jvs_string_objects_end]\n");
+        asm.append("    cmp r11, rdx\n");
+        asm.append("    jae __runtime_invalid_reference\n");
+        asm.append("    mov r10, r11\n");
+        asm.append("    sub r10, rax\n");
+        asm.append("    mov rax, r10\n");
+        asm.append("    xor edx, edx\n");
+        asm.append("    mov ecx, 24\n");
+        asm.append("    div rcx\n");
+        asm.append("    test rdx, rdx\n");
+        asm.append("    jnz __runtime_invalid_reference\n");
         asm.append("    ret\n");
 
         asm.append("__runtime_null_pointer:\n");
@@ -1540,11 +1715,40 @@ public class NasmGenerator {
         } else {
             appendLinuxCommandLineSupport(asm);
         }
-        ScannerRuntime.append(asm, target.isWindows());
+        if (usesScannerRuntime(instructions)) {
+            ScannerRuntime.append(asm, target.isWindows());
+        }
         List<String> runtimeClassNames = sourceProgram == null
                 ? List.of()
                 : sourceProgram.classes().stream().map(ClassRecord::name).toList();
         StringRuntime.append(asm, stringLabels, stringObjectLabels, runtimeClassNames);
+        if (usesMathRuntime(instructions)) {
+            MathRuntime.append(asm);
+        }
+    }
+
+    private boolean usesMathRuntime(List<IRInstruction> instructions) {
+        for (IRInstruction instruction : instructions) {
+            if (instruction.opCode() != IROpCode.CALL
+                    || instruction.left() == null
+                    || instruction.left().kind() != Operand.Kind.LABEL) {
+                continue;
+            }
+            if (instruction.left().value().toString().startsWith("jvs.util.Math.")) return true;
+        }
+        return false;
+    }
+
+    private boolean usesScannerRuntime(List<IRInstruction> instructions) {
+        for (IRInstruction instruction : instructions) {
+            if (instruction.opCode() == IROpCode.CALL
+                    && instruction.left() != null
+                    && instruction.left().kind() == Operand.Kind.LABEL
+                    && instruction.left().value().toString().startsWith("jvs.io.Scanner.")) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void appendUncaughtTracePrinter(StringBuilder asm) {
@@ -2674,6 +2878,104 @@ public class NasmGenerator {
         }
         asm.append(done).append(":\n");
         storeI64(asm, instruction.destination(), "rax");
+    }
+
+    private void emitGetClass(StringBuilder asm, IRInstruction instruction) {
+        if (instruction.left() == null || sourceProgram == null) {
+            throw new InvalidIRException("GET_CLASS exige receptor e programa fonte.");
+        }
+        int id = nextFreeLabel++;
+        String done = "__get_class_done_" + id;
+        String validate = "__get_class_validate_" + id;
+        loadI64(asm, instruction.left(), "rdi");
+        asm.append("    test rdi, rdi\n    jz __runtime_null_pointer\n");
+        for (int index = 0; index < runtimeExceptionSpecs().size(); index++) {
+            RuntimeExceptionSpec spec = runtimeExceptionSpecs().get(index);
+            asm.append("    lea r10, [rel ").append(spec.objectLabel()).append("]\n")
+                    .append("    cmp rdi, r10\n    je __get_class_builtin_")
+                    .append(id).append('_').append(index).append('\n');
+        }
+        asm.append("    call __heap_validate\n")
+                .append(validate).append(":\n")
+                .append("    mov rax, qword [rdi]\n")
+                ;
+        for (int index = 0; index < sourceProgram.classes().size(); index++) {
+            ClassRecord classNode = sourceProgram.classes().get(index);
+            asm.append("    lea r10, [rel __vtable_").append(classNode.name()).append("]\n")
+                    .append("    cmp rax, r10\n    je __get_class_source_")
+                    .append(id).append('_').append(index).append('\n');
+        }
+        String array = "__get_class_array_" + id;
+        asm.append("    lea r10, [rel __jvs_array_vtable]\n")
+                .append("    cmp rax, r10\n    je ").append(array).append('\n');
+        for (int index = 0; index < runtimeExceptionSpecs().size(); index++) {
+            RuntimeExceptionSpec spec = runtimeExceptionSpecs().get(index);
+            asm.append("    lea r10, [rel ").append(spec.vtableLabel()).append("]\n")
+                    .append("    cmp rax, r10\n    je __get_class_builtin_")
+                    .append(id).append('_').append(index).append('\n');
+        }
+        asm.append("    lea rax, [rel ").append(stringObjectLabels.get("jvs.lang.Object"))
+                .append("]\n    jmp ").append(done).append('\n')
+                .append(array).append(":\n")
+                .append("    mov rax, qword [rdi+16]\n");
+        for (String arrayType : arrayTypeNames) {
+            asm.append("    lea r10, [rel ").append(stringLabels.get(arrayType)).append("]\n")
+                    .append("    cmp rax, r10\n    je __get_class_array_type_")
+                    .append(id).append('_').append(arrayTypeLabelId(arrayType)).append('\n');
+        }
+        asm.append("    lea rax, [rel ").append(stringObjectLabels.get("Object[]"))
+                .append("]\n    jmp ").append(done).append('\n');
+        for (int index = 0; index < sourceProgram.classes().size(); index++) {
+            String name = sourceProgram.classes().get(index).name();
+            asm.append("__get_class_source_").append(id).append('_').append(index).append(":\n")
+                    .append("    lea rax, [rel ").append(stringObjectLabels.get(name))
+                    .append("]\n    jmp ").append(done).append('\n');
+        }
+        for (String arrayType : arrayTypeNames) {
+            asm.append("__get_class_array_type_").append(id).append('_')
+                    .append(arrayTypeLabelId(arrayType)).append(":\n")
+                    .append("    lea rax, [rel ").append(stringObjectLabels.get(arrayType))
+                    .append("]\n    jmp ").append(done).append('\n');
+        }
+        for (int index = 0; index < runtimeExceptionSpecs().size(); index++) {
+            RuntimeExceptionSpec spec = runtimeExceptionSpecs().get(index);
+            asm.append("__get_class_builtin_").append(id).append('_').append(index).append(":\n")
+                    .append("    lea rax, [rel ").append(stringObjectLabels.get(spec.typeName()))
+                    .append("]\n    jmp ").append(done).append('\n');
+        }
+        asm.append(done).append(":\n");
+        storeI64(asm, instruction.destination(), "rax");
+    }
+
+    private void emitClassGetName(StringBuilder asm, IRInstruction instruction) {
+        if (instruction.destination() == null || instruction.left() == null || sourceProgram == null) {
+            throw new InvalidIRException("CLASS_GET_NAME exige receptor e programa fonte.");
+        }
+        loadI64(asm, instruction.left(), "rdi");
+        asm.append("    test rdi, rdi\n    jz __runtime_null_pointer\n")
+                .append("    call __heap_validate\n")
+                .append("    mov rax, rdi\n");
+        storeI64(asm, instruction.destination(), "rax");
+    }
+
+    private void emitClassMetaClass(StringBuilder asm, IRInstruction instruction) {
+        if (instruction.destination() == null || instruction.left() == null || sourceProgram == null) {
+            throw new InvalidIRException("CLASS_META_CLASS exige receptor, destino e programa fonte.");
+        }
+        loadI64(asm, instruction.left(), "rdi");
+        asm.append("    test rdi, rdi\n    jz __runtime_null_pointer\n")
+                .append("    call __heap_validate\n");
+        asm.append("    lea rax, [rel ").append(stringObjectLabels.get("jvs.lang.Class")).append("]\n");
+        storeI64(asm, instruction.destination(), "rax");
+    }
+
+    private int arrayTypeLabelId(String arrayType) {
+        int index = 0;
+        for (String candidate : arrayTypeNames) {
+            if (candidate.equals(arrayType)) return index;
+            index++;
+        }
+        throw new InvalidIRException("Tipo de array sem identificador: " + arrayType);
     }
 
     private String findThrowableClassName() {

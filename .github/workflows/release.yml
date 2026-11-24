@@ -70,6 +70,11 @@ jobs:
           java -cp build/test-classes test.DiagnosticRendererTests
           java -cp build/test-classes test.EntryPointValidatorTests
           java -cp build/test-classes test.IROptimizerStaticFieldTests
+          java -cp build/test-classes test.IROptimizerStrengthReductionTests
+          java -cp build/test-classes test.IROptimizerTopologyGenerationTests
+          java -cp build/test-classes test.IROptimizerCopyPropagationTests
+          java -cp build/test-classes test.IROptimizerConstantPropagationTests
+          java -cp build/test-classes test.IROptimizerDeadStoreTests
           java -cp build/test-classes test.RuntimeExceptionHierarchyTests
 
       - name: Run Linux backend fixture suite
