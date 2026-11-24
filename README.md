@@ -6,7 +6,23 @@ O frontend, a IR e as otimizações são compartilhados; o destino é escolhido 
 ## Documentação
 
 Veja o [guia da linguagem](docs/linguagem.md) para aprender a escrever programas `.jvs`,
-com exemplos de tipos, funções, classes, arrays, entrada e saída e tratamento de exceções.
+com exemplos de tipos, funções, classes, tipos genéricos, coleções, arrays, entrada e saída e
+tratamento de exceções.
+
+## Escopo atual
+
+O projeto inclui lexer, parser e análise semântica; geração e otimização de IR; e backend
+NASM x86-64 para Linux e Windows. A linguagem oferece classes, herança, interfaces,
+polimorfismo, tipos genéricos, exceções, arrays, heap manual e bibliotecas padrão para entrada,
+tipos wrapper e coleções (`List`/`ArrayList` e `Map`/`HashMap`). Consulte o [guia da
+linguagem](docs/linguagem.md) para a sintaxe e as limitações conhecidas.
+
+Há também uma extensão de desenvolvimento para VS Code em [`javassembly/`](javassembly/README.md),
+com realce de sintaxe e ações Run/Debug. As ações usam `jvsc` e `jvs` instalados no `PATH`;
+a extensão não inclui o compilador.
+
+Os [benchmarks do heap e do HashMap](benchmarks/heap/README.md) documentam como reproduzir
+as medições. Resultados de desempenho dependem do ambiente e do workload utilizado.
 
 ## Requisitos
 

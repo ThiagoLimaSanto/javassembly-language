@@ -109,6 +109,24 @@ decimais, expoentes, `NaN` e `Infinity`; `Boolean.parseBoolean(texto)` retorna
 No momento, `Double.parseDouble` não aceita espaços externos nem literais
 hexadecimais de ponto flutuante.
 
+O compilador também faz **autoboxing** e **unboxing** nas conversões compatíveis: pode
+criar um wrapper ao atribuir um primitivo a uma variável wrapper ou ao passar um primitivo
+para um parâmetro genérico, e pode recuperar o primitivo ao atribuir um wrapper a uma
+variável primitiva. Conversões numéricas permitidas pela linguagem também podem ocorrer
+junto dessas conversões. Por exemplo:
+
+```java
+import jvs.lang.Integer;
+
+Integer valor = 19;       // autoboxing de int para Integer
+int primitivo = valor;    // unboxing de Integer para int
+printLn primitivo;
+```
+
+As classes wrapper continuam disponíveis explicitamente por `valueOf`, `parseInt`,
+`parseLong` e métodos de conversão. Use conversões explícitas quando precisar chamar
+essas operações ou deixar a intenção clara.
+
 Além de `length`, `substring` e `split`, `String` oferece `isEmpty`, `codePointAt`,
 `indexOf`, `startsWith`, `endsWith`, `contains`, `equals` e `hashCode`.
 
@@ -242,9 +260,10 @@ public class ExemploLista {
 }
 ```
 
-Os argumentos genéricos são tipos de referência; tipos primitivos precisam ser
-representados pelas classes wrapper de `jvs.lang`. A compatibilidade entre interfaces
-genéricas considera os argumentos declarados na herança. São aceitos curingas sem limite,
+Os argumentos genéricos são tipos de referência. Em declarações e usos genéricos, o
+autoboxing/unboxing permite usar valores primitivos em contextos compatíveis com os
+wrappers de `jvs.lang`. A compatibilidade entre interfaces genéricas considera os
+argumentos declarados na herança. São aceitos curingas sem limite,
 com limite superior (`? extends Tipo`) e inferior (`? super Tipo`), além da inferência
 `<>` em criações atribuídas a um tipo declarado ou inferidas pelos argumentos do
 construtor. A leitura por `? extends` usa o limite superior; `? super` permite passar
@@ -260,6 +279,64 @@ implementação concreta.
 Ainda não há limites em declarações de parâmetros (`<T extends Tipo>`), argumentos
 genéricos explícitos em chamadas (`obj.<String>metodo(...)`) nem inferência polimórfica
 completa em expressões genéricas aninhadas dentro de argumentos sobrecarregados.
+
+## Coleções da biblioteca padrão
+
+`jvs.util.List<T>` define operações de lista, e `jvs.util.ArrayList<T>` é uma
+implementação baseada em array redimensionável. A lista preserva a ordem dos elementos;
+inserções e remoções por índice podem deslocar os elementos seguintes.
+
+```java
+import jvs.util.ArrayList;
+import jvs.util.List;
+
+public class ExemploLista {
+    public static func void main(String[] args) {
+        List<Integer> valores = new ArrayList<>();
+        valores.add(10);             // int é convertido para Integer
+        valores.add(20);
+        int primeiro = valores.get(0); // retorno Integer sofre unboxing
+        valores.set(1, 25);
+
+        printfLn "Tamanho: %d; primeiro: %d", valores.size(), primeiro;
+        return;
+    }
+}
+```
+
+`List` oferece `size`, `isEmpty`, `contains`, `indexOf`, `lastIndexOf`, `get`, `set`,
+`add`, `remove` e `clear`. `ArrayList` também oferece `ensureCapacity` e `trimToSize`.
+O acesso e a inserção por índice verificam os limites e podem lançar
+`IndexOutOfBoundsException`. Elementos `null` são aceitos.
+
+`jvs.util.Map<K, V>` define uma coleção de pares chave/valor, implementada por
+`jvs.util.HashMap<K, V>`. O tipo genérico determina os tipos retornados por `get`, `put`
+e `remove`; o compilador também aplica boxing/unboxing compatível:
+
+```java
+import jvs.util.HashMap;
+import jvs.util.Map;
+
+public class ExemploMapa {
+    public static func void main(String[] args) {
+        Map<Integer, Integer> notas = new HashMap<>();
+        notas.put(7, 42);
+        Integer notaWrapper = notas.get(7); // get retorna V, aqui Integer
+        int nota = notaWrapper;             // unboxing para int
+
+        printfLn "Nota: %d", nota;
+        printLn notas.containsKey(7);
+        return;
+    }
+}
+```
+
+`Map` oferece `put`, `get`, `remove`, `containsKey`, `size`, `isEmpty` e `clear`.
+`put` substitui o valor de uma chave existente e retorna o valor anterior; `get` e
+`remove` retornam `null` quando a chave não existe. Portanto, se valores `null` forem
+armazenados, use `containsKey` para distinguir um valor nulo de uma chave ausente.
+`HashMap` exige chaves não nulas e usa `hashCode()` e `equals()` para localizar chaves;
+implementações desses métodos devem respeitar o contrato de igualdade.
 
 ## Interfaces
 
